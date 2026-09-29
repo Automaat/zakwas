@@ -102,7 +102,11 @@ Other editors (Helix, JetBrains, Sublime) that run yaml-language-server honor th
 
 **No overlapping destinations.** Two `files`/`links`/`templates` entries may not target the same path, or one a path inside another's directory. The comparison is case-insensitive, because APFS is by default.
 
-**File modes are octal integers with a leading zero**: `0700`, `0644`. YAML reads `700` without the zero as decimal (octal `1274`), which zakwas rejects. Don't quote them either: `"0644"` is a string, not a mode.
+**File modes are octal integers with the `0o` prefix**: `0o700`, `0o644`. Editors parse YAML 1.2, where `0700` is decimal 700 and fails validation; zakwas itself still reads `0700` as octal (YAML 1.1), so older configs keep working, but prefer `0o`. `700` with no prefix is decimal everywhere (octal `1274`), which zakwas rejects. Don't quote modes: `"0o644"` is a string, not a mode.
+
+**Quote strings that look like something else.** YAML reads unquoted `true`, `yes`/`no`, `8080`, `1.5` and `2024-01-01` as booleans, numbers and dates. Fields documented as strings (`key`, `check`, `run`, `name`, `comment`, paths) must be quoted when their text looks like that, e.g. `check: "true"`; the schema flags them in your editor. `templates.vars` values are the exception: any scalar is read as its text.
+
+**Empty sections are fine.** A key with nothing after it (`brew:`, `prune:`) is null and means the same as leaving it out.
 
 **Backups.** When zakwas replaces a file it didn't write, or one that was edited in place, it moves it to `<file>.zakwas-bak` (`.zakwas-bak.N` if taken) first. It never deletes or overwrites such a file.
 
@@ -165,7 +169,7 @@ Go [`text/template`](https://pkg.go.dev/text/template) files rendered into your 
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `vars` | map of string → string | `{}` | Values available to every template as `{{ .Vars.name }}`. |
+| `vars` | map of string → scalar | `{}` | Values available to every template as `{{ .Vars.name }}`. Numbers and booleans are used as their text (`port: 8080` renders `8080`). |
 | `files` | list | `[]` | Templates to render (below). |
 
 Each `files` entry:
@@ -174,7 +178,7 @@ Each `files` entry:
 |---|---|---|---|---|
 | `src` | string | yes | | Template in the config repo. |
 | `dst` | string | yes | | Destination, absolute or `~/…`. |
-| `mode` | octal int | no | `0444` | Permissions of the rendered file. Must be readable by the owner; write bits are stripped anyway. |
+| `mode` | octal int | no | `0o444` | Permissions of the rendered file. Must be readable by the owner; write bits are stripped anyway. |
 
 Templates see `{{ .Home }}` (your home directory) and `{{ .Vars.x }}`. Referencing a var that isn't defined is an error, not an empty string. Rendered files are protected and tracked exactly like `files`.
 
@@ -184,7 +188,7 @@ templates:
     name: Your Name
     email: you@example.com
   files:
-    - {src: dotfiles/git/user.tmpl, dst: ~/.config/git/user, mode: 0600}
+    - {src: dotfiles/git/user.tmpl, dst: ~/.config/git/user, mode: 0o600}
 ```
 
 ```
@@ -257,9 +261,9 @@ Machine-level setup.
 | Key | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `path` | string | yes | | Directory, absolute or `~/…`. Missing parents are created. |
-| `mode` | octal int | no | see below | Permissions. The owner must be able to read and enter it (`0500` bits set). |
+| `mode` | octal int | no | see below | Permissions. The owner must be able to read and enter it (`0o500` bits set). |
 
-With `mode` set, it is enforced on existing directories too. Without it, a new directory gets `0755` and an existing one keeps whatever it has, so directories like `~/Documents` keep their macOS permissions.
+With `mode` set, it is enforced on existing directories too. Without it, a new directory gets `0o755` and an existing one keeps whatever it has, so directories like `~/Documents` keep their macOS permissions.
 
 `sshKey`:
 
@@ -274,7 +278,7 @@ The key is an ed25519 key without a passphrase, created only when `path` doesn't
 system:
   sudoTouchID: true
   dirs:
-    - {path: ~/.ssh, mode: 0700}
+    - {path: ~/.ssh, mode: 0o700}
     - {path: ~/code}
   sshKey:
     path: ~/.ssh/id_ed25519
@@ -319,9 +323,9 @@ macOS preferences written with `defaults write`. Each `domain` + `key` (+ `curre
 | `true`, `false` | `-bool` |
 | `2` | `-int` |
 | `1.5` | `-float` |
-| `hello`, `"2"` (quoted) | `-string` |
+| `hello`, `"2"`, `"2024-01-01"` (quoted) | `-string` |
 
-Lists and maps are not supported.
+Lists and maps are not supported. An unquoted date like `2024-01-01` is a YAML timestamp and zakwas rejects it: quote it to write the text as a string.
 
 `restart` defaults: `com.apple.dock` → `Dock`, `com.apple.finder` → `Finder`, `com.apple.screencapture` → `SystemUIServer`; other domains restart nothing. Changed `NSGlobalDomain` values are applied to the running session with `activateSettings` when macOS has it.
 
@@ -367,7 +371,7 @@ mise:
 system:
   sudoTouchID: true
   dirs:
-    - {path: ~/.ssh, mode: 0700}
+    - {path: ~/.ssh, mode: 0o700}
   sshKey:
     path: ~/.ssh/id_ed25519
     comment: you@example.com

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -55,7 +56,7 @@ type Templates struct {
 type TemplateFile struct {
 	Src  string      `yaml:"src" jsonschema:"required,minLength=1" jsonschema_description:"Template path in the config repo (Go text/template syntax), relative to the directory holding zakwas.yaml (or absolute)."`
 	Dst  string      `yaml:"dst" jsonschema:"required,minLength=1" jsonschema_description:"Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination."`
-	Mode fs.FileMode `yaml:"mode" jsonschema:"minimum=0,maximum=511" jsonschema_description:"Octal permissions of the rendered file, written with a leading 0 (e.g. '0755'; '755' without the 0 is read as decimal). Must be readable by the owner. Write bits are always stripped. Default 0444."`
+	Mode fs.FileMode `yaml:"mode" jsonschema:"minimum=0,maximum=511" jsonschema_description:"Octal permissions of the rendered file, written with the 0o prefix, e.g. 0o755. Editors parse YAML 1.2 and read 0755 as decimal 755 (zakwas still accepts it as octal); 755 is decimal everywhere. Must be readable by the owner. Write bits are always stripped. Default 0o444."`
 }
 
 type Brew struct {
@@ -84,7 +85,7 @@ type Mise struct {
 type Default struct {
 	Domain      string `yaml:"domain" jsonschema:"required,minLength=1" jsonschema_description:"Preferences domain, e.g. 'com.apple.dock' or 'NSGlobalDomain'."`
 	Key         string `yaml:"key" jsonschema:"required,minLength=1" jsonschema_description:"Preference key within the domain, e.g. 'autohide'."`
-	Value       any    `yaml:"value" jsonschema:"required,oneof_type=boolean;number;string" jsonschema_description:"Value to write. The YAML type picks the defaults type: true/false → -bool, 2 → -int, 1.5 → -float, anything quoted or text → -string."`
+	Value       any    `yaml:"value" jsonschema:"required,oneof_type=boolean;number;string" jsonschema_description:"Value to write. The YAML type picks the defaults type: true/false → -bool, 2 → -int, 1.5 → -float, anything else → -string. Quote dates (\"2024-01-01\") and numbers meant as text (\"2\"); an unquoted date is rejected."`
 	Restart     string `yaml:"restart" jsonschema_description:"Process to 'killall' after the value changes, so it picks up the new setting. Empty uses the built-in mapping (com.apple.dock → Dock, com.apple.finder → Finder, com.apple.screencapture → SystemUIServer)."`
 	CurrentHost bool   `yaml:"currentHost" jsonschema:"default=false" jsonschema_description:"Write to the per-host (ByHost) preferences, like 'defaults -currentHost write'. Default false."`
 }
@@ -97,7 +98,7 @@ type System struct {
 
 type Dir struct {
 	Path string      `yaml:"path" jsonschema:"required,minLength=1" jsonschema_description:"Directory path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Missing parents are created."`
-	Mode fs.FileMode `yaml:"mode" jsonschema:"minimum=0,maximum=511" jsonschema_description:"Octal permissions, written with a leading 0 (e.g. '0700'; '700' without the 0 is read as decimal). The owner must be able to read and enter it. When set, it is enforced on an existing directory too. When omitted, a new directory gets 0755 and an existing one keeps its mode."`
+	Mode fs.FileMode `yaml:"mode" jsonschema:"minimum=0,maximum=511" jsonschema_description:"Octal permissions, written with the 0o prefix, e.g. 0o700. Editors parse YAML 1.2 and read 0700 as decimal 700 (zakwas still accepts it as octal); 700 is decimal everywhere. The owner must be able to read and enter it. When set, it is enforced on an existing directory too. When omitted, a new directory gets 0o755 and an existing one keeps its mode."`
 }
 
 type SSHKey struct {
@@ -200,7 +201,7 @@ func (c *Config) Validate(home string) error {
 		}
 		claimDst(t.Dst, fmt.Sprintf("templates.files[%d]", i))
 		if t.Mode != 0 && (t.Mode&^0o777 != 0 || t.Mode&0o400 == 0) {
-			errs = append(errs, fmt.Errorf("templates.files[%d]: mode %s must be octal permissions readable by the owner, e.g. 0644", i, octal(t.Mode)))
+			errs = append(errs, fmt.Errorf("templates.files[%d]: mode %s must be octal permissions readable by the owner, e.g. 0o644", i, octal(t.Mode)))
 		}
 	}
 	if c.Brew != nil {
@@ -231,8 +232,10 @@ func (c *Config) Validate(home string) error {
 		} else {
 			defaultsSeen[key] = i
 		}
-		switch d.Value.(type) {
+		switch v := d.Value.(type) {
 		case bool, int, float64, string:
+		case time.Time:
+			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: YAML reads %s as a date; quote it to write a string", i, d.Domain, d.Key, v.Format(time.RFC3339)))
 		default:
 			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value %#v", i, d.Domain, d.Key, d.Value))
 		}
@@ -244,7 +247,7 @@ func (c *Config) Validate(home string) error {
 			errs = append(errs, fmt.Errorf("system.dirs[%d]: %w", i, err))
 		}
 		if d.Mode != 0 && (d.Mode&^0o777 != 0 || d.Mode&0o500 != 0o500) {
-			errs = append(errs, fmt.Errorf("system.dirs[%d]: mode %s must be octal permissions the owner can read and enter, e.g. 0700", i, octal(d.Mode)))
+			errs = append(errs, fmt.Errorf("system.dirs[%d]: mode %s must be octal permissions the owner can read and enter, e.g. 0o700", i, octal(d.Mode)))
 		}
 	}
 	if k := c.System.SSHKey; k != nil {

@@ -138,6 +138,8 @@ defaults:
 		{"bad cleanup", "brew: {file: B, cleanup: nuke}", []string{`brew.cleanup: "nuke"`}},
 		{"brew without file", "brew: {upgrade: true}", []string{"brew.file is required"}},
 		{"unsupported default", "defaults: [{domain: d, key: k, value: [1]}]", []string{"unsupported value"}},
+		{"unquoted date default", "defaults: [{domain: d, key: k, value: 2024-01-01}]", []string{"defaults[0] d k: YAML reads 2024-01-01T00:00:00Z as a date; quote it"}},
+		{"template mode 0o unreadable by owner", "templates: {files: [{src: a, dst: ~/a, mode: 0o044}]}", []string{"e.g. 0o644"}},
 		{"reports all errors", `
 links: [{src: a}]
 commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
