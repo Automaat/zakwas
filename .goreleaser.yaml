@@ -34,6 +34,8 @@ homebrew_casks:
     description: Declarative Mac setup from one YAML file
     # The binary isn't notarized; Gatekeeper would refuse to run it.
     custom_block: |
+      depends_on :macos
+
       postflight_steps do
         run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "zakwas"], chdir: ".", writable_paths: ["zakwas"], must_succeed: false
       end

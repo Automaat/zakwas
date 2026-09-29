@@ -47,6 +47,18 @@ jobs:
       - name: release config builds
         run: goreleaser release --snapshot --clean --skip=publish
 
+      # `brew tap` validates every cask for every OS and arch; one invalid
+      # cask makes the whole tap fail to load.
+      - name: generated cask loads on every platform
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          brew tap-new --no-git zakwas-ci/tap
+          tap="$(brew --repository)/Library/Taps/zakwas-ci/homebrew-tap"
+          mkdir -p "$tap/Casks"
+          cp dist/homebrew/Casks/zakwas.rb "$tap/Casks/"
+          brew readall --os=all --arch=all zakwas-ci/tap
+
       - name: unit, e2e and integration tests
         run: mise run test:integration
 
