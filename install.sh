@@ -43,7 +43,8 @@ main() {
     # Piped as `curl … | bash`, stdin is the script itself: prompts would
     # swallow script text. The script lives in main, called on the last
     # line, so bash has parsed all of it before stdin moves to the terminal.
-    if [ ! -t 0 ] && [ -r /dev/tty ]; then
+    # CI has a /dev/tty node that can't be opened, hence the trial redirect.
+    if [ ! -t 0 ] && { : </dev/tty; } 2>/dev/null; then
         exec </dev/tty
     fi
 
@@ -68,6 +69,14 @@ main() {
     if ! command -v mise &>/dev/null; then
         info "Installing mise"
         brew install mise
+    fi
+
+    # mise hides releases younger than its minimum release age from
+    # "latest", so a fresh release would fail to resolve.
+    if [ "$version" = latest ]; then
+        version=$(curl -fsSL https://api.github.com/repos/Automaat/zakwas/releases/latest |
+            sed -n 's/^ *"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p')
+        [ -n "$version" ] || die "can't find the latest zakwas release"
     fi
 
     info "Installing zakwas $version"

@@ -44,6 +44,9 @@ jobs:
       - name: actionlint
         run: actionlint
 
+      - name: release config builds
+        run: goreleaser release --snapshot --clean --skip=publish
+
       - name: unit, e2e and integration tests
         run: mise run test:integration
 
@@ -89,3 +92,26 @@ jobs:
         run: |
           if echo x >> "$HOME/.zshrc"; then echo "$HOME/.zshrc is writable"; exit 1; fi
           stat -f %Sf "$HOME/.zshrc" | grep -q uchg
+
+  install:
+    name: install.sh on a fresh Mac
+    # Installs the latest published release, so it gates the installer, not
+    # this commit's code.
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: install.sh
+        run: ./install.sh --dir "$GITHUB_WORKSPACE/examples" --no-apply < /dev/null
+
+      - name: installed zakwas plans the example config
+        working-directory: examples
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(gh release view --json tagName --jq '.tagName | ltrimstr("v")')
+          mise exec "github:Automaat/zakwas@$version" -- zakwas version
+          mise exec "github:Automaat/zakwas@$version" -- zakwas plan --only system,files,templates,defaults
