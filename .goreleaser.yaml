@@ -17,6 +17,27 @@ archives:
 checksum:
   name_template: checksums.txt
 
+homebrew_casks:
+  - name: zakwas
+    repository:
+      owner: Automaat
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    # Without the tap token (forks, first releases) the cask is built but not pushed.
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}false{{ else }}true{{ end }}'
+    directory: Casks
+    commit_author:
+      name: goreleaser-bot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore(cask): update zakwas to {{ .Tag }}"
+    homepage: https://github.com/Automaat/zakwas
+    description: Declarative Mac setup from one YAML file
+    # The binary isn't notarized; Gatekeeper would refuse to run it.
+    custom_block: |
+      postflight_steps do
+        run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "zakwas"], chdir: ".", writable_paths: ["zakwas"], must_succeed: false
+      end
+
 changelog:
   use: github
   sort: asc

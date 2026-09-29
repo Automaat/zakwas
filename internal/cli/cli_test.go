@@ -13,6 +13,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/schema"
 )
 
 type result struct {
@@ -77,6 +78,17 @@ func TestExitCodes(t *testing.T) {
 				t.Errorf("output does not mention %q\nstdout: %s\nstderr: %s", tt.msg, r.stdout, r.stderr)
 			}
 		})
+	}
+}
+
+func TestSchemaPrintsEmbeddedSchemaWithoutLoadingConfig(t *testing.T) {
+	env, _ := setup(t, "links: [{src: x}]")
+	r := invoke(env, "", "schema")
+	if r.code != ExitOK || r.stderr != "" {
+		t.Fatalf("exit %d, stderr: %s", r.code, r.stderr)
+	}
+	if r.stdout != string(schema.JSON) {
+		t.Error("stdout differs from the embedded schema")
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	"github.com/Automaat/zakwas/internal/modules/system"
 	"github.com/Automaat/zakwas/internal/modules/templates"
 	"github.com/Automaat/zakwas/internal/runner"
+	"github.com/Automaat/zakwas/schema"
 )
 
 const usage = `zakwas converges this Mac to zakwas.yaml.
@@ -38,6 +39,7 @@ Commands:
   apply    show pending changes, confirm, apply them
   upgrade  refresh Homebrew's package list, then apply (picks up new brew versions)
   check    exit 2 when anything drifted (for CI/cron)
+  schema   print the JSON Schema for zakwas.yaml (for editor validation)
   version  print the zakwas version
 
 Flags:
@@ -108,6 +110,10 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	if !ok {
 		fs.Usage()
 		return ExitUsage
+	}
+	if cmd == "schema" {
+		_, _ = out.Write(schema.JSON)
+		return ExitOK
 	}
 	if !slices.Contains([]string{"plan", "apply", "upgrade", "check"}, cmd) {
 		errOut.printf("unknown command %q\n", cmd)
