@@ -77,9 +77,15 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	return append(append(trust, install...), cleanup...), nil
 }
 
+// installerCommit pins the Homebrew installer script, so a compromised or
+// broken upstream HEAD can't reach machines until Renovate proposes it.
+// renovate: datasource=git-refs depName=https://github.com/Homebrew/install branch=main
+const installerCommit = "04dfcac13ead62adfc864260c5d5f9404d145d50"
+
 // homebrewInstall primes sudo while a terminal is attached, so the official
 // installer can run NONINTERACTIVE (no "press RETURN") with cached credentials.
-const homebrewInstall = `sudo -v && NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+const homebrewInstall = `sudo -v && NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/` +
+	installerCommit + `/install.sh)"`
 
 // planBootstrap installs Homebrew, then everything in the Brewfile; taps are
 // trusted by `brew bundle install` from their `trusted:` options. A fresh

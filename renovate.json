@@ -38,6 +38,12 @@
       "managerFilePatterns": ["/^internal/modules/mise/bootstrap\\.go$/"],
       "matchStrings": ["// renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+const Version = \"(?<currentValue>[^\"]+)\""],
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "The Homebrew installer commit zakwas runs on machines without Homebrew.",
+      "managerFilePatterns": ["/^internal/modules/brew/brew\\.go$/"],
+      "matchStrings": ["// renovate: datasource=(?<datasource>git-refs) depName=(?<depName>\\S+) branch=(?<currentValue>\\S+)\\s+const installerCommit = \"(?<currentDigest>[0-9a-f]{40})\""]
     }
   ],
   "packageRules": [
@@ -80,6 +86,31 @@
       "addLabels": [
         "github-actions"
       ]
+    },
+    {
+      "description": "Tools zakwas downloads and runs on users' machines: always reviewed, never auto-merged.",
+      "matchFileNames": [
+        "internal/modules/brew/brew.go",
+        "internal/modules/mise/bootstrap.go"
+      ],
+      "matchDepNames": [
+        "https://github.com/Homebrew/install",
+        "jdx/mise"
+      ],
+      "automerge": false,
+      "addLabels": [
+        "bootstrap-pin"
+      ]
+    },
+    {
+      "description": "Let a mise release age before zakwas installs it. Not applied to the Homebrew installer: git-refs reports no release timestamps, so a minimum age would hold its bumps forever.",
+      "matchFileNames": [
+        "internal/modules/mise/bootstrap.go"
+      ],
+      "matchDepNames": [
+        "jdx/mise"
+      ],
+      "minimumReleaseAge": "3 days"
     }
   ]
 }
