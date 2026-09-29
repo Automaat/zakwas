@@ -15,6 +15,9 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `internal/runner/` | exec abstraction; `runnertest.Fake` for tests |
 | `install.sh` | fresh-Mac installer: CLT, zakwas binary from the release, clone, apply |
 | `examples/` | example config repo; CI plans and applies it |
+| `schema/` | generated `zakwas.schema.json` (embedded for `zakwas schema`); generator in `internal/schemagen` |
+| `internal/selfupdate/` | release download + verification for `self-update` |
+| `docs/` | user docs: config reference, commands, examples, security |
 | `.goreleaser.yaml` | darwin release binaries, published on `v*` tags |
 
 ## Commands
@@ -52,5 +55,9 @@ system → files → links → templates → brew → mise → commands → defa
 - Changes carry structure, not just text: `From`/`To` for versions and values, `Destructive` for deletions/cleanup/prune, `Streams` when Apply passes tool output through, `Diff` for file diffs and command scripts. Changes with nil `Apply` only list what a later step of the module does; prompts and progress count steps (`Plan.Steps`).
 - Machine output: `engine.JSONChange`/`JSONModule` (`engine/json.go`), plan document and apply events in `cli/machine.go`, history in `cli/history.go`; all versioned by `engine.FormatVersion`. Adding a field is fine; renaming or removing one bumps it.
 - Human output lives in `engine.Render` and `cli/progress.go`; plan goldens in `cmd/zakwas/testdata/script`.
+- Config fields carry `jsonschema_description` (and required/enum) tags. After changing `internal/config` types run `mise run schema`; a test fails on a stale schema or an undocumented property. Update `docs/config.md` too. Documented modes use `0o` octal: editors read YAML 1.2, where `0700` is decimal.
+- New commands go in `commandList` (`internal/cli/cli.go`), which feeds usage and completion; document them in `docs/commands.md`.
+- Release attestation runs in a separate `attest` job on the uploaded `dist` artifact; if it fails, re-run only that job. Don't make GoReleaser releases drafts while the cask is published: the cask would point at undownloadable assets.
+- The Homebrew installer is pinned to a commit (`installerCommit` in `internal/modules/brew/brew.go`); never fetch `HEAD`.
 - Nothing user-specific in code or `examples/`: no personal paths, taps, or keys.
 - `install.sh` passes `shellcheck`, workflows pass `actionlint` (both in CI).
