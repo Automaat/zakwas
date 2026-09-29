@@ -9,11 +9,11 @@ zakwas plan
 cmpenv stdout plan.golden
 
 ! zakwas check
-stdout 'links:'
+stdout '^links$'
 rm calls
 
 zakwas apply -y
-stdout 'done'
+stdout 'Applied \d+ of \d+ steps'
 
 linkto home/.zshrc dotfiles/zshrc
 grep 'user edits' home/.zshrc.zakwas-bak
@@ -26,9 +26,9 @@ grep 'pam_tid.so' sudo_local
 cmpenv calls calls.golden
 
 zakwas check
-stdout 'links: up to date'
-stdout 'files: up to date'
-stdout 'defaults: up to date'
+stdout 'up to date: .*\blinks\b'
+stdout 'up to date: .*\bfiles\b'
+stdout 'up to date: .*\bdefaults\b'
 
 ! exec sh -c 'echo "[core] editor = nano" >> home/.config/git/config'
 
@@ -72,24 +72,26 @@ brew "jq"
 -- home/.zshrc --
 user edits
 -- plan.golden --
-system:
-  ~ $WORK/sudo_local (enable Touch ID for sudo)
-files:
+system
+  ~ $WORK/sudo_local  enable Touch ID for sudo
+files
   + ~/.config/git/config
-links:
-  ~ ~/.zshrc (back up to .zshrc.zakwas-bak, link → $WORK/dotfiles/zshrc)
-templates:
+links
+  ~ ~/.zshrc  back up to .zshrc.zakwas-bak, link → $WORK/dotfiles/zshrc
+templates
   + ~/.config/k9s/config.yaml
-brew:
+brew
   + formula jq
-  ! brew bundle install
-mise:
+  ▶ brew bundle install
+mise
   + jq@1.7.1
-  ! mise install
-commands: up to date
-defaults:
-  ~ com.apple.dock autohide (unset → bool:1)
-  ! killall Dock
+  ▶ mise install
+defaults
+  ~ com.apple.dock autohide  unset → bool:1
+  ▶ killall Dock
+✓ up to date: commands
+
+Plan: 4 to add, 3 to change, 0 to remove, 3 to run.
 -- calls.golden --
 brew bundle check --file $WORK/Brewfile --verbose --no-upgrade
 brew bundle cleanup --file $WORK/Brewfile

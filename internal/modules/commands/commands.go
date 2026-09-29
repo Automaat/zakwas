@@ -39,7 +39,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		if ok {
 			continue
 		}
-		changes = append(changes, engine.Change{Action: engine.Run, Target: c.Name, Detail: c.Run, Apply: m.apply(c)})
+		changes = append(changes, engine.Change{Action: engine.Run, Target: c.Name, Diff: c.Run, Streams: true, Apply: m.apply(c)})
 	}
 	return changes, nil
 }

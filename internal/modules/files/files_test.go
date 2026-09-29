@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
 )
 
@@ -51,7 +52,7 @@ func TestFilesAndDirectories(t *testing.T) {
 	if len(changes) != 4 {
 		t.Fatalf("changes = %v", changes)
 	}
-	if err := engine.Apply(ctx, func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(ctx, engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,7 +118,7 @@ func TestRemovesFilesNoLongerManaged(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+		if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 			t.Fatal(err)
 		}
 		return changes
@@ -177,7 +178,7 @@ func applyModule(t *testing.T, m *Module) []engine.Change {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	return changes

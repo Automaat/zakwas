@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
@@ -69,7 +70,7 @@ func TestPlanAndApply(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	wantEnv := []string{"MISE_GLOBAL_CONFIG_FILE=" + m.Paths.Src(m.Mise.Config)}
@@ -132,7 +133,7 @@ func TestPrune(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	if !fake.Ran("mise prune --yes") {
@@ -224,5 +225,30 @@ func TestPruneScheduledWhenInstalledConfigStale(t *testing.T) {
 				t.Error("scheduled prune should explain why")
 			}
 		})
+	}
+}
+
+func TestMergeBumps(t *testing.T) {
+	changes := mergeBumps([]engine.Change{
+		{Action: engine.Create, Target: "ruff@0.16.9"},
+		{Action: engine.Create, Target: "jq@1.8.2"},
+		{Action: engine.Create, Target: "node@24"},
+		{Action: engine.Create, Target: "node@22"},
+		{Action: engine.Run, Target: "mise install"},
+		{Action: engine.Remove, Target: "ruff@0.16.2", Destructive: true},
+		{Action: engine.Remove, Target: "node@20", Destructive: true},
+		{Action: engine.Remove, Target: "pnpm@10", Destructive: true},
+		{Action: engine.Run, Target: "mise prune", Destructive: true},
+	})
+	var got []string
+	for _, c := range changes {
+		got = append(got, c.String())
+	}
+	want := []string{
+		"~ ruff (0.16.2 → 0.16.9)", "+ jq@1.8.2", "+ node@24", "+ node@22", "! mise install",
+		"- node@20", "- pnpm@10", "! mise prune",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }

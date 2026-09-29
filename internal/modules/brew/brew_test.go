@@ -10,6 +10,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
@@ -175,7 +176,7 @@ Satisfy missing dependencies with ` + "`brew bundle install`."})
 		t.Fatalf("got  %v\nwant %v", got, want)
 	}
 
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Module: "brew", Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Module: "brew", Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	lines := fake.Lines()
@@ -206,7 +207,7 @@ func TestNoUpgradeAndNoCleanup(t *testing.T) {
 	if got := targets(changes); !reflect.DeepEqual(got, []string{"+ formula jq", "! brew bundle install"}) {
 		t.Fatalf("got %v", got)
 	}
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	if fake.Ran("brew outdated") || fake.Ran("brew bundle cleanup") {
@@ -257,7 +258,7 @@ func TestBootstrapInstallsHomebrewThenBundle(t *testing.T) {
 	if len(fake.Calls) != 0 {
 		t.Fatalf("planning without brew ran %v", fake.Lines())
 	}
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := fake.Lines(); len(got) != 2 || !strings.HasPrefix(got[0], "/bin/bash") {
@@ -270,5 +271,20 @@ func TestBootstrapStillRequiresTrustedTaps(t *testing.T) {
 	fake.Missing("brew")
 	if _, err := m.Plan(context.Background()); err == nil {
 		t.Fatal("untrusted tap accepted")
+	}
+}
+
+func TestOutdatedShowsVersions(t *testing.T) {
+	m, fake, file := newModule(t, config.Brew{Upgrade: true})
+	fake.OnOK("brew trust --json=v1", `{"taps":["automaat/tap"]}`)
+	fake.OnOK("brew bundle check --file "+file+" --verbose --no-upgrade", "")
+	fake.OnOK("brew outdated --json=v2", `{"formulae":[{"name":"jq","installed_versions":["1.7.1"],"current_version":"1.8.2"}],"casks":[]}`)
+
+	changes, err := m.Plan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changes[0].String(); got != "~ brew jq (1.7.1 → 1.8.2)" {
+		t.Errorf("got %q", got)
 	}
 }

@@ -62,7 +62,8 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		changes = append(changes, engine.Change{
 			Action: engine.Update,
 			Target: target,
-			Detail: fmt.Sprintf("%s → %s", from, want),
+			From:   from,
+			To:     want.String(),
 			Apply:  m.write(d, want),
 		})
 		if p := restartFor(d); p != "" && !seen[p] {

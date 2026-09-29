@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
@@ -118,7 +119,7 @@ func TestApply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatalf("apply: %v (killall of a stopped process must not fail)", err)
 	}
 	for _, want := range []string{"defaults write com.apple.dock autohide -bool true", "defaults write NSGlobalDomain KeyRepeat -int 2", "killall Dock"} {
@@ -137,7 +138,7 @@ func TestWriteFailureSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err == nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err == nil {
 		t.Error("expected write failure")
 	}
 }
@@ -159,7 +160,7 @@ func TestCurrentHost(t *testing.T) {
 	if len(changes) != 1 || changes[0].String() != "~ -currentHost com.apple.controlcenter BatteryShowPercentage (bool:0 → bool:1)" {
 		t.Fatalf("changes = %v", changes)
 	}
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	if !fake.Ran("defaults -currentHost write") {
@@ -202,7 +203,7 @@ func TestActivateSettingsAfterGlobalDomainWrite(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
-			if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+			if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 				t.Errorf("apply: %v (activateSettings is best effort)", err)
 			}
 		})

@@ -7,7 +7,7 @@ linkto home/.zshrc dotfiles/zshrc
 exists home/.local/state/zakwas/history.jsonl
 
 ! zakwas check
-stdout 'links: up to date'
+stdout 'up to date: .*\blinks\b'
 
 -- zakwas.yaml --
 links:

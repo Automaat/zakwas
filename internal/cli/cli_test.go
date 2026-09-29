@@ -63,7 +63,7 @@ func TestExitCodes(t *testing.T) {
 		{"invalid config", "links: [{src: x}]", []string{"plan"}, ExitErr, "src and dst are required"},
 		{"plan with drift", linksOnly, []string{"plan"}, ExitOK, "+ ~/.zshrc"},
 		{"check with drift", linksOnly, []string{"check"}, ExitDrift, "+ ~/.zshrc"},
-		{"flags after command", linksOnly, []string{"check", "--only", "links"}, ExitDrift, "links:"},
+		{"flags after command", linksOnly, []string{"check", "--only", "links"}, ExitDrift, "Plan: 1 to add"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -81,22 +81,26 @@ func TestExitCodes(t *testing.T) {
 
 func TestApplyConfirmation(t *testing.T) {
 	tests := []struct {
+		name     string
+		tty      bool
 		stdin    string
 		args     []string
 		want     int
 		applied  bool
 		contains string
 	}{
-		{"n\n", []string{"apply"}, ExitErr, false, "aborted"},
-		{"", []string{"apply"}, ExitErr, false, "aborted"},
-		{"yes\n", []string{"apply"}, ExitOK, true, "done"},
-		{"", []string{"apply", "-y"}, ExitOK, true, "done"},
+		{"answer no", true, "n\n", []string{"apply"}, ExitErr, false, "aborted"},
+		{"no answer", true, "", []string{"apply"}, ExitErr, false, "aborted"},
+		{"answer yes", true, "yes\n", []string{"apply"}, ExitOK, true, "Apply 1 step(s)? [y/N]"},
+		{"no terminal", false, "yes\n", []string{"apply"}, ExitUsage, false, "stdin is not a terminal"},
+		{"no terminal with -y", false, "", []string{"apply", "-y"}, ExitOK, true, "Applied 1 of 1 steps"},
 	}
 	for _, tt := range tests {
-		t.Run(strings.Join(tt.args, " ")+" "+strings.TrimSpace(tt.stdin), func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			env, home := setup(t, linksOnly)
+			env.StdinTTY = tt.tty
 			r := invoke(env, tt.stdin, tt.args...)
-			if r.code != tt.want || !strings.Contains(r.stdout, tt.contains) {
+			if r.code != tt.want || !strings.Contains(r.stdout+r.stderr, tt.contains) {
 				t.Fatalf("exit %d, stdout: %s stderr: %s", r.code, r.stdout, r.stderr)
 			}
 			_, err := os.Lstat(filepath.Join(home, ".zshrc"))
@@ -113,7 +117,7 @@ func TestApplyNothingToDo(t *testing.T) {
 		t.Fatal(r)
 	}
 	r := invoke(env, "", "apply")
-	if r.code != ExitOK || !strings.Contains(r.stdout, "nothing to do") {
+	if r.code != ExitOK || !strings.Contains(r.stdout, "No changes") {
 		t.Errorf("second apply: %+v", r)
 	}
 	if r := invoke(env, "", "check"); r.code != ExitOK {
@@ -215,7 +219,7 @@ func TestApplyRecordsHistory(t *testing.T) {
 	if !entry.Time.Equal(env.Now()) || len(entry.Changes) != 1 || !strings.HasPrefix(entry.Changes[0], "links: + ~/.zshrc") {
 		t.Errorf("entry = %+v", entry)
 	}
-	if r := invoke(env, "", "apply", "-y"); r.code != ExitOK || !strings.Contains(r.stdout, "nothing to do") {
+	if r := invoke(env, "", "apply", "-y"); r.code != ExitOK || !strings.Contains(r.stdout, "No changes") {
 		t.Fatalf("%+v", r)
 	}
 	if data2, _ := os.ReadFile(HistoryPath(home)); !bytes.Equal(data, data2) {

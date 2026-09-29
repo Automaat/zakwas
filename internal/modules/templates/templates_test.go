@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
 )
 
@@ -44,7 +45,7 @@ func plan(t *testing.T, m *Module) []engine.Change {
 
 func apply(t *testing.T, changes []engine.Change) {
 	t.Helper()
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Module: "templates", Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Module: "templates", Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 }

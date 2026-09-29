@@ -33,6 +33,23 @@ zakwas check           # exit 2 when the machine drifted (cron/launchd friendly)
 zakwas plan --only brew,defaults
 ```
 
+```
+$ zakwas plan
+files
+  ~ ~/.zshenv                         content
+  - ~/.local/bin/old-tool             no longer managed
+mise
+  ~ ruff          0.16.2 → 0.16.9
+  ▶ mise install
+✓ up to date: system, links, templates, brew, commands, defaults
+
+⚠ destructive: ~/.local/bin/old-tool
+
+Plan: 0 to add, 2 to change, 1 to remove, 1 to run.
+```
+
+`+` add, `~` change, `-` remove, `▶` run a step; destructive changes (deletions, brew cleanup, mise prune) are bold red and repeated before the summary. `--diff` adds file diffs and command scripts. `apply` shows `[n/total]` progress per step, frames tool output (folded into groups on GitHub Actions), and ends with a recap. Colors follow [NO_COLOR](https://no-color.org) and turn off when stdout isn't a terminal or with `--no-color`. Without a terminal, `apply` refuses to prompt: review with `plan`, then `apply -y`.
+
 zakwas finds `zakwas.yaml` by searching up from the current directory, then `$ZAKWAS_CONFIG`; `-c` overrides both. Set `ZAKWAS_CONFIG` in your shell env to run it from anywhere.
 
 Exit codes: 0 ok, 1 error, 2 drift (`check`), 64 usage, 130 interrupted. A module that fails to plan is reported and skipped; the others still apply, and the run exits 1.

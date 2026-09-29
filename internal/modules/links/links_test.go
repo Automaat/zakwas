@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
 )
 
@@ -48,7 +49,7 @@ func converge(t *testing.T, m engine.Module) []engine.Change {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Apply(ctx, func(string) {}, engine.Plan{{Module: m.Name(), Changes: changes}}); err != nil {
+	if err := enginetest.Apply(ctx, engine.Plan{{Module: m.Name(), Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	again, err := m.Plan(ctx)
