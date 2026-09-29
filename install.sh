@@ -5,6 +5,7 @@ repo=""
 dir="${ZAKWAS_DIR:-$HOME/dotfiles}"
 version="${ZAKWAS_VERSION:-latest}"
 bin_dir="$HOME/.local/bin"
+tmp=""
 apply=1
 
 info() { printf '\033[1;33m==> %s\033[0m\n' "$1"; }
@@ -43,7 +44,7 @@ install_zakwas() {
             sed -n 's/^ *"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p')
         [ -n "$version" ] || die "can't find the latest zakwas release"
     fi
-    local arch archive base tmp
+    local arch archive base
     arch=$(uname -m)
     [ "$arch" = x86_64 ] && arch=amd64
     archive="zakwas_${version}_darwin_${arch}.tar.gz"
