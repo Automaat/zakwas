@@ -2,16 +2,13 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -45,8 +42,8 @@ func newInitFlags(errOut *console) (*flag.FlagSet, *[]string) {
 		errOut.print(`Usage: zakwas init DIR [--add PATH]...
 
 Creates a starter config repo in DIR (new or empty) from this Mac: a
-Brewfile from brew bundle dump, the active global mise tools pinned to
-their exact versions, and every --add file or directory copied under
+Brewfile (taps, formulae, casks, mas apps) from brew bundle dump, your
+global mise config with every tool pinned to its exact version, and every --add file or directory copied under
 dotfiles/. Nothing outside DIR is changed.
 
 Flags:
@@ -103,7 +100,7 @@ func runInit(ctx context.Context, env Env, args []string, out, errOut *console) 
 	p.orphans = p.countOrphans()
 	var miseToml []byte
 	if p.mise {
-		if miseToml, err = globalMiseConfig(ctx, env.Runner); err != nil {
+		if miseToml, err = globalMiseConfig(ctx, env.Runner, env.Home); err != nil {
 			errOut.fail(err)
 			return ExitErr
 		}
@@ -302,12 +299,12 @@ func yamlString(s string) string {
 	return strings.TrimSuffix(string(data), "\n")
 }
 
-// write creates the repo and reports whether it made the directory itself.
-func (p *initPlan) write(ctx context.Context, r runner.Runner, miseToml []byte) (bool, error) {
-	_, err := os.Stat(p.dir)
-	created := errors.Is(err, fs.ErrNotExist)
+// write creates the repo and returns the topmost directory it created, if
+// any, so a failed init can remove everything it made.
+func (p *initPlan) write(ctx context.Context, r runner.Runner, miseToml []byte) (string, error) {
+	created := topMissing(p.dir)
 	if err := os.MkdirAll(p.dir, 0o755); err != nil {
-		return false, err
+		return created, err
 	}
 	for _, a := range p.adds {
 		for _, f := range a.files {
@@ -324,7 +321,7 @@ func (p *initPlan) write(ctx context.Context, r runner.Runner, miseToml []byte) 
 	if p.brew {
 		dump := runner.Cmd{
 			Name: "brew",
-			Args: []string{"bundle", "dump", "--file", filepath.Join(p.dir, "Brewfile")},
+			Args: []string{"bundle", "dump", "--tap", "--formula", "--cask", "--mas", "--file", filepath.Join(p.dir, "Brewfile")},
 			Env:  []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ENV_HINTS=1"},
 		}
 		if err := runner.Check(ctx, r, dump); err != nil {
@@ -382,10 +379,23 @@ func writeFile(path string, data []byte, perm fs.FileMode) error {
 	return os.Chmod(path, perm)
 }
 
-// cleanup undoes a failed init. dir was new or empty, so all of it is ours.
-func cleanup(dir string, created bool) error {
-	if created {
-		return os.RemoveAll(dir)
+// topMissing returns the highest ancestor of dir (or dir itself) that does
+// not exist yet, or "" when dir exists.
+func topMissing(dir string) string {
+	top := ""
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Lstat(d); err == nil || filepath.Dir(d) == d {
+			return top
+		}
+		top = d
+	}
+}
+
+// cleanup undoes a failed init: created is the topmost directory init made;
+// otherwise dir was empty, so everything in it is init's.
+func cleanup(dir, created string) error {
+	if created != "" {
+		return os.RemoveAll(created)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -398,52 +408,13 @@ func cleanup(dir string, created bool) error {
 	return errors.Join(errs...)
 }
 
-// globalMiseConfig pins every active global tool to the exact version in
-// use, so the new repo reproduces this machine rather than "latest".
-func globalMiseConfig(ctx context.Context, r runner.Runner) ([]byte, error) {
-	ls := runner.Cmd{Name: "mise", Args: []string{"ls", "--global", "--current", "--json"}, Dir: mise.Dir}
-	stdout, err := runner.Output(ctx, r, ls)
-	if err != nil {
-		return nil, err
-	}
-	var tools map[string][]struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &tools); err != nil {
-		return nil, fmt.Errorf("%s: %w", ls, err)
-	}
-	var b strings.Builder
-	b.WriteString("[tools]\n")
-	for _, name := range slices.Sorted(maps.Keys(tools)) {
-		var versions []string
-		for _, t := range tools[name] {
-			if v := strconv.Quote(t.Version); t.Version != "" && !slices.Contains(versions, v) {
-				versions = append(versions, v)
-			}
-		}
-		if len(versions) == 0 {
-			continue
-		}
-		key := name
-		if !bareKey.MatchString(key) {
-			key = strconv.Quote(key)
-		}
-		value := versions[0]
-		if len(versions) > 1 {
-			value = "[" + strings.Join(versions, ", ") + "]"
-		}
-		fmt.Fprintf(&b, "%s = %s\n", key, value)
-	}
-	return []byte(b.String()), nil
-}
-
 func (p *initPlan) summary() string {
 	paths := config.Paths{Home: p.home}
 	dir := paths.Pretty(p.dir)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n  %s\n  .gitignore\n", dir, config.FileName)
 	if p.brew {
-		fmt.Fprintf(&b, "  %-29s from brew bundle dump\n", "Brewfile")
+		fmt.Fprintf(&b, "  %-29s taps, formulae, casks, mas apps from brew bundle dump\n", "Brewfile")
 		if len(p.trusted) > 0 {
 			fmt.Fprintf(&b, "  %-29s marked trusted: %s (already tapped here)\n", "", strings.Join(p.trusted, ", "))
 		}
@@ -451,7 +422,7 @@ func (p *initPlan) summary() string {
 		b.WriteString("  no brew section: Homebrew is not installed\n")
 	}
 	if p.mise {
-		fmt.Fprintf(&b, "  %-29s active global mise tools, exact versions\n", miseSrc)
+		fmt.Fprintf(&b, "  %-29s global mise config, active tools pinned to exact versions\n", miseSrc)
 	} else {
 		b.WriteString("  no mise section: mise is not installed\n")
 	}

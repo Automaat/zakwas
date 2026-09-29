@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	brewDump = "brew bundle dump --file "
+	brewDump = "brew bundle dump --tap --formula --cask --mas --file "
 	miseLs   = "mise ls --global --current --json"
 	gitInit  = "git init -q -b main"
 )
@@ -137,7 +137,7 @@ mise:
 	if got := read(t, filepath.Join(repo, "zakwas.yaml")); got != wantCfg {
 		t.Errorf("zakwas.yaml =\n%s\nwant\n%s", got, wantCfg)
 	}
-	wantMise := "[tools]\n\"aqua:cli/cli\" = \"2.1.0\"\njq = \"1.7.1\"\nnode = [\"22.1.0\", \"20.3.0\"]\n"
+	wantMise := "[tools]\n\"aqua:cli/cli\" = \"2.1.0\"\nnode = [\"22.1.0\", \"20.3.0\"]\njq = \"1.7.1\"\n"
 	if got := read(t, filepath.Join(repo, "dotfiles/mise/config.toml")); got != wantMise {
 		t.Errorf("mise config =\n%s\nwant\n%s", got, wantMise)
 	}
@@ -323,15 +323,26 @@ func TestInitRejects(t *testing.T) {
 }
 
 func TestInitCleansUpAfterFailure(t *testing.T) {
-	for _, existed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("dir existed %v", existed), func(t *testing.T) {
+	tests := []struct {
+		name    string
+		repo    string
+		existed bool
+	}{
+		{"new dir", "repo", false},
+		{"new parents", "sub/deep/repo", false},
+		{"empty dir", "repo", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			home := initHome(t)
-			repo := filepath.Join(t.TempDir(), "repo")
-			if existed {
+			parent := t.TempDir()
+			repo := filepath.Join(parent, tt.repo)
+			if tt.existed {
 				if err := os.Mkdir(repo, 0o755); err != nil {
 					t.Fatal(err)
 				}
 			}
+			before := snapshot(t, parent)
 			fake := runnertest.New().
 				OnOK(miseLs, `{}`).
 				On(brewDump+filepath.Join(repo, "Brewfile"), runner.Result{ExitCode: 1, Stderr: "boom"})
@@ -339,12 +350,8 @@ func TestInitCleansUpAfterFailure(t *testing.T) {
 			if r.code != ExitErr || !strings.Contains(r.stderr, "boom") {
 				t.Errorf("exit %d, stderr %q", r.code, r.stderr)
 			}
-			entries, err := os.ReadDir(repo)
-			switch {
-			case existed && (err != nil || len(entries) != 0):
-				t.Errorf("existing dir not emptied: %v %v", entries, err)
-			case !existed && err == nil:
-				t.Errorf("created dir left behind: %v", entries)
+			if after := snapshot(t, parent); after != before {
+				t.Errorf("failed init left files:\nbefore:\n%s\nafter:\n%s", before, after)
 			}
 		})
 	}

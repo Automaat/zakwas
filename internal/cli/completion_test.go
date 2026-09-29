@@ -91,7 +91,7 @@ func TestBashCompletion(t *testing.T) {
 		words []string
 		want  string
 	}{
-		{[]string{"zakwas", ""}, "plan apply upgrade check init self-update completion version"},
+		{[]string{"zakwas", ""}, strings.Join(commandNames(), " ")},
 		{[]string{"zakwas", "ap"}, "apply"},
 		{[]string{"zakwas", "-y", "ap"}, "apply"},
 		{[]string{"zakwas", "-c", "x.yaml", "pl"}, "plan"},

@@ -77,14 +77,14 @@ files
 Plan: 0 to add, 4 to change, 0 to remove, 0 to run.
 -- calls.golden --
 mise ls --global --current --json (in /)
-brew bundle dump --file $WORK/repo/Brewfile (auto-update off: 1)
+brew bundle dump --tap --formula --cask --mas --file $WORK/repo/Brewfile (auto-update off: 1)
 brew bundle check --file $WORK/repo/Brewfile --verbose --no-upgrade (auto-update off: 1)
 mise ls --global --missing --json (in /)
 -- bin/brew --
 #!/bin/sh
 echo "brew $* (auto-update off: $HOMEBREW_NO_AUTO_UPDATE)" >> "$WORK/calls"
 case "$1 $2" in
-  "bundle dump") [ "$3" = --file ] && echo 'brew "jq"' > "$4" ;;
+  "bundle dump") [ "$7" = --file ] && echo 'brew "jq"' > "$8" ;;
   "bundle check") exit 0 ;;
   *) echo "unexpected brew $*" >&2; exit 99 ;;
 esac
