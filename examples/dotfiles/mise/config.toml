@@ -1,0 +1,3 @@
+[tools]
+"github:Automaat/zakwas" = "latest"
+jq = "latest"

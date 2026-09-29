@@ -1,0 +1,55 @@
+[!darwin] skip 'uchg is macOS only'
+
+zakwas apply -y
+stdout 'done'
+cmp home/.config/git/config dotfiles/gitconfig
+cmp home/.config/app/a dotfiles/app/a
+exec ls -lO home/.config/git/config
+stdout 'uchg'
+
+zakwas check
+stdout 'files: up to date'
+stdout 'templates: up to date'
+
+! exec sh -c 'echo "[core] editor = nano" >> home/.config/git/config'
+! exec chmod 644 home/.config/git/config
+! exec rm -f home/.config/git/config
+exists home/.config/git/config
+
+exec chflags nouchg home/.config/git/config
+exec chmod 644 home/.config/git/config
+exec sh -c 'echo "[core] editor = nano" >> home/.config/git/config'
+exec touch home/.config/git/config.zakwas-bak
+! zakwas check
+stdout 'edited in place, back up to config.zakwas-bak.1'
+zakwas apply -y
+cmp home/.config/git/config dotfiles/gitconfig
+grep 'editor = nano' home/.config/git/config.zakwas-bak.1
+exec ls -lO home/.config/git/config
+stdout 'uchg'
+zakwas check
+
+exec chflags nouchg home/.config/app/a
+! zakwas check
+stdout '~ ~/.config/app/a \(set immutable\)'
+zakwas apply -y
+zakwas check
+
+-- zakwas.yaml --
+protect:
+  immutable: true
+files:
+  - {src: dotfiles/gitconfig, dst: ~/.config/git/config}
+  - {src: dotfiles/app, dst: ~/.config/app}
+templates:
+  files:
+    - {src: dotfiles/k9s.yaml.tmpl, dst: ~/.config/k9s/config.yaml}
+-- dotfiles/gitconfig --
+[user]
+	name = Test
+-- dotfiles/app/a --
+a
+-- dotfiles/app/sub/b --
+b
+-- dotfiles/k9s.yaml.tmpl --
+screenDumpDir: {{.Home}}/dumps

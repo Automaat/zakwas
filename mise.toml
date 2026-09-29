@@ -1,0 +1,14 @@
+[tools]
+go = "1.27.1"
+golangci-lint = "2.14.0"
+shellcheck = "0.11.0"
+actionlint = "1.7.12"
+
+[tasks.test]
+run = "go test -race ./..."
+
+[tasks."test:integration"]
+run = "go test -race -tags integration ./..."
+
+[tasks.lint]
+run = "golangci-lint run"

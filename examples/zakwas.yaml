@@ -1,0 +1,39 @@
+protect:
+  immutable: true
+
+files:
+  - {src: dotfiles/zsh/zshrc, dst: ~/.zshrc}
+  - {src: dotfiles/git/config, dst: ~/.config/git/config}
+  - {src: dotfiles/mise/config.toml, dst: ~/.config/mise/config.toml}
+
+templates:
+  vars:
+    name: Your Name
+  files:
+    - {src: dotfiles/git/user.tmpl, dst: ~/.config/git/user}
+
+brew:
+  file: Brewfile
+  cleanup: zap
+
+mise:
+  config: dotfiles/mise/config.toml
+  prune: true
+
+system:
+  sudoTouchID: true
+  dirs:
+    - {path: ~/.ssh, mode: 0700}
+  sshKey:
+    path: ~/.ssh/id_ed25519
+    comment: you@example.com
+
+commands:
+  - name: rosetta
+    check: /usr/bin/pgrep -q oahd
+    run: softwareupdate --install-rosetta --agree-to-license
+
+defaults:
+  - {domain: com.apple.dock, key: autohide, value: true}
+  - {domain: NSGlobalDomain, key: KeyRepeat, value: 2}
+  - {domain: com.apple.finder, key: AppleShowAllExtensions, value: true}

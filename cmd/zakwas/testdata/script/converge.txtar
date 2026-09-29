@@ -1,0 +1,140 @@
+chmod 755 bin/brew
+chmod 755 bin/mise
+chmod 755 bin/defaults
+chmod 755 bin/killall
+chmod 755 bin/sudo
+mkdir state
+
+zakwas plan
+cmpenv stdout plan.golden
+
+! zakwas check
+stdout 'links:'
+rm calls
+
+zakwas apply -y
+stdout 'done'
+
+linkto home/.zshrc dotfiles/zshrc
+grep 'user edits' home/.zshrc.zakwas-bak
+
+grep '^screenDumpDir: .*/home/dumps$' home/.config/k9s/config.yaml
+grep '^skin: nord-light$' home/.config/k9s/config.yaml
+
+grep 'pam_tid.so' sudo_local
+
+cmpenv calls calls.golden
+
+zakwas check
+stdout 'links: up to date'
+stdout 'files: up to date'
+stdout 'defaults: up to date'
+
+! exec sh -c 'echo "[core] editor = nano" >> home/.config/git/config'
+
+chmod 644 home/.config/git/config
+exec sh -c 'echo "[core] editor = nano" >> home/.config/git/config'
+! zakwas check
+stdout 'edited in place, back up to config.zakwas-bak'
+zakwas apply -y
+cmp home/.config/git/config dotfiles/gitconfig
+grep 'editor = nano' home/.config/git/config.zakwas-bak
+zakwas check
+
+-- zakwas.yaml --
+files:
+  - {src: dotfiles/gitconfig, dst: ~/.config/git/config}
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+templates:
+  vars: {theme: nord-light}
+  files:
+    - {src: dotfiles/k9s.yaml.tmpl, dst: ~/.config/k9s/config.yaml}
+brew: {file: Brewfile, cleanup: zap}
+mise: {config: dotfiles/mise.toml}
+defaults:
+  - {domain: com.apple.dock, key: autohide, value: true}
+system:
+  sudoTouchID: true
+-- dotfiles/gitconfig --
+[user]
+	name = Test
+-- dotfiles/zshrc --
+export EDITOR=vim
+-- dotfiles/k9s.yaml.tmpl --
+screenDumpDir: {{.Home}}/dumps
+skin: {{.Vars.theme}}
+-- dotfiles/mise.toml --
+[tools]
+jq = "1.7.1"
+-- Brewfile --
+brew "jq"
+-- home/.zshrc --
+user edits
+-- plan.golden --
+system:
+  ~ $WORK/sudo_local (enable Touch ID for sudo)
+files:
+  + ~/.config/git/config
+links:
+  ~ ~/.zshrc (back up to .zshrc.zakwas-bak, link → $WORK/dotfiles/zshrc)
+templates:
+  + ~/.config/k9s/config.yaml
+brew:
+  + formula jq
+  ! brew bundle install
+mise:
+  + jq@1.7.1
+  ! mise install
+commands: up to date
+defaults:
+  ~ com.apple.dock autohide (unset → bool:1)
+  ! killall Dock
+-- calls.golden --
+brew bundle check --file $WORK/Brewfile --verbose --no-upgrade
+brew bundle cleanup --file $WORK/Brewfile
+mise ls --global --missing --json
+defaults read-type com.apple.dock autohide
+sudo tee -a $WORK/sudo_local
+brew bundle install --file $WORK/Brewfile --no-upgrade
+mise install --yes
+defaults write com.apple.dock autohide -bool true
+killall Dock
+-- bin/sudo --
+#!/bin/sh
+echo "sudo $*" >> "$WORK/calls"
+exec "$@"
+-- bin/killall --
+#!/bin/sh
+echo "killall $*" >> "$WORK/calls"
+-- bin/brew --
+#!/bin/sh
+echo "brew $*" >> "$WORK/calls"
+case "$1 $2" in
+  "bundle check")
+    [ -f "$WORK/state/brew" ] && exit 0
+    echo "→ Formula jq needs to be installed."
+    exit 1 ;;
+  "bundle install") touch "$WORK/state/brew" ;;
+  "bundle cleanup") ;;
+  *) echo "unexpected brew $*" >&2; exit 99 ;;
+esac
+-- bin/mise --
+#!/bin/sh
+echo "mise $*" >> "$WORK/calls"
+[ "$MISE_GLOBAL_CONFIG_FILE" = "$WORK/dotfiles/mise.toml" ] || { echo "wrong config $MISE_GLOBAL_CONFIG_FILE" >&2; exit 98; }
+case "$1" in
+  ls)
+    if [ -f "$WORK/state/mise" ]; then echo '{}'; else echo '{"jq":[{"version":"1.7.1","installed":false}]}'; fi ;;
+  install) touch "$WORK/state/mise" ;;
+  *) exit 99 ;;
+esac
+-- bin/defaults --
+#!/bin/sh
+echo "defaults $*" >> "$WORK/calls"
+f="$WORK/state/defaults.$2.$3"
+case "$1" in
+  read-type) [ -f "$f" ] || exit 1; echo "Type is boolean" ;;
+  read) cat "$f" ;;
+  write) if [ "$5" = true ]; then echo 1 > "$f"; else echo 0 > "$f"; fi ;;
+esac

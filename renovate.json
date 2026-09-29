@@ -1,0 +1,78 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":semanticCommitType(chore)",
+    ":semanticCommitScope(deps)"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "reviewers": [
+    "Automaat"
+  ],
+  "automerge": false,
+  "automergeStrategy": "squash",
+  "platformAutomerge": true,
+  "rebaseWhen": "behind-base-branch",
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Versions pinned in workflow inputs behind a `# renovate:` comment, e.g. mise in jdx/mise-action.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+version: (?<currentValue>\\S+)"
+      ],
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Non-major updates merge on their own once the required checks pass, through GitHub native auto-merge.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Major bumps can change CLI or API behavior; review them one at a time.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false,
+      "addLabels": [
+        "major"
+      ]
+    },
+    {
+      "description": "Go toolchain and dependencies.",
+      "matchFileNames": [
+        "go.mod",
+        "mise.toml"
+      ],
+      "groupName": "go toolchain",
+      "groupSlug": "go-toolchain",
+      "addLabels": [
+        "go"
+      ]
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "addLabels": [
+        "github-actions"
+      ]
+    }
+  ]
+}

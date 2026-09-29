@@ -1,0 +1,23 @@
+chmod 755 bin/brew
+
+! zakwas apply -y
+stdout 'brew: plan failed'
+stderr 'plan brew'
+linkto home/.zshrc dotfiles/zshrc
+exists home/.local/state/zakwas/history.jsonl
+
+! zakwas check
+stdout 'links: up to date'
+
+-- zakwas.yaml --
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+brew: {file: Brewfile}
+-- Brewfile --
+brew "jq"
+-- dotfiles/zshrc --
+export EDITOR=vim
+-- bin/brew --
+#!/bin/sh
+echo "Error: Homebrew is offline" >&2
+exit 1
