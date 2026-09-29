@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
@@ -43,7 +44,7 @@ func TestRealDefaults(t *testing.T) {
 	if len(changes) != 5 {
 		t.Fatalf("fresh domain: %v", changes)
 	}
-	if err := engine.Apply(ctx, func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(ctx, engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	if again, err := m.Plan(ctx); err != nil || len(again) != 0 {
@@ -61,7 +62,7 @@ func TestRealDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	drift, err := m.Plan(ctx)
-	if err != nil || len(drift) != 1 || drift[0].Detail != "string:15 → int:15" {
+	if err != nil || len(drift) != 1 || drift[0].Summary() != "string:15 → int:15" {
 		t.Errorf("type drift not detected: %v, %v", drift, err)
 	}
 }

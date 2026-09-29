@@ -46,7 +46,7 @@ func (m *Module) planBootstrap() []engine.Change {
 	return []engine.Change{
 		{Action: engine.Create, Target: "mise@" + Version, Detail: Bin, Apply: m.installMise},
 		{
-			Action: engine.Run, Target: "mise install", Detail: "every tool in " + m.Mise.Config,
+			Action: engine.Run, Target: "mise install", Detail: "every tool in " + m.Mise.Config, Streams: true,
 			Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, install) },
 		},
 	}

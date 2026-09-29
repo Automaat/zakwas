@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
@@ -63,7 +64,51 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(changes, prune...), nil
+	return mergeBumps(append(changes, prune...)), nil
+}
+
+// mergeBumps shows a tool whose only change is one new version installed and
+// one old version pruned as a single `~ tool from → to`.
+func mergeBumps(changes []engine.Change) []engine.Change {
+	type pair struct{ add, remove []int }
+	byTool := map[string]*pair{}
+	for i, c := range changes {
+		name, _, ok := strings.Cut(c.Target, "@")
+		if !ok {
+			continue
+		}
+		if byTool[name] == nil {
+			byTool[name] = &pair{}
+		}
+		switch c.Action {
+		case engine.Create:
+			byTool[name].add = append(byTool[name].add, i)
+		case engine.Remove:
+			byTool[name].remove = append(byTool[name].remove, i)
+		}
+	}
+	replace := map[int]engine.Change{}
+	drop := map[int]bool{}
+	for name, p := range byTool {
+		if len(p.add) != 1 || len(p.remove) != 1 {
+			continue
+		}
+		_, to, _ := strings.Cut(changes[p.add[0]].Target, "@")
+		_, from, _ := strings.Cut(changes[p.remove[0]].Target, "@")
+		replace[p.add[0]] = engine.Change{Action: engine.Update, Target: name, From: from, To: to}
+		drop[p.remove[0]] = true
+	}
+	var out []engine.Change
+	for i, c := range changes {
+		switch {
+		case drop[i]:
+		case replace[i].Target != "":
+			out = append(out, replace[i])
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (m *Module) planInstall(ctx context.Context) ([]engine.Change, error) {
@@ -83,7 +128,7 @@ func (m *Module) planInstall(ctx context.Context) ([]engine.Change, error) {
 	install := m.cmd("install", "--yes")
 	install.Stream = true
 	return append(changes, engine.Change{
-		Action: engine.Run, Target: "mise install",
+		Action: engine.Run, Target: "mise install", Streams: true,
 		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, install) },
 	}), nil
 }
@@ -131,7 +176,7 @@ func (m *Module) planPrune(ctx context.Context, installing bool) ([]engine.Chang
 	}
 	var changes []engine.Change
 	for _, t := range prunable {
-		changes = append(changes, engine.Change{Action: engine.Remove, Target: t.Name + "@" + t.Version})
+		changes = append(changes, engine.Change{Action: engine.Remove, Target: t.Name + "@" + t.Version, Destructive: true})
 	}
 	detail := ""
 	switch {
@@ -144,7 +189,7 @@ func (m *Module) planPrune(ctx context.Context, installing bool) ([]engine.Chang
 	prune := m.cmd("prune", "--yes")
 	prune.Stream = true
 	return append(changes, engine.Change{
-		Action: engine.Run, Target: "mise prune", Detail: detail,
+		Action: engine.Run, Target: "mise prune", Detail: detail, Destructive: true, Streams: true,
 		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, prune) },
 	}), nil
 }

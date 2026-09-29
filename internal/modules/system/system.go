@@ -83,7 +83,7 @@ func (m *Module) planDir(d config.Dir) (*engine.Change, error) {
 		return nil, fmt.Errorf("%s exists and is not a directory", path)
 	case d.Mode != 0 && info.Mode().Perm() != d.Mode:
 		return &engine.Change{
-			Action: engine.Update, Target: target, Detail: fmt.Sprintf("mode %o → %o", info.Mode().Perm(), d.Mode),
+			Action: engine.Update, Target: target, Detail: "mode", From: fmt.Sprintf("%o", info.Mode().Perm()), To: fmt.Sprintf("%o", d.Mode),
 			Apply: func(context.Context) error { return os.Chmod(path, d.Mode) },
 		}, nil
 	}

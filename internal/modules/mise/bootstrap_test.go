@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 )
 
 const fakeBinary = "#!/bin/sh\necho mise\n"
@@ -58,7 +59,7 @@ func TestBootstrapInstallsMiseThenTools(t *testing.T) {
 		t.Fatalf("planning without mise ran %v", fake.Lines())
 	}
 
-	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
 		t.Fatal(err)
 	}
 	bin := m.Paths.Dst(Bin)

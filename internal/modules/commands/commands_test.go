@@ -8,6 +8,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
@@ -28,7 +29,7 @@ func run(t *testing.T, fake *runnertest.Fake) ([]engine.Change, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}})
+	err = enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}})
 	for _, c := range fake.Calls {
 		if c.Dir != m.Home {
 			t.Errorf("%s ran in %q, want $HOME", c, c.Dir)

@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/Automaat/zakwas/internal/cli"
 	"github.com/Automaat/zakwas/internal/runner"
 )
@@ -57,6 +59,10 @@ func run() int {
 		Cwd:     cwd,
 		Runner:  runner.NewExec(),
 		PAMFile: os.Getenv("ZAKWAS_PAM_FILE"),
+
+		StdinTTY:      term.IsTerminal(int(os.Stdin.Fd())),
+		Color:         colorOutput(),
+		GitHubActions: os.Getenv("GITHUB_ACTIONS") == "true",
 	})
 	if ctx.Err() != nil {
 		return exitInterrupted
@@ -75,4 +81,13 @@ func extendPath(home string) {
 		}
 	}
 	_ = os.Setenv("PATH", strings.Join(dirs, string(os.PathListSeparator)))
+}
+
+// colorOutput follows no-color.org: colors only on a terminal, never when
+// NO_COLOR is set to anything.
+func colorOutput() bool {
+	if _, set := os.LookupEnv("NO_COLOR"); set || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd()))
 }

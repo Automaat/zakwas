@@ -128,7 +128,7 @@ func (in *Installer) PlanRemove(dst string) (*engine.Change, error) {
 	}
 	if recorded, _ := in.State.Get(dst); recorded == Sum(have) {
 		return &engine.Change{
-			Action: engine.Remove, Target: target, Detail: "no longer managed",
+			Action: engine.Remove, Target: target, Detail: "no longer managed", Destructive: true,
 			Apply: func(ctx context.Context) error {
 				if err := unlock(dst); err != nil {
 					return err

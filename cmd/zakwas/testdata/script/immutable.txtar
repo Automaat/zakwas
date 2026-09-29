@@ -1,15 +1,15 @@
 [!darwin] skip 'uchg is macOS only'
 
 zakwas apply -y
-stdout 'done'
+stdout 'Applied \d+ of \d+ steps'
 cmp home/.config/git/config dotfiles/gitconfig
 cmp home/.config/app/a dotfiles/app/a
 exec ls -lO home/.config/git/config
 stdout 'uchg'
 
 zakwas check
-stdout 'files: up to date'
-stdout 'templates: up to date'
+stdout 'up to date: .*\bfiles\b'
+stdout 'up to date: .*\btemplates\b'
 
 ! exec sh -c 'echo "[core] editor = nano" >> home/.config/git/config'
 ! exec chmod 644 home/.config/git/config
@@ -31,7 +31,7 @@ zakwas check
 
 exec chflags nouchg home/.config/app/a
 ! zakwas check
-stdout '~ ~/.config/app/a \(set immutable\)'
+stdout '~ ~/.config/app/a +set immutable'
 zakwas apply -y
 zakwas check
 

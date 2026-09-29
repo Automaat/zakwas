@@ -49,5 +49,7 @@ system → files → links → templates → brew → mise → commands → defa
 - The mise module runs mise from `/`: from `$HOME`, mise treats `~/.config/mise/config.toml` as a project config that outranks the repo file, hiding bumped pins until after `apply`.
 - `commands` stops at the first failing entry.
 - zakwas bootstraps its own prerequisites: brew/mise modules plan an install of Homebrew / mise (pinned `mise.Version`, SHA256 from the release's `SHASUMS256.txt`) when `Runner.Installed` says the binary is missing. `main` appends `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` to `PATH` so later modules find what earlier ones installed.
+- Changes carry structure, not just text: `From`/`To` for versions and values, `Destructive` for deletions/cleanup/prune, `Streams` when Apply passes tool output through, `Diff` for file diffs and command scripts. Changes with nil `Apply` only list what a later step of the module does; prompts and progress count steps (`Plan.Steps`).
+- Human output lives in `engine.Render` and `cli/progress.go`; plan goldens in `cmd/zakwas/testdata/script`.
 - Nothing user-specific in code or `examples/`: no personal paths, taps, or keys.
 - `install.sh` passes `shellcheck`, workflows pass `actionlint` (both in CI).

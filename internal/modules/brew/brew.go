@@ -63,7 +63,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			return nil, err
 		}
 		for _, e := range outdated {
-			install = append(install, engine.Change{Action: engine.Update, Target: e, Detail: "outdated"})
+			install = append(install, engine.Change{Action: engine.Update, Target: e.Name, From: e.From, To: e.To})
 		}
 	}
 	if len(install) > 0 {
@@ -90,7 +90,7 @@ func (m *Module) planBootstrap(file string, entries []Entry) ([]engine.Change, e
 	}
 	cmd := runner.Cmd{Name: "/bin/bash", Args: []string{"-c", homebrewInstall}, Stream: true}
 	changes := []engine.Change{{
-		Action: engine.Create, Target: "Homebrew",
+		Action: engine.Create, Target: "Homebrew", Streams: true,
 		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
 	}}
 	for _, e := range entries {
@@ -163,7 +163,7 @@ func (m *Module) bundleInstall(file string) engine.Change {
 	}
 	cmd := runner.Cmd{Name: "brew", Args: args, Env: noAutoUpdate, Stream: true}
 	return engine.Change{
-		Action: engine.Run, Target: "brew bundle install",
+		Action: engine.Run, Target: "brew bundle install", Streams: true,
 		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
 	}
 }
@@ -192,8 +192,15 @@ func (m *Module) missing(ctx context.Context, file string) ([]string, error) {
 }
 
 type outdatedEntry struct {
-	Name   string `json:"name"`
-	Pinned bool   `json:"pinned"`
+	Name              string   `json:"name"`
+	Pinned            bool     `json:"pinned"`
+	InstalledVersions []string `json:"installed_versions"`
+	CurrentVersion    string   `json:"current_version"`
+}
+
+// Outdated is a Brewfile entry with a newer version available.
+type Outdated struct {
+	Name, From, To string
 }
 
 type outdatedJSON struct {
@@ -203,7 +210,7 @@ type outdatedJSON struct {
 
 // outdated skips pinned entries: brew bundle doesn't upgrade them, so they
 // would be drift that never converges.
-func (m *Module) outdated(ctx context.Context, entries []Entry) ([]string, error) {
+func (m *Module) outdated(ctx context.Context, entries []Entry) ([]Outdated, error) {
 	out, err := runner.Output(ctx, m.Runner, runner.Cmd{Name: "brew", Args: []string{"outdated", "--json=v2"}, Env: noAutoUpdate})
 	if err != nil {
 		return nil, err
@@ -216,11 +223,11 @@ func (m *Module) outdated(ctx context.Context, entries []Entry) ([]string, error
 	for _, e := range entries {
 		wanted[e.Kind+" "+path.Base(e.Name)] = true
 	}
-	var res []string
+	var res []Outdated
 	add := func(kind string, list []outdatedEntry) {
 		for _, e := range list {
 			if key := kind + " " + path.Base(e.Name); wanted[key] && !e.Pinned {
-				res = append(res, key)
+				res = append(res, Outdated{Name: key, From: strings.Join(e.InstalledVersions, ", "), To: e.CurrentVersion})
 			}
 		}
 	}
@@ -248,7 +255,7 @@ func (m *Module) planCleanup(ctx context.Context, file string) ([]engine.Change,
 	}
 	var changes []engine.Change
 	for _, r := range removals {
-		changes = append(changes, engine.Change{Action: engine.Remove, Target: r})
+		changes = append(changes, engine.Change{Action: engine.Remove, Target: r, Destructive: true})
 	}
 	args := []string{"bundle", "cleanup", "--force", "--file", file}
 	if mode == config.CleanupZap {
@@ -257,8 +264,8 @@ func (m *Module) planCleanup(ctx context.Context, file string) ([]engine.Change,
 	cmd := runner.Cmd{Name: "brew", Args: args, Env: noAutoUpdate, Stream: true}
 	return append(changes, engine.Change{
 		Action: engine.Run, Target: "brew bundle cleanup",
-		Detail: mode,
-		Apply:  func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
+		Detail: mode, Destructive: true, Streams: true,
+		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
 	}), nil
 }
 

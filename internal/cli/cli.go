@@ -62,6 +62,10 @@ type Env struct {
 	Runner  runner.Runner
 	PAMFile string
 	Now     func() time.Time
+	// Set by main from the real terminal and environment.
+	StdinTTY      bool
+	Color         bool
+	GitHubActions bool
 }
 
 func (e Env) now() time.Time {
@@ -92,7 +96,8 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	cfgPath := fs.String("c", "", "path to zakwas.yaml (default: search upward from cwd, then $ZAKWAS_CONFIG)")
 	only := fs.String("only", "", "comma-separated modules to run (default: all)")
 	yes := fs.Bool("y", false, "apply without asking for confirmation")
-	diff := fs.Bool("diff", false, "show the content diff of every file change")
+	diff := fs.Bool("diff", false, "show file content diffs and command scripts")
+	noColor := fs.Bool("no-color", false, "disable colors (also NO_COLOR)")
 	cmd, ok := parseArgs(fs, env.Args)
 	if !ok {
 		fs.Usage()
@@ -127,8 +132,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		}
 	}
 
+	style := engine.Style{Color: env.Color && !*noColor, ShowDiffs: *diff}
 	plan := engine.Build(ctx, mods)
-	if err := engine.Print(out, plan, *diff); err != nil {
+	if err := engine.Render(out, plan, style); err != nil {
 		return ExitErr
 	}
 	planErr := plan.Err()
@@ -154,25 +160,29 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			errOut.fail(planErr)
 			return ExitErr
 		}
-		out.print("nothing to do\n")
 		return ExitOK
 	}
 	for _, w := range repoWarnings(ctx, env.Runner, cfg.Root) {
 		errOut.print("zakwas: warning: " + w + "\n")
 	}
-	if !*yes && !confirm(env.Stdin, out, plan.Count()) {
+	if !*yes && !env.StdinTTY {
+		errOut.print("zakwas: stdin is not a terminal, so apply can't ask for confirmation; review with `zakwas plan`, then run `zakwas apply -y`\n")
+		return ExitUsage
+	}
+	if !*yes && !confirm(env.Stdin, out, plan.Steps()) {
 		out.print("aborted\n")
 		return ExitErr
 	}
-	applyErr := engine.Apply(ctx, func(s string) { out.print(s + "\n") }, plan)
+	out.print("\n")
+	result, applyErr := engine.Apply(ctx, &progress{out: out, style: style, groups: env.GitHubActions}, plan)
 	if err := recordHistory(ctx, env, cfg.Root, plan, errors.Join(planErr, applyErr)); err != nil {
 		errOut.print("zakwas: warning: history not recorded: " + err.Error() + "\n")
 	}
+	out.print("\n" + recap(result, style) + "\n")
 	if err := errors.Join(planErr, applyErr); err != nil {
 		errOut.fail(err)
 		return ExitErr
 	}
-	out.print("done\n")
 	return ExitOK
 }
 
@@ -295,7 +305,7 @@ func selectModules(all []engine.Module, only string) ([]engine.Module, error) {
 }
 
 func confirm(stdin io.Reader, out *console, n int) bool {
-	out.printf("\napply %d change(s)? [y/N] ", n)
+	out.printf("\nApply %d step(s)? [y/N] ", n)
 	line, _ := bufio.NewReader(stdin).ReadString('\n')
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"
