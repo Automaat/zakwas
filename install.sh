@@ -40,9 +40,11 @@ parse_args() {
 
 install_zakwas() {
     if [ "$version" = latest ]; then
-        version=$(curl -fsSL https://api.github.com/repos/Automaat/zakwas/releases/latest |
-            sed -n 's/^ *"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p')
-        [ -n "$version" ] || die "can't find the latest zakwas release"
+        # The releases/latest redirect names the tag; the API would count
+        # against the unauthenticated rate limit shared by the whole network.
+        version=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/Automaat/zakwas/releases/latest)
+        version=${version##*/v}
+        [[ "$version" =~ ^[0-9] ]] || die "can't find the latest zakwas release"
     fi
     local arch archive base
     arch=$(uname -m)
