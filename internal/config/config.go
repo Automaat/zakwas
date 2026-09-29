@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -17,15 +18,15 @@ import (
 const FileName = "zakwas.yaml"
 
 type Config struct {
-	Protect   Protect   `yaml:"protect"`
-	Files     []Link    `yaml:"files"`
-	Links     []Link    `yaml:"links"`
-	Templates Templates `yaml:"templates"`
-	Brew      *Brew     `yaml:"brew"`
-	Mise      *Mise     `yaml:"mise"`
-	Defaults  []Default `yaml:"defaults"`
-	System    System    `yaml:"system"`
-	Commands  []Command `yaml:"commands"`
+	Protect   Protect   `yaml:"protect" jsonschema_description:"How files and templates are locked down after zakwas writes them."`
+	Files     []Link    `yaml:"files" jsonschema_description:"Repo files installed into your home directory as protected, read-only copies. A directory src copies every file inside it. Edit the source in the repo and run 'zakwas apply' to change one."`
+	Links     []Link    `yaml:"links" jsonschema_description:"Repo files symlinked into your home directory, for configs an app must be able to write itself. Links are not protected."`
+	Templates Templates `yaml:"templates" jsonschema_description:"Go text/template files rendered into your home directory as protected copies, for dotfiles that need your home path or per-machine values."`
+	Brew      *Brew     `yaml:"brew" jsonschema_description:"Homebrew packages from a Brewfile. Homebrew is installed first when missing. Omit the section to leave Homebrew alone."`
+	Mise      *Mise     `yaml:"mise" jsonschema_description:"Tools pinned in a global mise config. mise is installed first when missing. Omit the section to leave mise alone."`
+	Defaults  []Default `yaml:"defaults" jsonschema_description:"macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once."`
+	System    System    `yaml:"system" jsonschema_description:"Machine-level setup: directories, Touch ID for sudo, an SSH key."`
+	Commands  []Command `yaml:"commands" jsonschema_description:"One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure."`
 
 	// Root is the directory holding zakwas.yaml; relative sources resolve from it.
 	Root string `yaml:"-"`
@@ -36,32 +37,32 @@ type Config struct {
 // always stripped; Immutable also sets the macOS uchg flag, so even the owner
 // can't edit or delete them without `chflags nouchg`.
 type Protect struct {
-	Immutable bool `yaml:"immutable"`
+	Immutable bool `yaml:"immutable" jsonschema:"default=false" jsonschema_description:"Also set the macOS 'uchg' flag on installed files, so even the owner cannot edit, chmod or delete them without 'chflags nouchg'. Write bits are always stripped."`
 }
 
 // Link maps a repo source to a home destination. Under `files` it is a
 // protected copy (directories are copied file by file); under `links` it is
 // a symlink, for configs that apps must be able to write.
 type Link struct {
-	Src string `yaml:"src"`
-	Dst string `yaml:"dst"`
+	Src string `yaml:"src" jsonschema:"required,minLength=1" jsonschema_description:"Source path in the config repo, relative to the directory holding zakwas.yaml (or absolute). May be a directory under 'files'."`
+	Dst string `yaml:"dst" jsonschema:"required,minLength=1" jsonschema_description:"Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination (compared case-insensitively). An existing file zakwas did not write is backed up to '<dst>.zakwas-bak'."`
 }
 
 type Templates struct {
-	Vars  map[string]string `yaml:"vars"`
-	Files []TemplateFile    `yaml:"files"`
+	Vars  map[string]string `yaml:"vars" jsonschema_description:"Values available to every template as '{{ .Vars.<name> }}'. A template referencing a missing var fails."`
+	Files []TemplateFile    `yaml:"files" jsonschema_description:"Templates to render. Each template also sees '{{ .Home }}', your home directory."`
 }
 
 type TemplateFile struct {
-	Src  string      `yaml:"src"`
-	Dst  string      `yaml:"dst"`
-	Mode fs.FileMode `yaml:"mode"`
+	Src  string      `yaml:"src" jsonschema:"required,minLength=1" jsonschema_description:"Template path in the config repo (Go text/template syntax), relative to the directory holding zakwas.yaml (or absolute)."`
+	Dst  string      `yaml:"dst" jsonschema:"required,minLength=1" jsonschema_description:"Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination."`
+	Mode fs.FileMode `yaml:"mode" jsonschema:"minimum=0,maximum=511" jsonschema_description:"Octal permissions of the rendered file, written with the 0o prefix, e.g. 0o755. Editors parse YAML 1.2 and read 0755 as decimal 755 (zakwas still accepts it as octal); 755 is decimal everywhere. Must be readable by the owner. Write bits are always stripped. Default 0o444."`
 }
 
 type Brew struct {
-	File    string `yaml:"file"`
-	Cleanup string `yaml:"cleanup"`
-	Upgrade bool   `yaml:"upgrade"`
+	File    string `yaml:"file" jsonschema:"required,minLength=1" jsonschema_description:"Brewfile path in the config repo, relative to the directory holding zakwas.yaml (or absolute). Every third-party tap in it needs 'trusted: true'."`
+	Cleanup string `yaml:"cleanup" jsonschema:"enum=none,enum=uninstall,enum=zap,default=none" jsonschema_description:"What to do with installed packages missing from the Brewfile: 'none' keeps them, 'uninstall' removes them ('brew bundle cleanup --force'), 'zap' also removes cask app data ('--zap'). Removals are shown in 'zakwas plan' first. Default none."`
+	Upgrade bool   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Upgrade outdated Brewfile packages on apply. When false, only missing packages are installed ('--no-upgrade'). Run 'zakwas upgrade' to refresh Homebrew's package list first. Default false."`
 }
 
 const (
@@ -73,8 +74,8 @@ const (
 // Mise points at the global mise config. Prune removes installed versions no
 // mise config on the machine references anymore, like brew's zap cleanup.
 type Mise struct {
-	Config string `yaml:"config"`
-	Prune  bool   `yaml:"prune"`
+	Config string `yaml:"config" jsonschema:"required,minLength=1" jsonschema_description:"Global mise config (config.toml) in the config repo, relative to the directory holding zakwas.yaml (or absolute). Its tools are installed with 'mise install'. Install it to ~/.config/mise/config.toml with a 'files' entry so mise uses it outside zakwas too."`
+	Prune  bool   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove installed tool versions that no mise config on the machine references anymore ('mise prune'). Default false."`
 }
 
 // Default is one `defaults write` entry. The value's YAML type selects the
@@ -82,34 +83,34 @@ type Mise struct {
 // killall after the value changes; empty uses the built-in domain mapping.
 // CurrentHost targets the per-host (ByHost) preferences.
 type Default struct {
-	Domain      string `yaml:"domain"`
-	Key         string `yaml:"key"`
-	Value       any    `yaml:"value"`
-	Restart     string `yaml:"restart"`
-	CurrentHost bool   `yaml:"currentHost"`
+	Domain      string `yaml:"domain" jsonschema:"required,minLength=1" jsonschema_description:"Preferences domain, e.g. 'com.apple.dock' or 'NSGlobalDomain'."`
+	Key         string `yaml:"key" jsonschema:"required,minLength=1" jsonschema_description:"Preference key within the domain, e.g. 'autohide'."`
+	Value       any    `yaml:"value" jsonschema:"required,oneof_type=boolean;number;string" jsonschema_description:"Value to write. The YAML type picks the defaults type: true/false → -bool, 2 → -int, 1.5 → -float, anything else → -string. Quote dates (\"2024-01-01\") and numbers meant as text (\"2\"); an unquoted date is rejected."`
+	Restart     string `yaml:"restart" jsonschema_description:"Process to 'killall' after the value changes, so it picks up the new setting. Empty uses the built-in mapping (com.apple.dock → Dock, com.apple.finder → Finder, com.apple.screencapture → SystemUIServer)."`
+	CurrentHost bool   `yaml:"currentHost" jsonschema:"default=false" jsonschema_description:"Write to the per-host (ByHost) preferences, like 'defaults -currentHost write'. Default false."`
 }
 
 type System struct {
-	Dirs        []Dir   `yaml:"dirs"`
-	SudoTouchID bool    `yaml:"sudoTouchID"`
-	SSHKey      *SSHKey `yaml:"sshKey"`
+	Dirs        []Dir   `yaml:"dirs" jsonschema_description:"Directories to create."`
+	SudoTouchID bool    `yaml:"sudoTouchID" jsonschema:"default=false" jsonschema_description:"Allow Touch ID for sudo by adding pam_tid.so to /etc/pam.d/sudo_local, which survives macOS updates. Default false."`
+	SSHKey      *SSHKey `yaml:"sshKey" jsonschema_description:"Generate an ed25519 SSH key (no passphrase) when the file does not exist. An existing key is never touched."`
 }
 
 type Dir struct {
-	Path string      `yaml:"path"`
-	Mode fs.FileMode `yaml:"mode"`
+	Path string      `yaml:"path" jsonschema:"required,minLength=1" jsonschema_description:"Directory path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Missing parents are created."`
+	Mode fs.FileMode `yaml:"mode" jsonschema:"minimum=0,maximum=511" jsonschema_description:"Octal permissions, written with the 0o prefix, e.g. 0o700. Editors parse YAML 1.2 and read 0700 as decimal 700 (zakwas still accepts it as octal); 700 is decimal everywhere. The owner must be able to read and enter it. When set, it is enforced on an existing directory too. When omitted, a new directory gets 0o755 and an existing one keeps its mode."`
 }
 
 type SSHKey struct {
-	Path    string `yaml:"path"`
-	Comment string `yaml:"comment"`
+	Path    string `yaml:"path" jsonschema:"required,minLength=1" jsonschema_description:"Private key path: absolute or starting with '~/' (expanded to your home directory), e.g. '~/.ssh/id_ed25519'."`
+	Comment string `yaml:"comment" jsonschema_description:"Key comment ('ssh-keygen -C'), usually your email."`
 }
 
 // Command runs Run through sh whenever Check (also through sh) fails.
 type Command struct {
-	Name  string `yaml:"name"`
-	Check string `yaml:"check"`
-	Run   string `yaml:"run"`
+	Name  string `yaml:"name" jsonschema:"required,minLength=1" jsonschema_description:"Label shown in plan and apply output."`
+	Check string `yaml:"check" jsonschema:"required,minLength=1" jsonschema_description:"Shell snippet (run with sh in your home directory) that exits 0 when the step is already done. Times out after 30s."`
+	Run   string `yaml:"run" jsonschema:"required,minLength=1" jsonschema_description:"Shell snippet (run with sh in your home directory) executed while 'check' fails. 'check' must pass afterwards, or apply fails."`
 }
 
 // Load reads and validates the config at path; home expands "~" in
@@ -200,7 +201,7 @@ func (c *Config) Validate(home string) error {
 		}
 		claimDst(t.Dst, fmt.Sprintf("templates.files[%d]", i))
 		if t.Mode != 0 && (t.Mode&^0o777 != 0 || t.Mode&0o400 == 0) {
-			errs = append(errs, fmt.Errorf("templates.files[%d]: mode %s must be octal permissions readable by the owner, e.g. 0644", i, octal(t.Mode)))
+			errs = append(errs, fmt.Errorf("templates.files[%d]: mode %s must be octal permissions readable by the owner, e.g. 0o644", i, octal(t.Mode)))
 		}
 	}
 	if c.Brew != nil {
@@ -231,8 +232,10 @@ func (c *Config) Validate(home string) error {
 		} else {
 			defaultsSeen[key] = i
 		}
-		switch d.Value.(type) {
+		switch v := d.Value.(type) {
 		case bool, int, float64, string:
+		case time.Time:
+			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: YAML reads %s as a date; quote it to write a string", i, d.Domain, d.Key, yamlDate(v)))
 		default:
 			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value %#v", i, d.Domain, d.Key, d.Value))
 		}
@@ -244,7 +247,7 @@ func (c *Config) Validate(home string) error {
 			errs = append(errs, fmt.Errorf("system.dirs[%d]: %w", i, err))
 		}
 		if d.Mode != 0 && (d.Mode&^0o777 != 0 || d.Mode&0o500 != 0o500) {
-			errs = append(errs, fmt.Errorf("system.dirs[%d]: mode %s must be octal permissions the owner can read and enter, e.g. 0700", i, octal(d.Mode)))
+			errs = append(errs, fmt.Errorf("system.dirs[%d]: mode %s must be octal permissions the owner can read and enter, e.g. 0o700", i, octal(d.Mode)))
 		}
 	}
 	if k := c.System.SSHKey; k != nil {
@@ -260,6 +263,14 @@ func (c *Config) Validate(home string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// yamlDate prints a timestamp the way it was most likely written.
+func yamlDate(t time.Time) string {
+	if t.Equal(time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)) {
+		return t.Format(time.DateOnly)
+	}
+	return t.Format(time.RFC3339)
 }
 
 type claim struct{ what, dst, key string }

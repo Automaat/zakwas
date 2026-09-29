@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -298,5 +299,15 @@ func TestTrustTaps(t *testing.T) {
 	}
 	if !reflect.DeepEqual(changed, []string{"acme/tools", "acme/other"}) {
 		t.Errorf("changed = %v", changed)
+	}
+}
+
+func TestHomebrewInstallerIsPinned(t *testing.T) {
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(installerCommit) {
+		t.Fatalf("installerCommit = %q, want a full commit SHA", installerCommit)
+	}
+	url := "https://raw.githubusercontent.com/Homebrew/install/" + installerCommit + "/install.sh"
+	if !strings.Contains(homebrewInstall, url) || strings.Contains(homebrewInstall, "/HEAD/") {
+		t.Errorf("homebrewInstall = %q, want it to fetch %s", homebrewInstall, url)
 	}
 }

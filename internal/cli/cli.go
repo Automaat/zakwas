@@ -26,6 +26,7 @@ import (
 	"github.com/Automaat/zakwas/internal/modules/system"
 	"github.com/Automaat/zakwas/internal/modules/templates"
 	"github.com/Automaat/zakwas/internal/runner"
+	"github.com/Automaat/zakwas/schema"
 )
 
 // commandList lists every command in usage order; completion reads it too.
@@ -37,6 +38,7 @@ var commandList = []struct{ name, args, help string }{
 	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
 	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
 	{"completion", "zsh|bash|fish", "print a shell completion script"},
+	{"schema", "", "print the JSON Schema for zakwas.yaml (for editor validation)"},
 	{"version", "", "print the zakwas version"},
 }
 
@@ -117,6 +119,10 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	if !ok {
 		fs.Usage()
 		return ExitUsage
+	}
+	if cmd == "schema" {
+		_, _ = out.Write(schema.JSON)
+		return ExitOK
 	}
 	if !slices.Contains([]string{"plan", "apply", "upgrade", "check"}, cmd) {
 		errOut.printf("unknown command %q\n", cmd)

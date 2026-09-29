@@ -13,3 +13,7 @@ run = "go test -race -tags integration ./..."
 
 [tasks.lint]
 run = "golangci-lint run"
+
+[tasks.schema]
+description = "Regenerate schema/zakwas.schema.json from internal/config"
+run = "go generate ./schema"
