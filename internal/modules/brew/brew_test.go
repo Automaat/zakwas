@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -286,5 +287,15 @@ func TestOutdatedShowsVersions(t *testing.T) {
 	}
 	if got := changes[0].String(); got != "~ brew jq (1.7.1 → 1.8.2)" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestHomebrewInstallerIsPinned(t *testing.T) {
+	if !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(installerCommit) {
+		t.Fatalf("installerCommit = %q, want a full commit SHA", installerCommit)
+	}
+	url := "https://raw.githubusercontent.com/Homebrew/install/" + installerCommit + "/install.sh"
+	if !strings.Contains(homebrewInstall, url) || strings.Contains(homebrewInstall, "/HEAD/") {
+		t.Errorf("homebrewInstall = %q, want it to fetch %s", homebrewInstall, url)
 	}
 }

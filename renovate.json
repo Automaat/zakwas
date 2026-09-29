@@ -38,6 +38,12 @@
       "managerFilePatterns": ["/^internal/modules/mise/bootstrap\\.go$/"],
       "matchStrings": ["// renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+const Version = \"(?<currentValue>[^\"]+)\""],
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "The Homebrew installer commit zakwas runs on machines without Homebrew.",
+      "managerFilePatterns": ["/^internal/modules/brew/brew\\.go$/"],
+      "matchStrings": ["// renovate: datasource=(?<datasource>git-refs) depName=(?<depName>\\S+) branch=(?<currentValue>\\S+)\\s+const installerCommit = \"(?<currentDigest>[0-9a-f]{40})\""]
     }
   ],
   "packageRules": [
