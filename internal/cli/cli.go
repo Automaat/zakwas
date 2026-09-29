@@ -4,6 +4,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -66,6 +67,8 @@ type Env struct {
 	StdinTTY      bool
 	Color         bool
 	GitHubActions bool
+	Version       string
+	Host          string
 }
 
 func (e Env) now() time.Time {
@@ -98,6 +101,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	yes := fs.Bool("y", false, "apply without asking for confirmation")
 	diff := fs.Bool("diff", false, "show file content diffs and command scripts")
 	noColor := fs.Bool("no-color", false, "disable colors (also NO_COLOR)")
+	asJSON := fs.Bool("json", false, "machine-readable output: a plan document, or JSON lines events for apply")
+	outFile := fs.String("out", "", "plan: also save the plan to this file, for apply -plan")
+	planFile := fs.String("plan", "", "apply: apply this saved plan if the machine still matches it, without prompting")
 	cmd, ok := parseArgs(fs, env.Args)
 	if !ok {
 		fs.Usage()
@@ -108,16 +114,33 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		fs.Usage()
 		return ExitUsage
 	}
+	if msg := flagConflict(cmd, *asJSON, *yes, *outFile, *planFile, *only); msg != "" {
+		errOut.print("zakwas: " + msg + "\n")
+		return ExitUsage
+	}
 
 	cfg, err := loadConfig(*cfgPath, env.Cwd, env.Home)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr
 	}
+	var saved *planDoc
+	if *planFile != "" {
+		doc, err := loadPlan(*planFile)
+		if err != nil {
+			errOut.fail(err)
+			return ExitErr
+		}
+		saved = &doc
+		*only = strings.Join(doc.Only, ",")
+	}
 	mods, err := selectModules(Modules(cfg, env), *only)
 	if err != nil {
 		errOut.fail(err)
 		return ExitUsage
+	}
+	if *asJSON {
+		toolOutputToStderr(env)
 	}
 
 	if cmd == "upgrade" {
@@ -132,12 +155,42 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		}
 	}
 
-	style := engine.Style{Color: env.Color && !*noColor, ShowDiffs: *diff}
+	style := engine.Style{Color: env.Color && !*noColor && !*asJSON, ShowDiffs: *diff}
 	plan := engine.Build(ctx, mods)
-	if err := engine.Render(out, plan, style); err != nil {
-		return ExitErr
-	}
 	planErr := plan.Err()
+	var onlyList []string
+	if *only != "" {
+		onlyList = strings.Split(*only, ",")
+	}
+	machine := *asJSON || *outFile != "" || saved != nil
+	var commit string
+	if machine {
+		commit, _ = git(ctx, env.Runner, cfg.Root, "rev-parse", "HEAD")
+	}
+	full := newPlanDoc(env, cfg.Path, commit, onlyList, plan, true)
+	if saved != nil {
+		if err := checkSaved(*saved, full); err != nil {
+			errOut.fail(err)
+			return ExitErr
+		}
+	}
+	if *outFile != "" {
+		if err := savePlan(*outFile, full); err != nil {
+			errOut.fail(err)
+			return ExitErr
+		}
+	}
+	doc := newPlanDoc(env, cfg.Path, commit, onlyList, plan, *diff)
+	switch {
+	case *asJSON && cmd == "plan", *asJSON && cmd == "check":
+		out.print(mustIndent(doc))
+	case *asJSON:
+		writeJSON(out, event{Type: "plan", FormatVersion: engine.FormatVersion, Plan: &doc})
+	default:
+		if err := engine.Render(out, plan, style); err != nil {
+			return ExitErr
+		}
+	}
 
 	switch cmd {
 	case "plan":
@@ -156,6 +209,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 
 	if plan.Empty() {
+		if *asJSON {
+			writeJSON(out, event{Type: "summary", Result: &resultJSON{}})
+		}
 		if planErr != nil {
 			errOut.fail(planErr)
 			return ExitErr
@@ -165,25 +221,74 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	for _, w := range repoWarnings(ctx, env.Runner, cfg.Root) {
 		errOut.print("zakwas: warning: " + w + "\n")
 	}
-	if !*yes && !env.StdinTTY {
-		errOut.print("zakwas: stdin is not a terminal, so apply can't ask for confirmation; review with `zakwas plan`, then run `zakwas apply -y`\n")
-		return ExitUsage
+	if !*yes && saved == nil {
+		if !env.StdinTTY {
+			errOut.print("zakwas: stdin is not a terminal, so apply can't ask for confirmation; review with `zakwas plan`, then run `zakwas apply -y`\n")
+			return ExitUsage
+		}
+		if !confirm(env.Stdin, out, plan.Steps()) {
+			out.print("aborted\n")
+			return ExitErr
+		}
 	}
-	if !*yes && !confirm(env.Stdin, out, plan.Steps()) {
-		out.print("aborted\n")
-		return ExitErr
+
+	var obs engine.Observer = jsonEvents{out: out}
+	if !*asJSON {
+		out.print("\n")
+		obs = &progress{out: out, style: style, groups: env.GitHubActions}
 	}
-	out.print("\n")
-	result, applyErr := engine.Apply(ctx, &progress{out: out, style: style, groups: env.GitHubActions}, plan)
-	if err := recordHistory(ctx, env, cfg.Root, plan, errors.Join(planErr, applyErr)); err != nil {
+	result, applyErr := engine.Apply(ctx, obs, plan)
+	finalErr := errors.Join(planErr, applyErr)
+	if err := recordHistory(ctx, env, cfg.Root, plan, result, finalErr); err != nil {
 		errOut.print("zakwas: warning: history not recorded: " + err.Error() + "\n")
 	}
-	out.print("\n" + recap(result, style) + "\n")
-	if err := errors.Join(planErr, applyErr); err != nil {
-		errOut.fail(err)
+	if *asJSON {
+		e := event{Type: "summary", Result: newResultJSON(result)}
+		if finalErr != nil {
+			e.Error = finalErr.Error()
+		}
+		writeJSON(out, e)
+	} else {
+		out.print("\n" + recap(result, style) + "\n")
+	}
+	if finalErr != nil {
+		errOut.fail(finalErr)
 		return ExitErr
 	}
 	return ExitOK
+}
+
+// flagConflict rejects flag combinations that would silently do the wrong
+// thing, e.g. a JSON consumer stuck at a confirmation prompt.
+func flagConflict(cmd string, asJSON, yes bool, outFile, planFile, only string) string {
+	apply := cmd == "apply" || cmd == "upgrade"
+	switch {
+	case outFile != "" && cmd != "plan":
+		return "-out only works with plan"
+	case planFile != "" && cmd != "apply":
+		return "-plan only works with apply"
+	case planFile != "" && only != "":
+		return "-plan applies the modules saved in the plan; drop --only"
+	case asJSON && apply && !yes && planFile == "":
+		return "apply --json can't prompt; pass -y or -plan"
+	}
+	return ""
+}
+
+func mustIndent(v any) string {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(data) + "\n"
+}
+
+// toolOutputToStderr keeps stdout pure JSON: brew and mise output streamed
+// by apply goes to stderr instead.
+func toolOutputToStderr(env Env) {
+	if ex, ok := env.Runner.(*runner.Exec); ok {
+		ex.Stdout = ex.Stderr
+	}
 }
 
 // console remembers the first write error so output failures (closed pipe,

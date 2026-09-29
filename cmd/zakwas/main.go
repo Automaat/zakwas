@@ -63,6 +63,8 @@ func run() int {
 		StdinTTY:      term.IsTerminal(int(os.Stdin.Fd())),
 		Color:         colorOutput(),
 		GitHubActions: os.Getenv("GITHUB_ACTIONS") == "true",
+		Version:       version,
+		Host:          hostname(),
 	})
 	if ctx.Err() != nil {
 		return exitInterrupted
@@ -90,4 +92,12 @@ func colorOutput() bool {
 		return false
 	}
 	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return h
 }
