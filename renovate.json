@@ -31,6 +31,13 @@
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+version: (?<currentValue>\\S+)"
       ],
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "The mise release zakwas installs on machines without mise.",
+      "managerFilePatterns": ["/^internal/modules/mise/bootstrap\\.go$/"],
+      "matchStrings": ["// renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+const Version = \"(?<currentValue>[^\"]+)\""],
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ],
   "packageRules": [

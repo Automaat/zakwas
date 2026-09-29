@@ -60,7 +60,7 @@ func (s *State) save() error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(s.path, append(data, '\n'), 0o644)
+	return WriteAtomic(s.path, append(data, '\n'), 0o644)
 }
 
 // Forget drops dst from the state and persists it.

@@ -28,6 +28,8 @@ type Module struct {
 	Mise   config.Mise
 	Paths  config.Paths
 	Runner runner.Runner
+	// ReleaseURL overrides where mise is downloaded from (tests).
+	ReleaseURL string
 }
 
 func (m *Module) Name() string { return "mise" }
@@ -47,6 +49,9 @@ func (m *Module) cmd(args ...string) runner.Cmd {
 }
 
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
+	if !m.Runner.Installed("mise") {
+		return m.planBootstrap(), nil
+	}
 	changes, err := m.planInstall(ctx)
 	if err != nil {
 		return nil, err
