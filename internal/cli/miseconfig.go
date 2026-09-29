@@ -8,36 +8,28 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"regexp"
+	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/modules/mise"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
-var (
-	tomlHeader  = regexp.MustCompile(`^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$`)
-	tomlKeyLine = regexp.MustCompile(`^(\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)(\s*=\s*)(.*)$`)
-	tomlString  = regexp.MustCompile(`^("(?:[^"\\]|\\.)*"|'[^']*')`)
-	tomlArray   = regexp.MustCompile(`^\[(?:[^\]"']|"(?:[^"\\]|\\.)*"|'[^']*')*\]`)
-	tomlVersion = regexp.MustCompile(`(\bversion\s*=\s*)("(?:[^"\\]|\\.)*"|'[^']*')`)
-)
-
 type miseTool struct {
-	Version string `json:"version"`
-	Source  struct {
+	Version          string `json:"version"`
+	RequestedVersion string `json:"requested_version"`
+	Installed        bool   `json:"installed"`
+	Source           struct {
 		Path string `json:"path"`
 	} `json:"source"`
 }
 
-// globalMiseConfig copies the user's global mise config with every active
-// tool pinned to the exact version in use, so the new repo reproduces this
-// machine rather than "latest". Tool options and other sections ([settings],
-// [env], …) are kept as written.
-func globalMiseConfig(ctx context.Context, r runner.Runner, home string) ([]byte, error) {
+// miseTools lists the active global tools, as mise resolves them.
+func miseTools(ctx context.Context, r runner.Runner) (map[string][]miseTool, error) {
 	ls := runner.Cmd{Name: "mise", Args: []string{"ls", "--global", "--current", "--json"}, Dir: mise.Dir}
 	stdout, err := runner.Output(ctx, r, ls)
 	if err != nil {
@@ -47,31 +39,23 @@ func globalMiseConfig(ctx context.Context, r runner.Runner, home string) ([]byte
 	if err := json.Unmarshal([]byte(stdout), &tools); err != nil {
 		return nil, fmt.Errorf("%s: %w", ls, err)
 	}
-	pins := map[string][]string{}
-	sources := map[string]int{}
-	for name, versions := range tools {
-		for _, t := range versions {
-			if v := strconv.Quote(t.Version); t.Version != "" && !slices.Contains(pins[name], v) {
-				pins[name] = append(pins[name], v)
-			}
-			if strings.HasSuffix(t.Source.Path, ".toml") {
-				sources[t.Source.Path]++
-			}
-		}
-	}
-	base, err := os.ReadFile(globalConfigPath(sources, home))
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
-	return []byte(pinTools(string(base), pins)), nil
+	return tools, nil
 }
 
 // globalConfigPath picks the file most global tools come from, falling back
 // to the config mise reads by default.
-func globalConfigPath(sources map[string]int, home string) string {
+func globalConfigPath(tools map[string][]miseTool, home string) string {
+	count := map[string]int{}
+	for _, versions := range tools {
+		for _, t := range versions {
+			if strings.HasSuffix(t.Source.Path, ".toml") {
+				count[t.Source.Path]++
+			}
+		}
+	}
 	best := ""
-	for _, path := range slices.Sorted(maps.Keys(sources)) {
-		if best == "" || sources[path] > sources[best] {
+	for _, path := range slices.Sorted(maps.Keys(count)) {
+		if best == "" || count[path] > count[best] {
 			best = path
 		}
 	}
@@ -84,114 +68,116 @@ func globalConfigPath(sources map[string]int, home string) string {
 	return config.Paths{Home: home}.Dst(mise.InstalledConfig)
 }
 
-// pinTools rewrites only tool versions in a mise config: `tool = "x"`,
-// arrays, the version of inline tables and of [tools.<name>] tables. Tools
-// mise reports but the file doesn't list are added under [tools].
-func pinTools(data string, pins map[string][]string) string {
-	lines := strings.SplitAfter(data, "\n")
-	section, toolsHeader := "", -1
-	seen := map[string]bool{}
-	for i, line := range lines {
-		body, hasNL := strings.CutSuffix(line, "\n")
-		nl := ""
-		if hasNL {
-			nl = "\n"
-		}
-		if m := tomlHeader.FindStringSubmatch(body); m != nil {
-			section = m[1]
-			if section == "tools" {
-				toolsHeader = i
-			}
-			continue
-		}
-		m := tomlKeyLine.FindStringSubmatch(body)
-		if m == nil {
-			continue
-		}
-		key := unquoteKey(m[2])
-		name := key
+// writeMiseConfig copies the user's global mise config to dst verbatim, then
+// has mise pin every tool whose requested version isn't exact to the version
+// in use. mise's own editor keeps comments, options and other sections, and
+// understands aliases (nodejs = "22" becomes node = "22.21.1"). It returns
+// the tools left as written. mise runs with dst as its global config and a
+// throwaway state and cache dir, so nothing outside the repo changes.
+func writeMiseConfig(ctx context.Context, r runner.Runner, tools map[string][]miseTool, home, dst string) ([]string, error) {
+	data, err := os.ReadFile(globalConfigPath(tools, home))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	if err := writeFile(dst, data, 0o644); err != nil {
+		return nil, err
+	}
+	scratch, err := os.MkdirTemp("", "zakwas-init-mise-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(scratch) }()
+	var parsed struct {
+		Tools map[string]any `toml:"tools"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		return nil, fmt.Errorf("global mise config is not valid TOML: %w", err)
+	}
+	env := []string{
+		"MISE_AUTO_INSTALL=0",
+		"MISE_GLOBAL_CONFIG_FILE=" + dst,
+		"MISE_STATE_DIR=" + filepath.Join(scratch, "state"),
+		"MISE_CACHE_DIR=" + filepath.Join(scratch, "cache"),
+		"MISE_YES=1",
+	}
+	var unpinned []string
+	for _, name := range slices.Sorted(maps.Keys(tools)) {
+		args, why := pinArgs(name, tools[name], parsed.Tools[name])
 		switch {
-		case section == "tools":
-		case strings.HasPrefix(section, "tools.") && key == "version":
-			name = unquoteKey(strings.TrimSpace(strings.TrimPrefix(section, "tools.")))
-		default:
+		case args == nil && why == "":
+			continue
+		case args == nil:
+			unpinned = append(unpinned, name+" ("+why+")")
 			continue
 		}
-		versions, ok := pins[name]
+		use := runner.Cmd{Name: "mise", Args: append([]string{"use", "--global", "--pin", "--quiet"}, args...), Dir: mise.Dir, Env: env}
+		if err := runner.Check(ctx, r, use); err != nil {
+			unpinned = append(unpinned, name+" ("+firstLine(err.Error())+")")
+		}
+	}
+	pinned, err := os.ReadFile(dst)
+	if err != nil {
+		return nil, err
+	}
+	var check map[string]any
+	if err := toml.Unmarshal(pinned, &check); err != nil {
+		return nil, fmt.Errorf("pinned mise config %s is not valid TOML: %w", dst, err)
+	}
+	return unpinned, nil
+}
+
+// pinArgs returns the `mise use` arguments pinning name, nil when every
+// version is already exact, or why it can't be pinned. Only installed
+// versions are pinned: `mise use` would install the others. mise writes
+// versions in argument order and the first one is the default, while `mise
+// ls` sorts them, so several versions follow the order in entry.
+func pinArgs(name string, versions []miseTool, entry any) ([]string, string) {
+	if len(versions) > 1 {
+		ordered, ok := inConfigOrder(versions, entry)
 		if !ok {
-			continue
+			return nil, "several versions in an order init can't read"
 		}
-		if value, ok := pinValue(m[4], versions); ok {
-			lines[i] = m[1] + m[2] + m[3] + value + nl
-			seen[name] = true
+		versions = ordered
+	}
+	exact := true
+	var args []string
+	for _, t := range versions {
+		if t.Version == "" {
+			return nil, "no resolved version"
 		}
-	}
-	var missing []string
-	for _, name := range slices.Sorted(maps.Keys(pins)) {
-		if !seen[name] {
-			missing = append(missing, tomlKey(name)+" = "+pinned(pins[name])+"\n")
+		if !t.Installed {
+			return nil, "not installed"
 		}
+		exact = exact && t.RequestedVersion == t.Version
+		args = append(args, name+"@"+t.Version)
 	}
-	if len(missing) == 0 {
-		return strings.Join(lines, "")
+	if exact {
+		return nil, ""
 	}
-	if toolsHeader >= 0 {
-		lines = slices.Insert(lines, toolsHeader+1, missing...)
-		return strings.Join(lines, "")
-	}
-	out := strings.Join(lines, "")
-	switch {
-	case out == "":
-	case strings.HasSuffix(out, "\n"):
-		out += "\n"
-	default:
-		out += "\n\n"
-	}
-	return out + "[tools]\n" + strings.Join(missing, "")
+	return args, ""
 }
 
-// pinValue swaps the version in a TOML value, keeping what follows it (a
-// comment) and, for inline tables, every other option.
-func pinValue(value string, versions []string) (string, bool) {
-	switch {
-	case strings.HasPrefix(value, "{"):
-		loc := tomlVersion.FindStringSubmatchIndex(value)
-		if loc == nil {
-			return "", false
-		}
-		return value[:loc[4]] + versions[0] + value[loc[5]:], true
-	case strings.HasPrefix(value, "["):
-		if m := tomlArray.FindString(value); m != "" {
-			return pinned(versions) + value[len(m):], true
-		}
-	default:
-		if m := tomlString.FindString(value); m != "" {
-			return pinned(versions) + value[len(m):], true
-		}
-	}
-	return "", false
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
-func pinned(versions []string) string {
-	if len(versions) == 1 {
-		return versions[0]
+func inConfigOrder(versions []miseTool, entry any) ([]miseTool, bool) {
+	list, ok := entry.([]any)
+	if !ok || len(list) != len(versions) {
+		return nil, false
 	}
-	return "[" + strings.Join(versions, ", ") + "]"
-}
-
-func unquoteKey(k string) string {
-	if strings.HasPrefix(k, "'") && strings.HasSuffix(k, "'") && len(k) >= 2 {
-		return k[1 : len(k)-1]
+	var ordered []miseTool
+	for _, item := range list {
+		requested, ok := item.(string)
+		if table, isTable := item.(map[string]any); isTable {
+			requested, ok = table["version"].(string)
+		}
+		i := slices.IndexFunc(versions, func(t miseTool) bool { return t.RequestedVersion == requested })
+		if !ok || i < 0 {
+			return nil, false
+		}
+		ordered = append(ordered, versions[i])
 	}
-	if u, err := strconv.Unquote(k); err == nil && strings.HasPrefix(k, `"`) {
-		return u
-	}
-	return k
-}
-
-func tomlKey(name string) string {
-	if bareKey.MatchString(name) {
-		return name
-	}
-	return strconv.Quote(name)
+	return ordered, true
 }

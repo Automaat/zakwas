@@ -86,12 +86,22 @@ What it writes:
 |---|---|---|
 | `zakwas.yaml` | always | schema comment, `protect.immutable: true`, a `files` entry per `--add`, plus `brew`/`mise` sections |
 | `Brewfile` | Homebrew installed | `brew bundle dump --tap --formula --cask --mas`: no go/npm/cargo/uv/vscode entries, which mise or the tools themselves manage; third-party taps without a `trusted:` option get `trusted: true` (an existing `trusted:` option is left alone) |
-| `dotfiles/mise/config.toml` | mise installed | your global mise config (the file `mise ls --global` reports tools from, else `$MISE_GLOBAL_CONFIG_FILE` or `~/.config/mise/config.toml`) with every active tool pinned to the exact version in use; tool options (`{ version = …, … }`, `[tools.<name>]` tables) and other sections (`[settings]`, `[env]`, …) are kept; active global tools the file doesn't list are added under `[tools]`. Installed to `~/.config/mise/config.toml` |
+| `dotfiles/mise/config.toml` | mise installed | a byte-for-byte copy of your global mise config, with tool versions pinned by mise itself (see below). Installed to `~/.config/mise/config.toml` |
 | `dotfiles/<path>` | per `--add` | copy of the file or directory |
 | `.gitignore` | always | `*.zakwas-bak*` |
 | `.git` | always | `git init -b main` |
 
 Sections for tools that aren't installed are left out. `brew.cleanup` starts as `none`; switch to `zap` once the Brewfile lists everything you want to keep.
+
+**mise pins.** init copies the file `mise ls --global` reports your tools from (else `$MISE_GLOBAL_CONFIG_FILE` or `~/.config/mise/config.toml`) unchanged, then, for each active global tool whose requested version isn't already exact (`"22"`, `"latest"`), runs `mise use --global --pin <tool>@<version in use>` against the copy (from `/`, with a throwaway `MISE_STATE_DIR`/`MISE_CACHE_DIR` and `MISE_AUTO_INSTALL=0`). mise's own editor does the rewrite, so:
+
+- comments, `[settings]`, `[env]`, `[[watch_files]]` and every other section stay as written;
+- tool options stay: `"pipx:black" = { version = "latest", uvx = false }` only gets its `version` changed, same for `[tools.<name>]` tables and multi-line arrays;
+- aliases resolve: `nodejs = "22"` becomes `node = "22.21.1"` (no duplicate key);
+- tools already pinned exactly, and tools only other global files list, are left alone;
+- a tool with several versions keeps the file's order (the first is mise's default).
+
+A tool init can't pin stays as you wrote it and is listed in the summary: versions not installed (pinning would install them), several versions under a key init can't match (e.g. an alias), or a `mise use` failure. The result must parse as TOML, or init fails and removes what it created.
 
 **`--add` layout.** Each path keeps its location relative to `$HOME` under `dotfiles/`, with the leading dot dropped from every path component, so nothing in the repo is hidden:
 
@@ -202,10 +212,10 @@ Prints `zakwas <version>` (`dev` for builds outside a release).
 
 | Code | Meaning |
 |---|---|
-| 0 | success; `check` found no drift |
+| 0 | success; `check` found no drift; `-h`/`--help` (usage goes to stdout) |
 | 1 | error; also when a module failed to plan (the others still apply) |
 | 2 | `check` found drift |
-| 64 | usage error: unknown command or flag, conflicting flags, invalid `init`/`self-update` arguments, package-managed binary |
+| 64 | usage error (usage goes to stderr): no or unknown command, unknown flag, conflicting flags, invalid `init`/`self-update` arguments, package-managed binary |
 | 130 | interrupted (Ctrl-C) |
 
 ## Environment

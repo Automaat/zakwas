@@ -5,6 +5,7 @@ go 1.27
 require (
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/invopop/jsonschema v0.14.0
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	go.yaml.in/yaml/v3 v3.0.5

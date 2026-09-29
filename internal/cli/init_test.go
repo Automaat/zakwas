@@ -96,7 +96,8 @@ func TestInit(t *testing.T) {
 	brewfile := filepath.Join(repo, "Brewfile")
 	fake := &dumpingFake{
 		Fake: runnertest.New().
-			OnOK(miseLs, `{"jq":[{"version":"1.7.1"}],"aqua:cli/cli":[{"version":"2.1.0"}],"node":[{"version":"22.1.0"},{"version":"20.3.0"},{"version":"22.1.0"}]}`).
+			OnOK(miseLs, `{"jq":[{"version":"1.7.1","requested_version":"latest","installed":true}],"node":[{"version":"22.1.0","requested_version":"22","installed":false}]}`).
+			OnOK("mise use --global --pin --quiet jq@1.7.1", "").
 			OnOK(brewDump+brewfile, "").
 			OnOK(gitInit, ""),
 		brewfile: brewfile,
@@ -137,7 +138,7 @@ mise:
 	if got := read(t, filepath.Join(repo, "zakwas.yaml")); got != wantCfg {
 		t.Errorf("zakwas.yaml =\n%s\nwant\n%s", got, wantCfg)
 	}
-	wantMise := "[tools]\n\"aqua:cli/cli\" = \"2.1.0\"\nnode = [\"22.1.0\", \"20.3.0\"]\njq = \"1.7.1\"\n"
+	wantMise := "[tools]\njq = \"latest\"\n"
 	if got := read(t, filepath.Join(repo, "dotfiles/mise/config.toml")); got != wantMise {
 		t.Errorf("mise config =\n%s\nwant\n%s", got, wantMise)
 	}
@@ -160,7 +161,7 @@ mise:
 			t.Errorf("%s copied", skipped)
 		}
 	}
-	for _, want := range []string{"Created", "zakwas plan", "install.sh | bash -s -- --repo URL", "skipped ~/.config/git/.git (git metadata)", "skipped ~/.config/git/link (not a regular file)"} {
+	for _, want := range []string{"Created", "zakwas plan", "install.sh | bash -s -- --repo URL", "skipped ~/.config/git/.git (git metadata)", "skipped ~/.config/git/link (not a regular file)", "left as written: node (not installed)"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("output lacks %q:\n%s", want, r.stdout)
 		}
@@ -368,5 +369,22 @@ func TestRepoPath(t *testing.T) {
 		if got := repoPath(rel); got != want {
 			t.Errorf("repoPath(%q) = %q, want %q", rel, got, want)
 		}
+	}
+}
+
+func TestInitRollsBackInvalidMiseConfig(t *testing.T) {
+	t.Setenv("MISE_GLOBAL_CONFIG_FILE", "")
+	home := initHome(t)
+	if err := os.WriteFile(filepath.Join(home, ".config/mise/config.toml"), []byte("[tools\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(t.TempDir(), "new/repo")
+	fake := runnertest.New().Missing("brew").OnOK(miseLs, `{}`)
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo)
+	if r.code != ExitErr || !strings.Contains(r.stderr, "not valid TOML") {
+		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
+	}
+	if _, err := os.Stat(filepath.Dir(repo)); err == nil {
+		t.Errorf("%s left behind", filepath.Dir(repo))
 	}
 }

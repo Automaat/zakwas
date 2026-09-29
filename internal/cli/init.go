@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,17 +30,14 @@ const (
 	miseSrc     = "dotfiles/mise/config.toml"
 )
 
-var (
-	bareKey   = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-	shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
-)
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
 
 func newInitFlags(errOut *console) (*flag.FlagSet, *[]string) {
 	var adds []string
 	fs := flag.NewFlagSet("zakwas init", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		errOut.print(`Usage: zakwas init DIR [--add PATH]...
+		_, _ = io.WriteString(fs.Output(), `Usage: zakwas init DIR [--add PATH]...
 
 Creates a starter config repo in DIR (new or empty) from this Mac: a
 Brewfile (taps, formulae, casks, mas apps) from brew bundle dump, your
@@ -70,22 +68,28 @@ type copyFile struct {
 }
 
 type initPlan struct {
-	dir     string
-	home    string
-	adds    []addition
-	skipped []string
-	brew    bool
-	mise    bool
-	orphans int
-	trusted []string
+	dir      string
+	home     string
+	adds     []addition
+	skipped  []string
+	brew     bool
+	mise     bool
+	orphans  int
+	trusted  []string
+	unpinned []string
 }
 
 func runInit(ctx context.Context, env Env, args []string, out, errOut *console) int {
 	fs, adds := newInitFlags(errOut)
-	pos, err := parseInterspersed(fs, args)
-	if err != nil || len(pos) != 1 {
-		fs.Usage()
-		return ExitUsage
+	var pos []string
+	if code, ok := parseCommand(fs, out, func() (err error) {
+		pos, err = parseInterspersed(fs, args)
+		if err == nil && len(pos) != 1 {
+			err = errUsage
+		}
+		return err
+	}); !ok {
+		return code
 	}
 	p := &initPlan{
 		dir:  absFrom(env.Cwd, env.Home, pos[0]),
@@ -98,14 +102,15 @@ func runInit(ctx context.Context, env Env, args []string, out, errOut *console) 
 		return ExitUsage
 	}
 	p.orphans = p.countOrphans()
-	var miseToml []byte
+	var tools map[string][]miseTool
 	if p.mise {
-		if miseToml, err = globalMiseConfig(ctx, env.Runner, env.Home); err != nil {
+		var err error
+		if tools, err = miseTools(ctx, env.Runner); err != nil {
 			errOut.fail(err)
 			return ExitErr
 		}
 	}
-	created, err := p.write(ctx, env.Runner, miseToml)
+	created, err := p.write(ctx, env.Runner, tools)
 	if err != nil {
 		errOut.fail(errors.Join(err, cleanup(p.dir, created)))
 		return ExitErr
@@ -301,7 +306,7 @@ func yamlString(s string) string {
 
 // write creates the repo and returns the topmost directory it created, if
 // any, so a failed init can remove everything it made.
-func (p *initPlan) write(ctx context.Context, r runner.Runner, miseToml []byte) (string, error) {
+func (p *initPlan) write(ctx context.Context, r runner.Runner, tools map[string][]miseTool) (string, error) {
 	created := topMissing(p.dir)
 	if err := os.MkdirAll(p.dir, 0o755); err != nil {
 		return created, err
@@ -314,9 +319,11 @@ func (p *initPlan) write(ctx context.Context, r runner.Runner, miseToml []byte) 
 		}
 	}
 	if p.mise {
-		if err := writeFile(filepath.Join(p.dir, miseSrc), miseToml, 0o644); err != nil {
+		unpinned, err := writeMiseConfig(ctx, r, tools, p.home, filepath.Join(p.dir, miseSrc))
+		if err != nil {
 			return created, err
 		}
+		p.unpinned = unpinned
 	}
 	if p.brew {
 		dump := runner.Cmd{
@@ -423,6 +430,9 @@ func (p *initPlan) summary() string {
 	}
 	if p.mise {
 		fmt.Fprintf(&b, "  %-29s global mise config, active tools pinned to exact versions\n", miseSrc)
+		if len(p.unpinned) > 0 {
+			fmt.Fprintf(&b, "  %-29s left as written: %s\n", "", strings.Join(p.unpinned, ", "))
+		}
 	} else {
 		b.WriteString("  no mise section: mise is not installed\n")
 	}

@@ -77,6 +77,7 @@ files
 Plan: 0 to add, 4 to change, 0 to remove, 0 to run.
 -- calls.golden --
 mise ls --global --current --json (in /)
+mise use --global --pin --quiet jq@1.7.1 (in /)
 brew bundle dump --tap --formula --cask --mas --file $WORK/repo/Brewfile (auto-update off: 1)
 brew bundle check --file $WORK/repo/Brewfile --verbose --no-upgrade (auto-update off: 1)
 mise ls --global --missing --json (in /)
@@ -92,7 +93,8 @@ esac
 #!/bin/sh
 echo "mise $* (in $PWD)" >> "$WORK/calls"
 case "$*" in
-  "ls --global --current --json") echo '{"jq":[{"version":"1.7.1","installed":true,"active":true}]}' ;;
+  "ls --global --current --json") echo '{"jq":[{"version":"1.7.1","requested_version":"latest","installed":true}]}' ;;
+  "use --global --pin --quiet jq@1.7.1") sed 's/"latest"/"1.7.1"/' "$MISE_GLOBAL_CONFIG_FILE" > "$MISE_GLOBAL_CONFIG_FILE.new" && mv "$MISE_GLOBAL_CONFIG_FILE.new" "$MISE_GLOBAL_CONFIG_FILE" ;;
   "ls --global --missing --json") echo '{}' ;;
   *) echo "unexpected mise $*" >&2; exit 99 ;;
 esac
