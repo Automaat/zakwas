@@ -12,10 +12,10 @@ mise run test:integration   # adds real `defaults` and mise round-trips (macOS)
 mise run lint
 ```
 
-Try your build against the example config without touching your machine's state:
+Try your build against the example config with a throwaway `$HOME`, so your real zakwas state isn't read:
 
 ```bash
-go run ./cmd/zakwas -c examples/zakwas.yaml plan --only files,templates
+HOME=$(mktemp -d) go run ./cmd/zakwas -c examples/zakwas.yaml plan --only files,templates
 ```
 
 [CLAUDE.md](CLAUDE.md) describes the layout, module order, and how to add a module.

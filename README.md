@@ -49,7 +49,7 @@ zakwas needs nothing else: when the config has a `brew` section and Homebrew is 
 | mise | `"github:Automaat/zakwas" = "X.Y.Z"` in your mise config | bump the pin (Renovate does it) |
 | Go | `go install github.com/Automaat/zakwas/cmd/zakwas@latest` | same command |
 
-Releases carry SHA256 checksums and GitHub build provenance; `install.sh` and `self-update` verify both. See [docs/security.md](docs/security.md).
+Releases carry SHA256 checksums and GitHub build provenance; `install.sh` and `self-update` always verify the checksum, and the provenance too when a logged-in `gh` is installed. See [docs/security.md](docs/security.md).
 
 Shell completion: `zakwas completion zsh|bash|fish` ([docs/commands.md](docs/commands.md#completion)).
 
@@ -105,8 +105,6 @@ Editors with YAML language support (VS Code, Zed, Neovim, JetBrains) autocomplet
 ```
 
 Every key is described in [docs/config.md](docs/config.md); ready-made snippets are in [docs/examples.md](docs/examples.md). Overview:
-
-See [`examples/`](examples) for a complete config repo.
 
 ```yaml
 protect:
@@ -179,7 +177,7 @@ Every apply is logged to `~/.local/state/zakwas/history.jsonl` with the config r
 ## Compared to
 
 - **nix-darwin / home-manager**: the same "machine = repo" model and read-only dotfiles, without learning Nix. zakwas delegates packages to Homebrew and mise instead of building them, so there's no store, no evaluation, and upgrades are whatever `brew` and Renovate-bumped mise pins give you.
-- **chezmoi / stow / yadm**: great at dotfiles, but stop there. zakwas also converges apps, CLI tool versions, macOS preferences and one-off setup steps, shows a plan first, and protects installed files from edits in place.
+- **chezmoi / stow / yadm**: built around dotfiles, with scripts (chezmoi's `run_` scripts, yadm's bootstrap) for everything else. zakwas has typed modules for apps, CLI tool versions, macOS preferences and one-off steps, plans all of them before acting, and protects installed files from edits in place.
 - **A Brewfile plus a shell script**: fine until the script isn't idempotent or you forget what it changed. zakwas plans before it acts, records every apply, and `check` tells you when the machine drifted.
 
 ## Documentation

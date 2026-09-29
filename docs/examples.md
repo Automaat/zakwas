@@ -90,29 +90,65 @@ Commands stop at the first failure, so put ones that need manual action (importi
 
 ## Daily drift notification
 
-A launchd agent that runs `zakwas check` and notifies on drift:
+A launchd agent that runs `zakwas check` every morning and notifies you when the Mac drifted. launchd starts agents from `/` with a minimal `PATH`, so the script sets both.
 
 ```yaml
+files:
+  - {src: dotfiles/bin/zakwas-check-notify, dst: ~/.local/bin/zakwas-check-notify}
 templates:
   files:
-    - {src: dotfiles/launchd/zakwas-check.plist.tmpl, dst: ~/Library/LaunchAgents/dev.zakwas.check.plist}
+    - {src: dotfiles/launchd/dev.zakwas.check.plist.tmpl, dst: ~/Library/LaunchAgents/dev.zakwas.check.plist}
 commands:
   - name: drift check agent
     check: launchctl print "gui/$(id -u)/dev.zakwas.check" > /dev/null 2>&1
     run: launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/dev.zakwas.check.plist"
 ```
 
-The plist runs a script like:
+`dotfiles/bin/zakwas-check-notify` (adjust `ZAKWAS_CONFIG` to your repo; drop `mise exec --` if zakwas comes from Homebrew or `~/.local/bin`):
 
 ```sh
 #!/bin/sh
-zakwas check > /dev/null 2>&1
-case $? in
+PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+ZAKWAS_CONFIG="$HOME/dotfiles/zakwas.yaml"
+export PATH ZAKWAS_CONFIG
+
+status=0
+mise exec -- zakwas check > /dev/null 2>&1 || status=$?
+case $status in
     0) exit 0 ;;
-    2) osascript -e 'display notification "Run: zakwas plan" with title "Mac drifted from zakwas.yaml"' ;;
-    *) osascript -e 'display notification "Run: zakwas check" with title "zakwas check failed"' ;;
+    2) message="This Mac drifted from zakwas.yaml. Run: zakwas plan" ;;
+    *) message="zakwas check failed (exit $status). Run: zakwas check" ;;
 esac
+osascript -e "display notification \"$message\" with title \"zakwas\""
 ```
+
+`dotfiles/launchd/dev.zakwas.check.plist.tmpl` (a template, so `{{.Home}}` becomes your home directory):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.zakwas.check</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{.Home}}/.local/bin/zakwas-check-notify</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>10</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>StandardErrorPath</key>
+	<string>{{.Home}}/Library/Logs/zakwas-check.log</string>
+</dict>
+</plist>
+```
+
+After changing the plist, `launchctl bootout "gui/$(id -u)/dev.zakwas.check"` so the `commands` entry loads the new version on the next apply. A complete working setup is in [environment-as-code](https://github.com/Automaat/environment-as-code).
 
 ## CI: review before apply
 
