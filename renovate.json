@@ -86,6 +86,31 @@
       "addLabels": [
         "github-actions"
       ]
+    },
+    {
+      "description": "Tools zakwas downloads and runs on users' machines: always reviewed, never auto-merged.",
+      "matchFileNames": [
+        "internal/modules/brew/brew.go",
+        "internal/modules/mise/bootstrap.go"
+      ],
+      "matchDepNames": [
+        "https://github.com/Homebrew/install",
+        "jdx/mise"
+      ],
+      "automerge": false,
+      "addLabels": [
+        "bootstrap-pin"
+      ]
+    },
+    {
+      "description": "Let a mise release age before zakwas installs it. Not applied to the Homebrew installer: git-refs reports no release timestamps, so a minimum age would hold its bumps forever.",
+      "matchFileNames": [
+        "internal/modules/mise/bootstrap.go"
+      ],
+      "matchDepNames": [
+        "jdx/mise"
+      ],
+      "minimumReleaseAge": "3 days"
     }
   ]
 }
