@@ -291,14 +291,52 @@ func TestOutdatedShowsVersions(t *testing.T) {
 }
 
 func TestTrustTaps(t *testing.T) {
-	in := "tap \"homebrew/bundle\"\ntap \"acme/tools\"\ntap \"acme/other\", \"https://example.com/other.git\"\ntap \"acme/ok\", trusted: true\nbrew \"jq\"\n# tap \"acme/commented\"\ncask \"firefox\""
-	want := "tap \"homebrew/bundle\"\ntap \"acme/tools\", trusted: true\ntap \"acme/other\", \"https://example.com/other.git\", trusted: true\ntap \"acme/ok\", trusted: true\nbrew \"jq\"\n# tap \"acme/commented\"\ncask \"firefox\""
+	in := strings.Join([]string{
+		`tap "homebrew/bundle"`,
+		`tap "acme/tools"`,
+		`tap "acme/other", "https://example.com/other.git"`,
+		`tap "acme/ok", trusted: true`,
+		`tap "acme/partial", trusted: { formula: ["x"] }`,
+		`tap "acme/commented"  # my tap`,
+		`tap "acme/hash", "https://example.com/#frag" # note`,
+		`brew "jq"`,
+		`# tap "acme/disabled"`,
+		`cask "firefox"`,
+	}, "\n")
+	want := strings.Join([]string{
+		`tap "homebrew/bundle"`,
+		`tap "acme/tools", trusted: true`,
+		`tap "acme/other", "https://example.com/other.git", trusted: true`,
+		`tap "acme/ok", trusted: true`,
+		`tap "acme/partial", trusted: { formula: ["x"] }`,
+		`tap "acme/commented", trusted: true  # my tap`,
+		`tap "acme/hash", "https://example.com/#frag", trusted: true # note`,
+		`brew "jq"`,
+		`# tap "acme/disabled"`,
+		`cask "firefox"`,
+	}, "\n")
 	got, changed := TrustTaps([]byte(in))
 	if string(got) != want {
 		t.Errorf("TrustTaps =\n%s\nwant\n%s", got, want)
 	}
-	if !reflect.DeepEqual(changed, []string{"acme/tools", "acme/other"}) {
+	if !reflect.DeepEqual(changed, []string{"acme/tools", "acme/other", "acme/commented", "acme/hash"}) {
 		t.Errorf("changed = %v", changed)
+	}
+}
+
+func TestParseBrewfileIgnoresTrustInComments(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "Brewfile")
+	body := "tap \"acme/a\" # , trusted: true\ntap \"acme/b\", trusted: true # ok\ntap \"acme/c\", \"https://x/#a\", trusted: true\n"
+	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := ParseBrewfile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Entry{{"tap", "acme/a", false}, {"tap", "acme/b", true}, {"tap", "acme/c", true}}
+	if !reflect.DeepEqual(entries, want) {
+		t.Errorf("entries = %+v, want %+v", entries, want)
 	}
 }
 
