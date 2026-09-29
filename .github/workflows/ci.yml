@@ -53,11 +53,15 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: |
+          set -o pipefail
           brew tap-new --no-git zakwas-ci/tap
+          brew trust zakwas-ci/tap
           tap="$(brew --repository)/Library/Taps/zakwas-ci/homebrew-tap"
           mkdir -p "$tap/Casks"
           cp dist/homebrew/Casks/zakwas.rb "$tap/Casks/"
-          brew readall --os=all --arch=all zakwas-ci/tap
+          # readall skips untrusted taps with exit 0; make that a failure.
+          brew readall --os=all --arch=all zakwas-ci/tap 2>&1 | tee "$RUNNER_TEMP/readall.log"
+          if grep -q Skipping "$RUNNER_TEMP/readall.log"; then exit 1; fi
 
       - name: unit, e2e and integration tests
         run: mise run test:integration
