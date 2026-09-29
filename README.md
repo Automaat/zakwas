@@ -83,7 +83,7 @@ links:                            # plain symlinks, for configs apps write
 templates:                        # Go text/template: .Home, .Vars.x
   vars: {email: you@example.com}
   files:
-    - {src: dotfiles/git/user.tmpl, dst: ~/.config/git/user, mode: 0600}
+    - {src: dotfiles/git/user.tmpl, dst: ~/.config/git/user, mode: 0o600}
 
 brew:
   file: Brewfile
@@ -96,7 +96,7 @@ mise:
 
 system:
   sudoTouchID: true
-  dirs: [{path: ~/.ssh, mode: 0700}]
+  dirs: [{path: ~/.ssh, mode: 0o700}]
   sshKey: {path: ~/.ssh/id_ed25519, comment: you@example.com}
 
 commands:

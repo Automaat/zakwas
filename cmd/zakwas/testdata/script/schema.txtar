@@ -1,0 +1,6 @@
+! exists zakwas.yaml
+zakwas schema
+stdout '^  "\$schema": "https://json-schema.org/draft/2020-12/schema",$'
+stdout '^  "\$id": "https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json",$'
+stdout '"cleanup": \{'
+! stderr .
