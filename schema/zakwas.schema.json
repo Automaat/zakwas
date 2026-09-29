@@ -1,478 +1,375 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json",
-  "anyOf": [
-    {
+  "properties": {
+    "protect": {
       "properties": {
-        "protect": {
-          "anyOf": [
-            {
-              "properties": {
-                "immutable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Also set the macOS 'uchg' flag on installed files, so even the owner cannot edit, chmod or delete them without 'chflags nouchg'. Write bits are always stripped.",
-                  "default": false
-                }
-              },
-              "additionalProperties": false,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "How files and templates are locked down after zakwas writes them."
-        },
-        "files": {
-          "anyOf": [
-            {
-              "items": {
-                "properties": {
-                  "src": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Source path in the config repo, relative to the directory holding zakwas.yaml (or absolute). May be a directory under 'files'."
-                  },
-                  "dst": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination (compared case-insensitively). An existing file zakwas did not write is backed up to '\u003cdst\u003e.zakwas-bak'."
-                  }
-                },
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "src",
-                  "dst"
-                ]
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Repo files installed into your home directory as protected, read-only copies. A directory src copies every file inside it. Edit the source in the repo and run 'zakwas apply' to change one."
-        },
-        "links": {
-          "anyOf": [
-            {
-              "items": {
-                "properties": {
-                  "src": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Source path in the config repo, relative to the directory holding zakwas.yaml (or absolute). May be a directory under 'files'."
-                  },
-                  "dst": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination (compared case-insensitively). An existing file zakwas did not write is backed up to '\u003cdst\u003e.zakwas-bak'."
-                  }
-                },
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "src",
-                  "dst"
-                ]
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Repo files symlinked into your home directory, for configs an app must be able to write itself. Links are not protected."
-        },
-        "templates": {
-          "anyOf": [
-            {
-              "properties": {
-                "vars": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "boolean"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "type": "object"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Values available to every template as '{{ .Vars.\u003cname\u003e }}'. A template referencing a missing var fails."
-                },
-                "files": {
-                  "anyOf": [
-                    {
-                      "items": {
-                        "properties": {
-                          "src": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Template path in the config repo (Go text/template syntax), relative to the directory holding zakwas.yaml (or absolute)."
-                          },
-                          "dst": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination."
-                          },
-                          "mode": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "maximum": 511,
-                                "minimum": 0
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ],
-                            "description": "Octal permissions of the rendered file, written with the 0o prefix, e.g. 0o755. Editors parse YAML 1.2 and read 0755 as decimal 755 (zakwas still accepts it as octal); 755 is decimal everywhere. Must be readable by the owner. Write bits are always stripped. Default 0o444."
-                          }
-                        },
-                        "additionalProperties": false,
-                        "type": "object",
-                        "required": [
-                          "src",
-                          "dst"
-                        ]
-                      },
-                      "type": "array"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Templates to render. Each template also sees '{{ .Home }}', your home directory."
-                }
-              },
-              "additionalProperties": false,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Go text/template files rendered into your home directory as protected copies, for dotfiles that need your home path or per-machine values."
-        },
-        "brew": {
-          "anyOf": [
-            {
-              "properties": {
-                "file": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Brewfile path in the config repo, relative to the directory holding zakwas.yaml (or absolute). Every third-party tap in it needs 'trusted: true'."
-                },
-                "cleanup": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "none",
-                        "uninstall",
-                        "zap"
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "What to do with installed packages missing from the Brewfile: 'none' keeps them, 'uninstall' removes them ('brew bundle cleanup --force'), 'zap' also removes cask app data ('--zap'). Removals are shown in 'zakwas plan' first. Default none.",
-                  "default": "none"
-                },
-                "upgrade": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Upgrade outdated Brewfile packages on apply. When false, only missing packages are installed ('--no-upgrade'). Run 'zakwas upgrade' to refresh Homebrew's package list first. Default false.",
-                  "default": false
-                }
-              },
-              "additionalProperties": false,
-              "type": "object",
-              "required": [
-                "file"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Homebrew packages from a Brewfile. Homebrew is installed first when missing. Omit the section to leave Homebrew alone."
-        },
-        "mise": {
-          "anyOf": [
-            {
-              "properties": {
-                "config": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Global mise config (config.toml) in the config repo, relative to the directory holding zakwas.yaml (or absolute). Its tools are installed with 'mise install'. Install it to ~/.config/mise/config.toml with a 'files' entry so mise uses it outside zakwas too."
-                },
-                "prune": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Remove installed tool versions that no mise config on the machine references anymore ('mise prune'). Default false.",
-                  "default": false
-                }
-              },
-              "additionalProperties": false,
-              "type": "object",
-              "required": [
-                "config"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Tools pinned in a global mise config. mise is installed first when missing. Omit the section to leave mise alone."
-        },
-        "defaults": {
-          "anyOf": [
-            {
-              "items": {
-                "properties": {
-                  "domain": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Preferences domain, e.g. 'com.apple.dock' or 'NSGlobalDomain'."
-                  },
-                  "key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Preference key within the domain, e.g. 'autohide'."
-                  },
-                  "value": {
-                    "oneOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ],
-                    "description": "Value to write. The YAML type picks the defaults type: true/false → -bool, 2 → -int, 1.5 → -float, anything else → -string. Quote dates (\"2024-01-01\") and numbers meant as text (\"2\"); an unquoted date is rejected."
-                  },
-                  "restart": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "Process to 'killall' after the value changes, so it picks up the new setting. Empty uses the built-in mapping (com.apple.dock → Dock, com.apple.finder → Finder, com.apple.screencapture → SystemUIServer)."
-                  },
-                  "currentHost": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "Write to the per-host (ByHost) preferences, like 'defaults -currentHost write'. Default false.",
-                    "default": false
-                  }
-                },
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "domain",
-                  "key",
-                  "value"
-                ]
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once."
-        },
-        "system": {
-          "anyOf": [
-            {
-              "properties": {
-                "dirs": {
-                  "anyOf": [
-                    {
-                      "items": {
-                        "properties": {
-                          "path": {
-                            "type": "string",
-                            "minLength": 1,
-                            "description": "Directory path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Missing parents are created."
-                          },
-                          "mode": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "maximum": 511,
-                                "minimum": 0
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ],
-                            "description": "Octal permissions, written with the 0o prefix, e.g. 0o700. Editors parse YAML 1.2 and read 0700 as decimal 700 (zakwas still accepts it as octal); 700 is decimal everywhere. The owner must be able to read and enter it. When set, it is enforced on an existing directory too. When omitted, a new directory gets 0o755 and an existing one keeps its mode."
-                          }
-                        },
-                        "additionalProperties": false,
-                        "type": "object",
-                        "required": [
-                          "path"
-                        ]
-                      },
-                      "type": "array"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Directories to create."
-                },
-                "sudoTouchID": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Allow Touch ID for sudo by adding pam_tid.so to /etc/pam.d/sudo_local, which survives macOS updates. Default false.",
-                  "default": false
-                },
-                "sshKey": {
-                  "anyOf": [
-                    {
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "Private key path: absolute or starting with '~/' (expanded to your home directory), e.g. '~/.ssh/id_ed25519'."
-                        },
-                        "comment": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "Key comment ('ssh-keygen -C'), usually your email."
-                        }
-                      },
-                      "additionalProperties": false,
-                      "type": "object",
-                      "required": [
-                        "path"
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "description": "Generate an ed25519 SSH key (no passphrase) when the file does not exist. An existing key is never touched."
-                }
-              },
-              "additionalProperties": false,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Machine-level setup: directories, Touch ID for sudo, an SSH key."
-        },
-        "commands": {
-          "anyOf": [
-            {
-              "items": {
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Label shown in plan and apply output."
-                  },
-                  "check": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Shell snippet (run with sh in your home directory) that exits 0 when the step is already done. Times out after 30s."
-                  },
-                  "run": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Shell snippet (run with sh in your home directory) executed while 'check' fails. 'check' must pass afterwards, or apply fails."
-                  }
-                },
-                "additionalProperties": false,
-                "type": "object",
-                "required": [
-                  "name",
-                  "check",
-                  "run"
-                ]
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure."
+        "immutable": {
+          "description": "Also set the macOS 'uchg' flag on installed files, so even the owner cannot edit, chmod or delete them without 'chflags nouchg'. Write bits are always stripped.",
+          "default": false,
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,
-      "type": "object"
+      "description": "How files and templates are locked down after zakwas writes them.",
+      "type": [
+        "object",
+        "null"
+      ]
     },
-    {
-      "type": "null"
+    "files": {
+      "items": {
+        "properties": {
+          "src": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Source path in the config repo, relative to the directory holding zakwas.yaml (or absolute). May be a directory under 'files'."
+          },
+          "dst": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination (compared case-insensitively). An existing file zakwas did not write is backed up to '<dst>.zakwas-bak'."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "src",
+          "dst"
+        ]
+      },
+      "description": "Repo files installed into your home directory as protected, read-only copies. A directory src copies every file inside it. Edit the source in the repo and run 'zakwas apply' to change one.",
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "links": {
+      "items": {
+        "properties": {
+          "src": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Source path in the config repo, relative to the directory holding zakwas.yaml (or absolute). May be a directory under 'files'."
+          },
+          "dst": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination (compared case-insensitively). An existing file zakwas did not write is backed up to '<dst>.zakwas-bak'."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "src",
+          "dst"
+        ]
+      },
+      "description": "Repo files symlinked into your home directory, for configs an app must be able to write itself. Links are not protected.",
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "templates": {
+      "properties": {
+        "vars": {
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "description": "Values available to every template as '{{ .Vars.<name> }}'. A template referencing a missing var fails.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "files": {
+          "items": {
+            "properties": {
+              "src": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Template path in the config repo (Go text/template syntax), relative to the directory holding zakwas.yaml (or absolute)."
+              },
+              "dst": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Destination path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Must not overlap another files/links/templates destination."
+              },
+              "mode": {
+                "maximum": 511,
+                "minimum": 0,
+                "description": "Octal permissions of the rendered file, written with the 0o prefix, e.g. 0o755. Editors parse YAML 1.2 and read 0755 as decimal 755 (zakwas still accepts it as octal); 755 is decimal everywhere. Must be readable by the owner. Write bits are always stripped. Default 0o444.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "src",
+              "dst"
+            ]
+          },
+          "description": "Templates to render. Each template also sees '{{ .Home }}', your home directory.",
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "Go text/template files rendered into your home directory as protected copies, for dotfiles that need your home path or per-machine values.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "brew": {
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Brewfile path in the config repo, relative to the directory holding zakwas.yaml (or absolute). Every third-party tap in it needs 'trusted: true'."
+        },
+        "cleanup": {
+          "enum": [
+            "none",
+            "uninstall",
+            "zap",
+            null
+          ],
+          "description": "What to do with installed packages missing from the Brewfile: 'none' keeps them, 'uninstall' removes them ('brew bundle cleanup --force'), 'zap' also removes cask app data ('--zap'). Removals are shown in 'zakwas plan' first. Default none.",
+          "default": "none",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "upgrade": {
+          "description": "Upgrade outdated Brewfile packages on apply. When false, only missing packages are installed ('--no-upgrade'). Run 'zakwas upgrade' to refresh Homebrew's package list first. Default false.",
+          "default": false,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "file"
+      ],
+      "description": "Homebrew packages from a Brewfile. Homebrew is installed first when missing. Omit the section to leave Homebrew alone.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "mise": {
+      "properties": {
+        "config": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Global mise config (config.toml) in the config repo, relative to the directory holding zakwas.yaml (or absolute). Its tools are installed with 'mise install'. Install it to ~/.config/mise/config.toml with a 'files' entry so mise uses it outside zakwas too."
+        },
+        "prune": {
+          "description": "Remove installed tool versions that no mise config on the machine references anymore ('mise prune'). Default false.",
+          "default": false,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "config"
+      ],
+      "description": "Tools pinned in a global mise config. mise is installed first when missing. Omit the section to leave mise alone.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "defaults": {
+      "items": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Preferences domain, e.g. 'com.apple.dock' or 'NSGlobalDomain'."
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Preference key within the domain, e.g. 'autohide'."
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Value to write. The YAML type picks the defaults type: true/false → -bool, 2 → -int, 1.5 → -float, anything else → -string. Quote dates (\"2024-01-01\") and numbers meant as text (\"2\"); an unquoted date is rejected."
+          },
+          "restart": {
+            "description": "Process to 'killall' after the value changes, so it picks up the new setting. Empty uses the built-in mapping (com.apple.dock → Dock, com.apple.finder → Finder, com.apple.screencapture → SystemUIServer).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currentHost": {
+            "description": "Write to the per-host (ByHost) preferences, like 'defaults -currentHost write'. Default false.",
+            "default": false,
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "domain",
+          "key",
+          "value"
+        ]
+      },
+      "description": "macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once.",
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "system": {
+      "properties": {
+        "dirs": {
+          "items": {
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Directory path: absolute or starting with '~/' (expanded to your home directory). '$VAR' is not expanded. Missing parents are created."
+              },
+              "mode": {
+                "maximum": 511,
+                "minimum": 0,
+                "description": "Octal permissions, written with the 0o prefix, e.g. 0o700. Editors parse YAML 1.2 and read 0700 as decimal 700 (zakwas still accepts it as octal); 700 is decimal everywhere. The owner must be able to read and enter it. When set, it is enforced on an existing directory too. When omitted, a new directory gets 0o755 and an existing one keeps its mode.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "path"
+            ]
+          },
+          "description": "Directories to create.",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "sudoTouchID": {
+          "description": "Allow Touch ID for sudo by adding pam_tid.so to /etc/pam.d/sudo_local, which survives macOS updates. Default false.",
+          "default": false,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "sshKey": {
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Private key path: absolute or starting with '~/' (expanded to your home directory), e.g. '~/.ssh/id_ed25519'."
+            },
+            "comment": {
+              "description": "Key comment ('ssh-keygen -C'), usually your email.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "description": "Generate an ed25519 SSH key (no passphrase) when the file does not exist. An existing key is never touched.",
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "Machine-level setup: directories, Touch ID for sudo, an SSH key.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "commands": {
+      "items": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Label shown in plan and apply output."
+          },
+          "check": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Shell snippet (run with sh in your home directory) that exits 0 when the step is already done. Times out after 30s."
+          },
+          "run": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Shell snippet (run with sh in your home directory) executed while 'check' fails. 'check' must pass afterwards, or apply fails."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "check",
+          "run"
+        ]
+      },
+      "description": "One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure.",
+      "type": [
+        "array",
+        "null"
+      ]
     }
-  ],
+  },
+  "additionalProperties": false,
   "title": "zakwas.yaml",
-  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, defaults, system, commands."
+  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, defaults, system, commands.",
+  "type": [
+    "object",
+    "null"
+  ]
 }

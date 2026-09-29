@@ -30,6 +30,23 @@ func TestCommittedSchemaIsCurrent(t *testing.T) {
 	}
 }
 
+// Editors lose key skeletons and enum descriptions behind anyOf wrappers,
+// so nullability must stay a type array.
+func TestSchemaIsEditorFriendly(t *testing.T) {
+	if bytes.Contains(schema.JSON, []byte(`"anyOf"`)) {
+		t.Error("schema uses anyOf; express null as \"type\": [T, \"null\"]")
+	}
+	for _, c := range []string{"<", ">", "&"} {
+		escaped, err := json.Marshal(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(schema.JSON, bytes.Trim(escaped, `"`)) {
+			t.Errorf("schema escapes %q", c)
+		}
+	}
+}
+
 func TestEveryPropertyIsDescribed(t *testing.T) {
 	var doc map[string]any
 	if err := json.Unmarshal(schema.JSON, &doc); err != nil {

@@ -235,7 +235,7 @@ func (c *Config) Validate(home string) error {
 		switch v := d.Value.(type) {
 		case bool, int, float64, string:
 		case time.Time:
-			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: YAML reads %s as a date; quote it to write a string", i, d.Domain, d.Key, v.Format(time.RFC3339)))
+			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: YAML reads %s as a date; quote it to write a string", i, d.Domain, d.Key, yamlDate(v)))
 		default:
 			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value %#v", i, d.Domain, d.Key, d.Value))
 		}
@@ -263,6 +263,14 @@ func (c *Config) Validate(home string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// yamlDate prints a timestamp the way it was most likely written.
+func yamlDate(t time.Time) string {
+	if t.Equal(time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)) {
+		return t.Format(time.DateOnly)
+	}
+	return t.Format(time.RFC3339)
 }
 
 type claim struct{ what, dst, key string }

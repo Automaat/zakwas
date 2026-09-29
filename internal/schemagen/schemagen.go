@@ -23,11 +23,9 @@ func Generate() ([]byte, error) {
 		Anonymous:                  true,
 		Mapper:                     scalarMap,
 	}
-	body := r.Reflect(&config.Config{})
-	body.Version = ""
-	allowNull(body)
-	root := nullable(body)
-	root.Version = jsonschema.Version
+	root := r.Reflect(&config.Config{})
+	allowNull(root)
+	orNull(root)
 	root.ID = schema.ID
 	root.Title = "zakwas.yaml"
 	root.Description = "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, defaults, system, commands."
@@ -46,9 +44,9 @@ func scalarMap(t reflect.Type) *jsonschema.Schema {
 	}
 	return &jsonschema.Schema{
 		Type: "object",
-		AdditionalProperties: &jsonschema.Schema{AnyOf: []*jsonschema.Schema{
-			{Type: "string"}, {Type: "number"}, {Type: "boolean"}, {Type: "null"},
-		}},
+		AdditionalProperties: &jsonschema.Schema{
+			Extras: map[string]any{"type": []string{"string", "number", "boolean", "null"}},
+		},
 	}
 }
 
@@ -65,23 +63,33 @@ func allowNull(s *jsonschema.Schema) {
 	for p := s.Properties.Oldest(); p != nil; p = p.Next() {
 		allowNull(p.Value)
 		if !slices.Contains(s.Required, p.Key) {
-			p.Value = nullable(p.Value)
+			orNull(p.Value)
 		}
 	}
 }
 
-// nullable wraps s in anyOf [s, null], keeping the annotations on the wrapper
-// where editors show them.
-func nullable(s *jsonschema.Schema) *jsonschema.Schema {
-	w := &jsonschema.Schema{
-		Description: s.Description,
-		Default:     s.Default,
-		AnyOf:       []*jsonschema.Schema{s, {Type: "null"}},
+// orNull turns "type": T into "type": [T, "null"]. An anyOf wrapper would
+// validate the same, but editors then stop offering key skeletons and enum
+// descriptions.
+func orNull(s *jsonschema.Schema) {
+	if s.Type == "" {
+		return
 	}
-	s.Description, s.Default = "", nil
-	return w
+	if s.Extras == nil {
+		s.Extras = map[string]any{}
+	}
+	s.Extras["type"] = []string{s.Type, "null"}
+	s.Type = ""
+	if s.Enum != nil {
+		s.Enum = append(s.Enum, nil)
+	}
 }
 
 // htmlUnescaper undoes encoding/json's HTML escaping (Schema's MarshalJSON
 // ignores SetEscapeHTML), keeping descriptions readable in the raw file.
-var htmlUnescaper = strings.NewReplacer(`<`, "<", `>`, ">", `&`, "&")
+var htmlUnescaper = strings.NewReplacer(jsonEscaped("<"), "<", jsonEscaped(">"), ">", jsonEscaped("&"), "&")
+
+func jsonEscaped(s string) string {
+	b, _ := json.Marshal(s)
+	return strings.Trim(string(b), `"`)
+}
