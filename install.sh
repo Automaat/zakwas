@@ -51,6 +51,14 @@ version_at_least() {
     return 0
 }
 
+gh_can_verify() {
+    command -v gh &>/dev/null || return 1
+    gh auth status &>/dev/null || return 1
+    local help
+    help=$(gh attestation verify --help 2>&1) || return 1
+    [[ "$help" == *--source-ref* ]]
+}
+
 verify_attestation() {
     local file="$1" name
     name=$(basename "$file")
@@ -58,12 +66,15 @@ verify_attestation() {
         info "zakwas $version predates build attestations; skipping provenance check"
         return
     fi
-    if command -v gh &>/dev/null && gh auth status &>/dev/null; then
+    local -a opts=(--repo Automaat/zakwas
+        --signer-workflow Automaat/zakwas/.github/workflows/release.yml
+        --source-ref "refs/tags/v$version")
+    if gh_can_verify; then
         info "Verifying build provenance of $name"
-        gh attestation verify "$file" --repo Automaat/zakwas ||
+        gh attestation verify "$file" "${opts[@]}" ||
             die "attestation verification failed for $name"
     else
-        info "Skipped attestation check (needs gh, logged in); to verify: gh release download v$version -R Automaat/zakwas -p $name && gh attestation verify $name --repo Automaat/zakwas"
+        info "Skipped attestation check (needs a recent gh, logged in); to verify: gh release download v$version -R Automaat/zakwas -p $name && gh attestation verify $name ${opts[*]}"
     fi
 }
 
