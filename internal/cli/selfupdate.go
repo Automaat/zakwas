@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ func newSelfUpdateFlags(errOut *console) (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet("zakwas self-update", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		errOut.print("Usage: zakwas self-update [--version X.Y.Z]\n\nReplaces this zakwas binary with a release from GitHub, verified against\nthe release's checksums.txt.\n\nFlags:\n")
+		_, _ = io.WriteString(fs.Output(), "Usage: zakwas self-update [--version X.Y.Z]\n\nReplaces this zakwas binary with a release from GitHub, verified against\nthe release's checksums.txt.\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	version := fs.String("version", "", "release to install (default: latest)")
@@ -23,11 +24,16 @@ func newSelfUpdateFlags(errOut *console) (*flag.FlagSet, *string) {
 
 func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *console) int {
 	fs, want := newSelfUpdateFlags(errOut)
-	pos, err := parseInterspersed(fs, args)
-	if err != nil || len(pos) != 0 {
-		fs.Usage()
-		return ExitUsage
+	if code, ok := parseCommand(fs, out, func() error {
+		pos, err := parseInterspersed(fs, args)
+		if err == nil && len(pos) != 0 {
+			err = errUsage
+		}
+		return err
+	}); !ok {
+		return code
 	}
+	var err error
 	exe := env.Executable
 	if exe == "" {
 		if exe, err = selfupdate.Executable(); err != nil {

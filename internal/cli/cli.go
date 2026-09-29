@@ -115,10 +115,12 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		}
 	}
 	fs, o := newFlags(errOut)
-	cmd, ok := parseArgs(fs, env.Args)
-	if !ok {
-		fs.Usage()
-		return ExitUsage
+	var cmd string
+	if code, ok := parseCommand(fs, out, func() (err error) {
+		cmd, err = parseArgs(fs, env.Args)
+		return err
+	}); !ok {
+		return code
 	}
 	if cmd == "schema" {
 		_, _ = out.Write(schema.JSON)
@@ -284,7 +286,7 @@ func newFlags(errOut io.Writer) (*flag.FlagSet, *options) {
 	fs := flag.NewFlagSet("zakwas", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		_, _ = io.WriteString(errOut, usage())
+		_, _ = io.WriteString(fs.Output(), usage())
 		fs.PrintDefaults()
 	}
 	fs.StringVar(&o.cfgPath, "c", "", "path to zakwas.yaml (default: search upward from cwd, then $ZAKWAS_CONFIG)")
@@ -361,15 +363,43 @@ func (c *console) fail(err error) {
 
 // parseArgs accepts flags on either side of the command, so both
 // `zakwas -y apply` and `zakwas apply -y` work.
-func parseArgs(fs *flag.FlagSet, args []string) (string, bool) {
-	if err := fs.Parse(args); err != nil || fs.NArg() == 0 {
-		return "", false
+func parseArgs(fs *flag.FlagSet, args []string) (string, error) {
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	if fs.NArg() == 0 {
+		return "", errUsage
 	}
 	cmd := fs.Arg(0)
-	if err := fs.Parse(fs.Args()[1:]); err != nil || fs.NArg() != 0 {
-		return "", false
+	if err := fs.Parse(fs.Args()[1:]); err != nil {
+		return "", err
 	}
-	return cmd, true
+	if fs.NArg() != 0 {
+		return "", errUsage
+	}
+	return cmd, nil
+}
+
+var errUsage = errors.New("usage")
+
+// parseCommand runs parse with the flag set's usage silenced, then prints
+// it once: to stdout with exit 0 for -h/--help, to stderr with exit 64 for
+// bad arguments (after the flag package's own error line, if any).
+func parseCommand(fs *flag.FlagSet, out *console, parse func() error) (int, bool) {
+	usage := fs.Usage
+	fs.Usage = func() {}
+	err := parse()
+	fs.Usage = usage
+	switch {
+	case err == nil:
+		return ExitOK, true
+	case errors.Is(err, flag.ErrHelp):
+		fs.SetOutput(out)
+		usage()
+		return ExitOK, false
+	}
+	usage()
+	return ExitUsage, false
 }
 
 func loadConfig(flagPath, cwd, home string) (*config.Config, error) {
