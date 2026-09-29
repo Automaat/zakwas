@@ -85,8 +85,8 @@ What it writes:
 | Path in DIR | When | Content |
 |---|---|---|
 | `zakwas.yaml` | always | schema comment, `protect.immutable: true`, a `files` entry per `--add`, plus `brew`/`mise` sections |
-| `Brewfile` | Homebrew installed | `brew bundle dump`; third-party taps this Mac already has get `trusted: true` |
-| `dotfiles/mise/config.toml` | mise installed | every active global tool (`mise ls --global --current`) pinned to the exact version in use; installed to `~/.config/mise/config.toml` |
+| `Brewfile` | Homebrew installed | `brew bundle dump --tap --formula --cask --mas`: no go/npm/cargo/uv/vscode entries, which mise or the tools themselves manage; third-party taps without a `trusted:` option get `trusted: true` (an existing `trusted:` option is left alone) |
+| `dotfiles/mise/config.toml` | mise installed | your global mise config (the file `mise ls --global` reports tools from, else `$MISE_GLOBAL_CONFIG_FILE` or `~/.config/mise/config.toml`) with every active tool pinned to the exact version in use; tool options (`{ version = …, … }`, `[tools.<name>]` tables) and other sections (`[settings]`, `[env]`, …) are kept; active global tools the file doesn't list are added under `[tools]`. Installed to `~/.config/mise/config.toml` |
 | `dotfiles/<path>` | per `--add` | copy of the file or directory |
 | `.gitignore` | always | `*.zakwas-bak*` |
 | `.git` | always | `git init -b main` |
@@ -116,6 +116,8 @@ git remote add origin git@github.com:you/dotfiles.git && git push -u origin main
 curl -fsSL https://raw.githubusercontent.com/Automaat/zakwas/main/install.sh | bash -s -- --repo https://github.com/you/dotfiles.git
 ```
 
+If a step fails after writing started, init removes what it created, including parent directories it made for DIR.
+
 If zakwas already manages files on this Mac from another config, init warns: `plan` in the new repo lists those files as no longer managed, and `apply` deletes them.
 
 ## self-update
@@ -129,6 +131,8 @@ zakwas self-update [--version X.Y.Z]
 | `--version X.Y.Z` | release to install (a leading `v` is fine); default: latest |
 
 Resolves the latest release from the `https://github.com/Automaat/zakwas/releases/latest` redirect (not the rate-limited API), downloads `zakwas_<version>_darwin_<arm64|amd64>.tar.gz` and `checksums.txt`, verifies the SHA256, and replaces the running binary atomically (temp file in the same directory, `chmod 0755`, rename). Prints a message and does nothing when that version is already running.
+
+Build provenance is checked the way `install.sh` does it (see [security.md](security.md)): when `gh` is installed, logged in (`gh auth status`) and supports `--source-ref`, self-update runs `gh attestation verify <archive> --repo Automaat/zakwas --signer-workflow Automaat/zakwas/.github/workflows/release.yml --source-ref refs/tags/v<version>` and stops (exit 1) if it fails. Without such a `gh` it prints the command to verify by hand and continues. Versions before 0.4.0 carry no attestation and skip the check.
 
 It refuses (exit 64) when a package manager owns the binary (the path after resolving symlinks):
 
@@ -179,7 +183,7 @@ To manage it with zakwas, generate the file into your config repo and add it to 
 zakwas schema
 ```
 
-Prints the JSON Schema of `zakwas.yaml`. Editors with the YAML language server use it through the first line `zakwas init` writes:
+Prints the JSON Schema of `zakwas.yaml` (see [config.md](config.md)). Editors with the YAML language server use it through the first line `zakwas init` writes:
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json
