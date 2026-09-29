@@ -14,6 +14,8 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 - **system**: Touch ID for sudo, directories, SSH key
 - **commands**: guarded one-off steps (`run` only while `check` fails)
 
+![zakwas plan, apply, and a protected dotfile](docs/demo/demo.gif)
+
 *Zakwas* is Polish for sourdough starter: keep it, feed it, and every new loaf comes out the same.
 
 > **Status:** pre-1.0 and macOS only. The config format may change between minor versions until 1.0; changes are called out in the [release notes](https://github.com/Automaat/zakwas/releases).
