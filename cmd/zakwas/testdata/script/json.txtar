@@ -1,0 +1,19 @@
+zakwas plan --json
+stdout '"format_version": "1"'
+stdout '"target": "marker"'
+
+zakwas apply --json -y
+! stdout '^[^{]'
+stdout '"type":"step_done"'
+stdout '"type":"summary"'
+stderr 'hello from the command'
+exists home/marker
+
+zakwas check --json
+stdout '"status": "up_to_date"'
+
+-- zakwas.yaml --
+commands:
+  - name: marker
+    check: test -f marker
+    run: echo hello from the command && touch marker

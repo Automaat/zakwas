@@ -29,6 +29,7 @@ type Config struct {
 
 	// Root is the directory holding zakwas.yaml; relative sources resolve from it.
 	Root string `yaml:"-"`
+	Path string `yaml:"-"`
 }
 
 // Protect controls how files and templates are locked down. Write bits are
@@ -129,6 +130,7 @@ func Load(path, home string) (*Config, error) {
 		return nil, err
 	}
 	c.Root = root
+	c.Path = filepath.Join(root, filepath.Base(path))
 	if err := c.Validate(home); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

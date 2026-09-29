@@ -20,11 +20,14 @@ func HistoryPath(home string) string {
 }
 
 type historyEntry struct {
-	Time    time.Time `json:"time"`
-	Commit  string    `json:"commit,omitempty"`
-	Dirty   bool      `json:"dirty,omitempty"`
-	Changes []string  `json:"changes"`
-	Error   string    `json:"error,omitempty"`
+	FormatVersion string              `json:"format_version"`
+	Time          time.Time           `json:"time"`
+	Host          string              `json:"host,omitempty"`
+	Commit        string              `json:"commit,omitempty"`
+	Dirty         bool                `json:"dirty,omitempty"`
+	Changes       []engine.JSONChange `json:"changes"`
+	Result        *resultJSON         `json:"result"`
+	Error         string              `json:"error,omitempty"`
 }
 
 func git(ctx context.Context, r runner.Runner, root string, args ...string) (string, bool) {
@@ -56,16 +59,21 @@ func repoWarnings(ctx context.Context, r runner.Runner, root string) []string {
 
 // recordHistory ignores cancellation, so an interrupted apply still records
 // its commit.
-func recordHistory(ctx context.Context, env Env, root string, plan engine.Plan, applyErr error) error {
+func recordHistory(ctx context.Context, env Env, root string, plan engine.Plan, result engine.Result, applyErr error) error {
 	ctx = context.WithoutCancel(ctx)
-	entry := historyEntry{Time: env.now()}
+	entry := historyEntry{
+		FormatVersion: engine.FormatVersion, Time: env.now(), Host: env.Host,
+		Changes: []engine.JSONChange{}, Result: newResultJSON(result),
+	}
 	entry.Commit, _ = git(ctx, env.Runner, root, "rev-parse", "HEAD")
 	if status, ok := git(ctx, env.Runner, root, "status", "--porcelain"); ok {
 		entry.Dirty = status != ""
 	}
 	for _, mp := range plan {
 		for _, c := range mp.Changes {
-			entry.Changes = append(entry.Changes, mp.Module+": "+c.String())
+			j := c.JSON(false)
+			j.Module = mp.Module
+			entry.Changes = append(entry.Changes, j)
 		}
 	}
 	if applyErr != nil {

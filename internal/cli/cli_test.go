@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
@@ -216,7 +217,10 @@ func TestApplyRecordsHistory(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(data), &entry); err != nil {
 		t.Fatalf("%v in %q", err, data)
 	}
-	if !entry.Time.Equal(env.Now()) || len(entry.Changes) != 1 || !strings.HasPrefix(entry.Changes[0], "links: + ~/.zshrc") {
+	c := entry.Changes
+	if !entry.Time.Equal(env.Now()) || entry.FormatVersion != "1" || len(c) != 1 ||
+		c[0].Module != "links" || c[0].Action != "create" || c[0].Target != "~/.zshrc" ||
+		entry.Result == nil || entry.Result.Applied != 1 {
 		t.Errorf("entry = %+v", entry)
 	}
 	if r := invoke(env, "", "apply", "-y"); r.code != ExitOK || !strings.Contains(r.stdout, "No changes") {
@@ -245,7 +249,7 @@ func TestInterruptedApplyRecordsCommit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	env := Env{Home: home, Runner: cancelAware{fake}}
-	if err := recordHistory(ctx, env, "/repo", nil, ctx.Err()); err != nil {
+	if err := recordHistory(ctx, env, "/repo", nil, engine.Result{}, ctx.Err()); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(HistoryPath(home))
