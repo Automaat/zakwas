@@ -288,3 +288,15 @@ func TestOutdatedShowsVersions(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestTrustTaps(t *testing.T) {
+	in := "tap \"homebrew/bundle\"\ntap \"acme/tools\"\ntap \"acme/other\", \"https://example.com/other.git\"\ntap \"acme/ok\", trusted: true\nbrew \"jq\"\n# tap \"acme/commented\"\ncask \"firefox\""
+	want := "tap \"homebrew/bundle\"\ntap \"acme/tools\", trusted: true\ntap \"acme/other\", \"https://example.com/other.git\", trusted: true\ntap \"acme/ok\", trusted: true\nbrew \"jq\"\n# tap \"acme/commented\"\ncask \"firefox\""
+	got, changed := TrustTaps([]byte(in))
+	if string(got) != want {
+		t.Errorf("TrustTaps =\n%s\nwant\n%s", got, want)
+	}
+	if !reflect.DeepEqual(changed, []string{"acme/tools", "acme/other"}) {
+		t.Errorf("changed = %v", changed)
+	}
+}

@@ -341,3 +341,25 @@ func ParseBrewfile(file string) ([]Entry, error) {
 	}
 	return entries, nil
 }
+
+// TrustTaps marks every third-party tap line without `trusted: true` as
+// trusted, for a Brewfile dumped from a machine that already has the taps,
+// and returns the taps it changed.
+func TrustTaps(data []byte) ([]byte, []string) {
+	var out strings.Builder
+	var changed []string
+	for line := range strings.Lines(string(data)) {
+		g := entryLine.FindStringSubmatch(strings.TrimSpace(line))
+		if g == nil || !thirdParty(Entry{Kind: g[1], Name: g[2]}) || trustedTrue.MatchString(line) {
+			out.WriteString(line)
+			continue
+		}
+		body, nl := strings.CutSuffix(line, "\n")
+		out.WriteString(body + ", trusted: true")
+		if nl {
+			out.WriteString("\n")
+		}
+		changed = append(changed, g[2])
+	}
+	return []byte(out.String()), changed
+}
