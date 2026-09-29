@@ -174,3 +174,11 @@ func TestManagedBy(t *testing.T) {
 		})
 	}
 }
+
+func TestAttested(t *testing.T) {
+	for v, want := range map[string]bool{"0.3.9": false, "0.4.0": true, "0.4.0-rc.1": true, "0.10.0": true, "1.0.0": true, "0.3.99": false} {
+		if got := Attested(v); got != want {
+			t.Errorf("Attested(%q) = %v, want %v", v, got, want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Automaat/zakwas/internal/selfupdate"
@@ -54,7 +55,7 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 		out.printf("zakwas %s is already installed\n", version)
 		return ExitOK
 	}
-	bin, err := u.Fetch(ctx, version)
+	bin, err := fetchVerified(ctx, env, u, version, out)
 	if err == nil {
 		err = selfupdate.Replace(exe, bin)
 	}
@@ -64,6 +65,38 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 	}
 	out.printf("zakwas %s → %s (%s)\n", current, version, exe)
 	return ExitOK
+}
+
+// fetchVerified downloads a release, checks its SHA256 and, like install.sh,
+// its build provenance when an authenticated, recent enough gh is present.
+func fetchVerified(ctx context.Context, env Env, u *selfupdate.Updater, version string, out *console) ([]byte, error) {
+	archive, err := u.Download(ctx, version)
+	if err != nil {
+		return nil, err
+	}
+	asset := u.Asset(version)
+	switch {
+	case !selfupdate.Attested(version):
+		out.printf("zakwas %s predates build attestations; skipping provenance check\n", version)
+	case !selfupdate.CanVerify(ctx, env.Runner):
+		out.printf("Skipped attestation check (needs a recent gh, logged in); to verify: gh release download v%s -R Automaat/zakwas -p %s && gh attestation verify %s %s\n",
+			version, asset, asset, strings.Join(selfupdate.AttestationArgs(version), " "))
+	default:
+		dir, err := os.MkdirTemp("", "zakwas-update-")
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		file := filepath.Join(dir, asset)
+		if err := os.WriteFile(file, archive, 0o600); err != nil {
+			return nil, err
+		}
+		if err := selfupdate.VerifyAttestation(ctx, env.Runner, file, version); err != nil {
+			return nil, err
+		}
+		out.printf("Verified build provenance of %s\n", asset)
+	}
+	return selfupdate.Extract(archive)
 }
 
 // parseInterspersed accepts flags before, between and after positional

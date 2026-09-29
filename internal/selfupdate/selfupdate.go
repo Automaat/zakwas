@@ -86,9 +86,9 @@ func (u *Updater) Latest(ctx context.Context) (string, error) {
 	return v, nil
 }
 
-// Fetch downloads version's archive, checks its SHA256 against
-// checksums.txt and returns the zakwas binary inside.
-func (u *Updater) Fetch(ctx context.Context, version string) ([]byte, error) {
+// Download fetches version's archive and checks its SHA256 against the
+// release's checksums.txt.
+func (u *Updater) Download(ctx context.Context, version string) ([]byte, error) {
 	base := fmt.Sprintf("%s/download/v%s/", u.base(), version)
 	asset := u.Asset(version)
 	sums, err := u.download(ctx, base+"checksums.txt")
@@ -107,7 +107,17 @@ func (u *Updater) Fetch(ctx context.Context, version string) ([]byte, error) {
 	if got := hex.EncodeToString(sum[:]); got != want {
 		return nil, fmt.Errorf("%s: sha256 %s, want %s", asset, got, want)
 	}
-	return extract(archive)
+	return archive, nil
+}
+
+// Fetch downloads and verifies version's archive and returns the zakwas
+// binary inside.
+func (u *Updater) Fetch(ctx context.Context, version string) ([]byte, error) {
+	archive, err := u.Download(ctx, version)
+	if err != nil {
+		return nil, err
+	}
+	return Extract(archive)
 }
 
 func (u *Updater) download(ctx context.Context, url string) ([]byte, error) {
@@ -139,7 +149,8 @@ func checksum(sums []byte, asset string) (string, error) {
 	return "", fmt.Errorf("checksums.txt has no entry for %s", asset)
 }
 
-func extract(archive []byte) ([]byte, error) {
+// Extract returns the zakwas binary from a release archive.
+func Extract(archive []byte) ([]byte, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, err
