@@ -39,7 +39,7 @@ templates:
   vars:
     email: you@example.com
   files:
-    - {src: dotfiles/git/user.tmpl, dst: ~/.config/git/user, mode: 0600}
+    - {src: dotfiles/git/user.tmpl, dst: ~/.config/git/user, mode: 0o600}
 ```
 
 ```ini
