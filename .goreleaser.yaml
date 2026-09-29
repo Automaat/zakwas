@@ -19,3 +19,26 @@ checksum:
 
 changelog:
   use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "^test"
+      - "^style"
+      - "^build"
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Performance
+      regexp: '^perf(\(.+\))?!?:'
+      order: 2
+    - title: Documentation
+      regexp: '^docs(\(.+\))?!?:'
+      order: 3
+    - title: Other
+      order: 999
