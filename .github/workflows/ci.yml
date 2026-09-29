@@ -109,6 +109,9 @@ jobs:
 
       - name: installed zakwas plans the example config
         working-directory: examples
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mise exec github:Automaat/zakwas@latest -- zakwas version
-          mise exec github:Automaat/zakwas@latest -- zakwas plan --only system,files,templates,defaults
+          version=$(gh release view --json tagName --jq '.tagName | ltrimstr("v")')
+          mise exec "github:Automaat/zakwas@$version" -- zakwas version
+          mise exec "github:Automaat/zakwas@$version" -- zakwas plan --only system,files,templates,defaults

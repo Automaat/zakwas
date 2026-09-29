@@ -71,6 +71,14 @@ main() {
         brew install mise
     fi
 
+    # mise hides releases younger than its minimum release age from
+    # "latest", so a fresh release would fail to resolve.
+    if [ "$version" = latest ]; then
+        version=$(curl -fsSL https://api.github.com/repos/Automaat/zakwas/releases/latest |
+            sed -n 's/^ *"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p')
+        [ -n "$version" ] || die "can't find the latest zakwas release"
+    fi
+
     info "Installing zakwas $version"
     mise install "github:Automaat/zakwas@$version"
 
