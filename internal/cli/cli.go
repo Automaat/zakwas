@@ -28,20 +28,28 @@ import (
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
-const usage = `zakwas converges this Mac to zakwas.yaml.
+// commandList lists every command in usage order; completion reads it too.
+var commandList = []struct{ name, args, help string }{
+	{"plan", "", "show pending changes"},
+	{"apply", "", "show pending changes, confirm, apply them"},
+	{"upgrade", "", "refresh Homebrew's package list, then apply (picks up new brew versions)"},
+	{"check", "", "exit 2 when anything drifted (for CI/cron)"},
+	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
+	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
+	{"completion", "zsh|bash|fish", "print a shell completion script"},
+	{"version", "", "print the zakwas version"},
+}
 
-Usage:
-  zakwas [flags] <command>
-
-Commands:
-  plan     show pending changes
-  apply    show pending changes, confirm, apply them
-  upgrade  refresh Homebrew's package list, then apply (picks up new brew versions)
-  check    exit 2 when anything drifted (for CI/cron)
-  version  print the zakwas version
-
-Flags:
-`
+func usage() string {
+	var b strings.Builder
+	b.WriteString("zakwas converges this Mac to zakwas.yaml.\n\nUsage:\n  zakwas [flags] <command>\n\nCommands:\n")
+	for _, c := range commandList {
+		name := strings.TrimSpace(c.name + " " + c.args)
+		fmt.Fprintf(&b, "  %-30s %s\n", name, c.help)
+	}
+	b.WriteString("\nFlags (plan, apply, upgrade, check):\n")
+	return b.String()
+}
 
 // Exit codes.
 const (
@@ -69,6 +77,10 @@ type Env struct {
 	GitHubActions bool
 	Version       string
 	Host          string
+	// Executable is the binary self-update replaces (default: this one).
+	Executable string
+	// ReleaseURL overrides where self-update downloads releases (tests).
+	ReleaseURL string
 }
 
 func (e Env) now() time.Time {
@@ -90,20 +102,17 @@ func Main(ctx context.Context, env Env) int {
 }
 
 func run(ctx context.Context, env Env, out, errOut *console) int {
-	fs := flag.NewFlagSet("zakwas", flag.ContinueOnError)
-	fs.SetOutput(errOut)
-	fs.Usage = func() {
-		errOut.print(usage)
-		fs.PrintDefaults()
+	if len(env.Args) > 0 {
+		switch env.Args[0] {
+		case "init":
+			return runInit(ctx, env, env.Args[1:], out, errOut)
+		case "self-update":
+			return runSelfUpdate(ctx, env, env.Args[1:], out, errOut)
+		case "completion":
+			return runCompletion(env.Args[1:], out, errOut)
+		}
 	}
-	cfgPath := fs.String("c", "", "path to zakwas.yaml (default: search upward from cwd, then $ZAKWAS_CONFIG)")
-	only := fs.String("only", "", "comma-separated modules to run (default: all)")
-	yes := fs.Bool("y", false, "apply without asking for confirmation")
-	diff := fs.Bool("diff", false, "show file content diffs and command scripts")
-	noColor := fs.Bool("no-color", false, "disable colors (also NO_COLOR)")
-	asJSON := fs.Bool("json", false, "machine-readable output: a plan document, or JSON lines events for apply")
-	outFile := fs.String("out", "", "plan: also save the plan to this file, for apply -plan")
-	planFile := fs.String("plan", "", "apply: apply this saved plan if the machine still matches it, without prompting")
+	fs, o := newFlags(errOut)
 	cmd, ok := parseArgs(fs, env.Args)
 	if !ok {
 		fs.Usage()
@@ -114,32 +123,32 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		fs.Usage()
 		return ExitUsage
 	}
-	if msg := flagConflict(cmd, *asJSON, *yes, *outFile, *planFile, *only); msg != "" {
+	if msg := flagConflict(cmd, o.asJSON, o.yes, o.outFile, o.planFile, o.only); msg != "" {
 		errOut.print("zakwas: " + msg + "\n")
 		return ExitUsage
 	}
 
-	cfg, err := loadConfig(*cfgPath, env.Cwd, env.Home)
+	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr
 	}
 	var saved *planDoc
-	if *planFile != "" {
-		doc, err := loadPlan(*planFile)
+	if o.planFile != "" {
+		doc, err := loadPlan(o.planFile)
 		if err != nil {
 			errOut.fail(err)
 			return ExitErr
 		}
 		saved = &doc
-		*only = strings.Join(doc.Only, ",")
+		o.only = strings.Join(doc.Only, ",")
 	}
-	mods, err := selectModules(Modules(cfg, env), *only)
+	mods, err := selectModules(Modules(cfg, env), o.only)
 	if err != nil {
 		errOut.fail(err)
 		return ExitUsage
 	}
-	if *asJSON {
+	if o.asJSON {
 		toolOutputToStderr(env)
 	}
 
@@ -155,14 +164,14 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		}
 	}
 
-	style := engine.Style{Color: env.Color && !*noColor && !*asJSON, ShowDiffs: *diff}
+	style := engine.Style{Color: env.Color && !o.noColor && !o.asJSON, ShowDiffs: o.diff}
 	plan := engine.Build(ctx, mods)
 	planErr := plan.Err()
 	var onlyList []string
-	if *only != "" {
-		onlyList = strings.Split(*only, ",")
+	if o.only != "" {
+		onlyList = strings.Split(o.only, ",")
 	}
-	machine := *asJSON || *outFile != "" || saved != nil
+	machine := o.asJSON || o.outFile != "" || saved != nil
 	var commit string
 	if machine {
 		commit, _ = git(ctx, env.Runner, cfg.Root, "rev-parse", "HEAD")
@@ -174,17 +183,17 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return ExitErr
 		}
 	}
-	if *outFile != "" {
-		if err := savePlan(*outFile, full); err != nil {
+	if o.outFile != "" {
+		if err := savePlan(o.outFile, full); err != nil {
 			errOut.fail(err)
 			return ExitErr
 		}
 	}
-	doc := newPlanDoc(env, cfg.Path, commit, onlyList, plan, *diff)
+	doc := newPlanDoc(env, cfg.Path, commit, onlyList, plan, o.diff)
 	switch {
-	case *asJSON && cmd == "plan", *asJSON && cmd == "check":
+	case o.asJSON && cmd == "plan", o.asJSON && cmd == "check":
 		out.print(mustIndent(doc))
-	case *asJSON:
+	case o.asJSON:
 		writeJSON(out, event{Type: "plan", FormatVersion: engine.FormatVersion, Plan: &doc})
 	default:
 		if err := engine.Render(out, plan, style); err != nil {
@@ -209,7 +218,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 
 	if plan.Empty() {
-		if *asJSON {
+		if o.asJSON {
 			writeJSON(out, event{Type: "summary", Result: &resultJSON{}})
 		}
 		if planErr != nil {
@@ -221,7 +230,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	for _, w := range repoWarnings(ctx, env.Runner, cfg.Root) {
 		errOut.print("zakwas: warning: " + w + "\n")
 	}
-	if !*yes && saved == nil {
+	if !o.yes && saved == nil {
 		if !env.StdinTTY {
 			errOut.print("zakwas: stdin is not a terminal, so apply can't ask for confirmation; review with `zakwas plan`, then run `zakwas apply -y`\n")
 			return ExitUsage
@@ -233,7 +242,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 
 	var obs engine.Observer = jsonEvents{out: out}
-	if !*asJSON {
+	if !o.asJSON {
 		out.print("\n")
 		obs = &progress{out: out, style: style, groups: env.GitHubActions}
 	}
@@ -242,7 +251,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	if err := recordHistory(ctx, env, cfg.Root, plan, result, finalErr); err != nil {
 		errOut.print("zakwas: warning: history not recorded: " + err.Error() + "\n")
 	}
-	if *asJSON {
+	if o.asJSON {
 		e := event{Type: "summary", Result: newResultJSON(result)}
 		if finalErr != nil {
 			e.Error = finalErr.Error()
@@ -256,6 +265,31 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		return ExitErr
 	}
 	return ExitOK
+}
+
+type options struct {
+	cfgPath, only, outFile, planFile string
+	yes, diff, noColor, asJSON       bool
+}
+
+// newFlags defines the flags of plan, apply, upgrade and check.
+func newFlags(errOut io.Writer) (*flag.FlagSet, *options) {
+	var o options
+	fs := flag.NewFlagSet("zakwas", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	fs.Usage = func() {
+		_, _ = io.WriteString(errOut, usage())
+		fs.PrintDefaults()
+	}
+	fs.StringVar(&o.cfgPath, "c", "", "path to zakwas.yaml (default: search upward from cwd, then $ZAKWAS_CONFIG)")
+	fs.StringVar(&o.only, "only", "", "comma-separated modules to run (default: all)")
+	fs.BoolVar(&o.yes, "y", false, "apply without asking for confirmation")
+	fs.BoolVar(&o.diff, "diff", false, "show file content diffs and command scripts")
+	fs.BoolVar(&o.noColor, "no-color", false, "disable colors (also NO_COLOR)")
+	fs.BoolVar(&o.asJSON, "json", false, "machine-readable output: a plan document, or JSON lines events for apply")
+	fs.StringVar(&o.outFile, "out", "", "plan: also save the plan to this file, for apply -plan")
+	fs.StringVar(&o.planFile, "plan", "", "apply: apply this saved plan if the machine still matches it, without prompting")
+	return fs, &o
 }
 
 // flagConflict rejects flag combinations that would silently do the wrong
