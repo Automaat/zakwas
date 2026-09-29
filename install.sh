@@ -7,6 +7,7 @@ version="${ZAKWAS_VERSION:-latest}"
 bin_dir="$HOME/.local/bin"
 tmp=""
 apply=1
+attested_since=0.4.0
 
 info() { printf '\033[1;33m==> %s\033[0m\n' "$1"; }
 die() { printf '\033[1;31mzakwas: %s\033[0m\n' "$1" >&2; exit 1; }
@@ -38,6 +39,34 @@ parse_args() {
     done
 }
 
+version_at_least() {
+    local IFS=. i
+    local -a a b
+    read -r -a a <<<"${1%%[-+]*}"
+    read -r -a b <<<"$2"
+    for i in 0 1 2; do
+        ((10#${a[i]:-0} > 10#${b[i]:-0})) && return 0
+        ((10#${a[i]:-0} < 10#${b[i]:-0})) && return 1
+    done
+    return 0
+}
+
+verify_attestation() {
+    local file="$1" name
+    name=$(basename "$file")
+    if ! version_at_least "$version" "$attested_since"; then
+        info "zakwas $version predates build attestations; skipping provenance check"
+        return
+    fi
+    if command -v gh &>/dev/null && gh auth status &>/dev/null; then
+        info "Verifying build provenance of $name"
+        gh attestation verify "$file" --repo Automaat/zakwas ||
+            die "attestation verification failed for $name"
+    else
+        info "Skipped attestation check (needs gh, logged in); to verify: gh release download v$version -R Automaat/zakwas -p $name && gh attestation verify $name --repo Automaat/zakwas"
+    fi
+}
+
 install_zakwas() {
     if [ "$version" = latest ]; then
         # The releases/latest redirect names the tag; the API would count
@@ -46,6 +75,7 @@ install_zakwas() {
         version=${version##*/v}
         [[ "$version" =~ ^[0-9] ]] || die "can't find the latest zakwas release"
     fi
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]] || die "invalid version: $version"
     local arch archive base
     arch=$(uname -m)
     [ "$arch" = x86_64 ] && arch=amd64
@@ -59,6 +89,7 @@ install_zakwas() {
     curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
     (cd "$tmp" && grep "  $archive\$" checksums.txt | shasum -a 256 -c -s) ||
         die "checksum mismatch for $archive"
+    verify_attestation "$tmp/$archive"
     tar -xzf "$tmp/$archive" -C "$tmp" zakwas
     mkdir -p "$bin_dir"
     mv "$tmp/zakwas" "$bin_dir/zakwas"
