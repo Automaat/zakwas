@@ -121,3 +121,12 @@ func TestBashCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestCompletionHelp(t *testing.T) {
+	for _, args := range [][]string{{"completion", "--help"}, {"completion", "-h"}, {"completion", "zsh", "--help"}} {
+		r := invoke(Env{Runner: runnertest.New()}, "", args...)
+		if r.code != ExitOK || !strings.Contains(r.stdout, "Usage: zakwas completion") || r.stderr != "" {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+}

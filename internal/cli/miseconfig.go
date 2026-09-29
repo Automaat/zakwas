@@ -73,7 +73,8 @@ func globalConfigPath(tools map[string][]miseTool, home string) string {
 // in use. mise's own editor keeps comments, options and other sections, and
 // understands aliases (nodejs = "22" becomes node = "22.21.1"). It returns
 // the tools left as written. mise runs with dst as its global config and a
-// throwaway state and cache dir, so nothing outside the repo changes.
+// throwaway state and cache dir, so no config or state outside the repo
+// changes; mise may add version alias symlinks to its shared installs dir.
 func writeMiseConfig(ctx context.Context, r runner.Runner, tools map[string][]miseTool, home, dst string) ([]string, error) {
 	data, err := os.ReadFile(globalConfigPath(tools, home))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {

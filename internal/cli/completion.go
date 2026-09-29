@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 )
 
@@ -77,9 +78,15 @@ func newCompletionModel() completionModel {
 	return completionModel{global: flagsOf(global), init: flagsOf(initFS), selfUpdate: flagsOf(selfUpdateFS)}
 }
 
+const completionUsage = "Usage: zakwas completion zsh|bash|fish\n"
+
 func runCompletion(args []string, out, errOut *console) int {
+	if slices.ContainsFunc(args, func(a string) bool { return a == "-h" || a == "--help" }) {
+		out.print(completionUsage)
+		return ExitOK
+	}
 	if len(args) != 1 {
-		errOut.print("Usage: zakwas completion zsh|bash|fish\n")
+		errOut.print(completionUsage)
 		return ExitUsage
 	}
 	m := newCompletionModel()

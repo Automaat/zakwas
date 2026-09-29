@@ -97,7 +97,7 @@ Sections for tools that aren't installed are left out. `brew.cleanup` starts as 
 
 - comments, `[settings]`, `[env]`, `[[watch_files]]` and every other section stay as written;
 - tool options stay: `"pipx:black" = { version = "latest", uvx = false }` only gets its `version` changed, same for `[tools.<name>]` tables and multi-line arrays;
-- aliases resolve: `nodejs = "22"` becomes `node = "22.21.1"` (no duplicate key);
+- aliases resolve: `nodejs = "22"` becomes `node = "22.21.1"` (no duplicate key), moved to the end of `[tools]`; order there decides which tool wins when two ship the same binary, so check it;
 - tools already pinned exactly, and tools only other global files list, are left alone;
 - a tool with several versions keeps the file's order (the first is mise's default).
 
