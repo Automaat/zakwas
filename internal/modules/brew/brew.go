@@ -342,8 +342,59 @@ func ParseBrewfile(file string) ([]Entry, error) {
 	var entries []Entry
 	for line := range strings.Lines(string(data)) {
 		if g := entryLine.FindStringSubmatch(strings.TrimSpace(line)); g != nil {
-			entries = append(entries, Entry{Kind: g[1], Name: g[2], Trusted: trustedTrue.MatchString(line)})
+			code, _ := splitComment(line)
+			entries = append(entries, Entry{Kind: g[1], Name: g[2], Trusted: trustedTrue.MatchString(code)})
 		}
 	}
 	return entries, nil
+}
+
+// TrustTaps marks every third-party tap line without a `trusted:` option as
+// trusted, for a Brewfile dumped from a machine that already has the taps,
+// and returns the taps it changed. An existing `trusted:` option (e.g.
+// trusting only some formulae) is left alone rather than widened.
+func TrustTaps(data []byte) ([]byte, []string) {
+	var out strings.Builder
+	var changed []string
+	for line := range strings.Lines(string(data)) {
+		body, nl := strings.CutSuffix(line, "\n")
+		code, comment := splitComment(body)
+		g := entryLine.FindStringSubmatch(strings.TrimSpace(code))
+		if g == nil || !thirdParty(Entry{Kind: g[1], Name: g[2]}) || trustedOption.MatchString(code) {
+			out.WriteString(line)
+			continue
+		}
+		trimmed := strings.TrimRight(code, " \t")
+		out.WriteString(trimmed + ", trusted: true" + code[len(trimmed):] + comment)
+		if nl {
+			out.WriteString("\n")
+		}
+		changed = append(changed, g[2])
+	}
+	return []byte(out.String()), changed
+}
+
+var trustedOption = regexp.MustCompile(`,\s*trusted:`)
+
+// splitComment splits a Brewfile (Ruby) line at the first # outside a
+// string literal.
+func splitComment(line string) (code, comment string) {
+	var quote rune
+	escaped := false
+	for i, r := range line {
+		switch {
+		case escaped:
+			escaped = false
+		case quote != 0 && r == '\\':
+			escaped = true
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote != 0:
+		case r == '"' || r == '\'':
+			quote = r
+		case r == '#':
+			return line[:i], line[i:]
+		}
+	}
+	return line, ""
 }

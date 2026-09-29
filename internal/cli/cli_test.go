@@ -333,3 +333,40 @@ func TestPlanDiff(t *testing.T) {
 		t.Errorf("diff shown without --diff: %s", r.stdout)
 	}
 }
+
+func TestHelpPrintsUsageOnce(t *testing.T) {
+	tests := []struct {
+		args   []string
+		code   int
+		usage  string
+		stdout bool
+	}{
+		{[]string{"--help"}, ExitOK, "Usage:\n  zakwas [flags] <command>", true},
+		{[]string{"plan", "-h"}, ExitOK, "Usage:\n  zakwas [flags] <command>", true},
+		{[]string{"init", "--help"}, ExitOK, "Usage: zakwas init DIR", true},
+		{[]string{"self-update", "-h"}, ExitOK, "Usage: zakwas self-update", true},
+		{nil, ExitUsage, "Usage:\n  zakwas [flags] <command>", false},
+		{[]string{"--bogus", "plan"}, ExitUsage, "Usage:\n  zakwas [flags] <command>", false},
+		{[]string{"init", "--bogus", "dir"}, ExitUsage, "Usage: zakwas init DIR", false},
+		{[]string{"init"}, ExitUsage, "Usage: zakwas init DIR", false},
+		{[]string{"self-update", "extra"}, ExitUsage, "Usage: zakwas self-update", false},
+	}
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			r := invoke(Env{Home: t.TempDir(), Cwd: t.TempDir(), Runner: runnertest.New()}, "", tt.args...)
+			if r.code != tt.code {
+				t.Errorf("exit %d, want %d", r.code, tt.code)
+			}
+			where, other := r.stderr, r.stdout
+			if tt.stdout {
+				where, other = r.stdout, r.stderr
+			}
+			if n := strings.Count(where, tt.usage); n != 1 {
+				t.Errorf("usage printed %d times:\nstdout: %s\nstderr: %s", n, r.stdout, r.stderr)
+			}
+			if strings.Contains(other, "Usage") {
+				t.Errorf("usage also on the other stream: %q", other)
+			}
+		})
+	}
+}

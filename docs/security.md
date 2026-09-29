@@ -15,6 +15,10 @@ Releases are built by GoReleaser in GitHub Actions (`.github/workflows/release.y
 
 The checksum alone catches a corrupted or truncated download. It can't catch a tampered release, because `checksums.txt` comes from the same place as the archive. The attestation can: it is signed through GitHub's OIDC identity for the release workflow, which a modified asset can't reproduce.
 
+### What `zakwas self-update` checks
+
+The same steps: SHA256 against `checksums.txt`, then `gh attestation verify` with the same `--repo`, `--signer-workflow` and `--source-ref` when a logged-in `gh` that supports `--source-ref` is installed (skipped, with the manual command printed, otherwise; skipped for versions before 0.4.0). A failed verification leaves the installed binary untouched.
+
 ### Verify by hand
 
 ```bash

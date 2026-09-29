@@ -1,0 +1,100 @@
+chmod 755 bin/brew
+chmod 755 bin/mise
+
+! zakwas init
+stderr 'Usage: zakwas init DIR'
+
+! zakwas init repo --add /etc/hosts
+stderr 'not inside \$HOME'
+! exists repo
+
+zakwas init repo --add ~/.zshrc --add ~/.config/git
+stdout '^Created .*/repo$'
+stdout 'cd .*/repo && zakwas plan'
+exists repo/.git
+grep -count=1 '^. yaml-language-server: \$schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json$' repo/zakwas.yaml
+exec tail -n +2 repo/zakwas.yaml
+cmp stdout zakwas.golden
+cmp repo/dotfiles/mise/config.toml mise.golden
+cmp repo/dotfiles/zshrc home/.zshrc
+cmp repo/dotfiles/config/git/config home/.config/git/config
+cmp repo/dotfiles/config/git/ignore home/.config/git/ignore
+grep '^brew "jq"$' repo/Brewfile
+grep '^\*\.zakwas-bak\*$' repo/.gitignore
+cmp home/.config/mise/config.toml home-mise.golden
+
+! zakwas init repo
+stderr 'not empty'
+
+cd repo
+zakwas plan
+cmpenv stdout $WORK/plan.golden
+cmpenv $WORK/calls $WORK/calls.golden
+
+-- home/.zshrc --
+export EDITOR=vim
+-- home/.config/git/config --
+[user]
+	name = Test
+-- home/.config/git/ignore --
+.DS_Store
+-- home/.config/mise/config.toml --
+[tools]
+jq = "latest"
+-- home-mise.golden --
+[tools]
+jq = "latest"
+-- zakwas.golden --
+
+protect:
+  immutable: true
+
+files:
+  - src: dotfiles/zshrc
+    dst: ~/.zshrc
+  - src: dotfiles/config/git
+    dst: ~/.config/git
+  - src: dotfiles/mise/config.toml
+    dst: ~/.config/mise/config.toml
+
+brew:
+  file: Brewfile
+  cleanup: none
+
+mise:
+  config: dotfiles/mise/config.toml
+-- mise.golden --
+[tools]
+jq = "1.7.1"
+-- plan.golden --
+files
+  ~ ~/.zshrc                    mode 644 → 444, set immutable, already matches, start tracking
+  ~ ~/.config/git/config        mode 644 → 444, set immutable, already matches, start tracking
+  ~ ~/.config/git/ignore        mode 644 → 444, set immutable, already matches, start tracking
+  ~ ~/.config/mise/config.toml  not managed yet, back up to config.toml.zakwas-bak
+✓ up to date: system, links, templates, brew, mise, commands, defaults
+
+Plan: 0 to add, 4 to change, 0 to remove, 0 to run.
+-- calls.golden --
+mise ls --global --current --json (in /)
+mise use --global --pin --quiet jq@1.7.1 (in /)
+brew bundle dump --tap --formula --cask --mas --file $WORK/repo/Brewfile (auto-update off: 1)
+brew bundle check --file $WORK/repo/Brewfile --verbose --no-upgrade (auto-update off: 1)
+mise ls --global --missing --json (in /)
+-- bin/brew --
+#!/bin/sh
+echo "brew $* (auto-update off: $HOMEBREW_NO_AUTO_UPDATE)" >> "$WORK/calls"
+case "$1 $2" in
+  "bundle dump") [ "$7" = --file ] && echo 'brew "jq"' > "$8" ;;
+  "bundle check") exit 0 ;;
+  *) echo "unexpected brew $*" >&2; exit 99 ;;
+esac
+-- bin/mise --
+#!/bin/sh
+echo "mise $* (in $PWD)" >> "$WORK/calls"
+case "$*" in
+  "ls --global --current --json") echo '{"jq":[{"version":"1.7.1","requested_version":"latest","installed":true}]}' ;;
+  "use --global --pin --quiet jq@1.7.1") sed 's/"latest"/"1.7.1"/' "$MISE_GLOBAL_CONFIG_FILE" > "$MISE_GLOBAL_CONFIG_FILE.new" && mv "$MISE_GLOBAL_CONFIG_FILE.new" "$MISE_GLOBAL_CONFIG_FILE" ;;
+  "ls --global --missing --json") echo '{}' ;;
+  *) echo "unexpected mise $*" >&2; exit 99 ;;
+esac
