@@ -13,7 +13,7 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `internal/modules/<name>/` | one package per module |
 | `internal/install/` | protected-copy writer + hash state (`~/.local/state/zakwas/files.json`) |
 | `internal/runner/` | exec abstraction; `runnertest.Fake` for tests |
-| `install.sh` | fresh-Mac installer (CLT, brew, mise, zakwas, clone, apply) |
+| `install.sh` | fresh-Mac installer: CLT, zakwas binary from the release, clone, apply |
 | `examples/` | example config repo; CI plans and applies it |
 | `.goreleaser.yaml` | darwin release binaries, published on `v*` tags |
 
@@ -48,5 +48,6 @@ system → files → links → templates → brew → mise → commands → defa
 - zakwas refuses to write through a symlinked parent dir under `$HOME` or one resolving into the config repo.
 - The mise module runs mise from `/`: from `$HOME`, mise treats `~/.config/mise/config.toml` as a project config that outranks the repo file, hiding bumped pins until after `apply`.
 - `commands` stops at the first failing entry.
+- zakwas bootstraps its own prerequisites: brew/mise modules plan an install of Homebrew / mise (pinned `mise.Version`, SHA256 from the release's `SHASUMS256.txt`) when `Runner.Installed` says the binary is missing. `main` appends `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` to `PATH` so later modules find what earlier ones installed.
 - Nothing user-specific in code or `examples/`: no personal paths, taps, or keys.
 - `install.sh` passes `shellcheck`, workflows pass `actionlint` (both in CI).

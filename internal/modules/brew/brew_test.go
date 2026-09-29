@@ -236,3 +236,39 @@ func TestCleanupFailureWithoutListIsAnError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestBootstrapInstallsHomebrewThenBundle(t *testing.T) {
+	m, fake, file := newModule(t, config.Brew{Cleanup: config.CleanupZap})
+	fake.Missing("brew")
+	fake.OnOK("/bin/bash -c "+homebrewInstall, "")
+	fake.OnOK("brew bundle install --file "+file+" --no-upgrade", "")
+
+	changes, err := m.Plan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"+ Homebrew", "+ tap automaat/tap", "+ tap homebrew/services", "+ brew jq", "+ brew automaat/tap/cache-buster",
+		"+ cask ghostty", "! brew bundle install",
+	}
+	if got := targets(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if len(fake.Calls) != 0 {
+		t.Fatalf("planning without brew ran %v", fake.Lines())
+	}
+	if err := engine.Apply(context.Background(), func(string) {}, engine.Plan{{Changes: changes}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.Lines(); len(got) != 2 || !strings.HasPrefix(got[0], "/bin/bash") {
+		t.Errorf("ran %v, want the installer then brew bundle install", got)
+	}
+}
+
+func TestBootstrapStillRequiresTrustedTaps(t *testing.T) {
+	m, fake, _ := newModuleWith(t, config.Brew{}, "tap \"x/y\"\n")
+	fake.Missing("brew")
+	if _, err := m.Plan(context.Background()); err == nil {
+		t.Fatal("untrusted tap accepted")
+	}
+}

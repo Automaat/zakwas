@@ -52,8 +52,11 @@ func (r Result) Err(c Cmd) error {
 
 // Runner executes commands. Run returns an error only when the command could
 // not be started; a non-zero exit is reported through Result.ExitCode.
+// Installed reports whether a binary is on PATH, so modules can install
+// their own prerequisites (brew, mise) on a fresh machine.
 type Runner interface {
 	Run(ctx context.Context, c Cmd) (Result, error)
+	Installed(name string) bool
 }
 
 // Exec runs commands on the host.
@@ -70,6 +73,11 @@ func NewExec() *Exec {
 // WaitDelay is how long a cancelled command gets to exit after SIGINT
 // before it is killed.
 const WaitDelay = 30 * time.Second
+
+func (e *Exec) Installed(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
 
 // Run interrupts the command when ctx is cancelled rather than killing it:
 // SIGKILL would leave brew or mise mid-install with locks and partial kegs.

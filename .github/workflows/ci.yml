@@ -99,8 +99,6 @@ jobs:
     # this commit's code.
     runs-on: macos-26
     timeout-minutes: 20
-    env:
-      MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -109,9 +107,36 @@ jobs:
 
       - name: installed zakwas plans the example config
         working-directory: examples
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(gh release view --json tagName --jq '.tagName | ltrimstr("v")')
-          mise exec "github:Automaat/zakwas@$version" -- zakwas version
-          mise exec "github:Automaat/zakwas@$version" -- zakwas plan --only system,files,templates,defaults
+          ~/.local/bin/zakwas version
+          ~/.local/bin/zakwas plan --only system,files,templates,defaults
+
+  bootstrap:
+    name: installs mise on a Mac without it
+    # The runner image has Homebrew but no mise, so the mise module must
+    # download it and then install the example's tools with it.
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: build
+        run: go build -o "$RUNNER_TEMP/zakwas" ./cmd/zakwas
+
+      - name: no mise yet
+        run: if command -v mise; then echo "runner already has mise"; exit 1; fi
+
+      - name: apply
+        run: |
+          "$RUNNER_TEMP/zakwas" -c examples/zakwas.yaml apply -y --only files,mise
+
+      - name: mise and the pinned tools are installed
+        run: |
+          ~/.local/bin/mise --version
+          "$RUNNER_TEMP/zakwas" -c examples/zakwas.yaml check --only files,mise

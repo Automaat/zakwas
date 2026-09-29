@@ -15,11 +15,36 @@ import (
 type Fake struct {
 	mu        sync.Mutex
 	responses map[string][]runner.Result
+	missing   map[string]bool
 	Calls     []runner.Cmd
 }
 
 func New() *Fake {
-	return &Fake{responses: map[string][]runner.Result{}}
+	return &Fake{responses: map[string][]runner.Result{}, missing: map[string]bool{}}
+}
+
+// Missing makes Installed report the binaries as not installed; every other
+// binary is installed.
+func (f *Fake) Missing(names ...string) *Fake {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, n := range names {
+		f.missing[n] = true
+	}
+	return f
+}
+
+// Install makes Installed find a binary again, as an install step would.
+func (f *Fake) Install(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.missing, name)
+}
+
+func (f *Fake) Installed(name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.missing[name]
 }
 
 // On registers a response for a command line. Registering the same line

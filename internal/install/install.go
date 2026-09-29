@@ -185,7 +185,7 @@ func (in *Installer) install(dst string, want []byte, perm fs.FileMode, backup b
 				return err
 			}
 		}
-		if err := writeAtomic(dst, want, perm); err != nil {
+		if err := WriteAtomic(dst, want, perm); err != nil {
 			return err
 		}
 		return in.finish(dst, want)
@@ -370,9 +370,9 @@ func Backup(path string) (string, error) {
 	}
 }
 
-// writeAtomic replaces dst via rename so a failed write never leaves a
+// WriteAtomic replaces dst via rename so a failed write never leaves a
 // half-written file behind.
-func writeAtomic(dst string, data []byte, perm fs.FileMode) (err error) {
+func WriteAtomic(dst string, data []byte, perm fs.FileMode) (err error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}

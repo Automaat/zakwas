@@ -37,6 +37,9 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !m.Runner.Installed("brew") {
+		return m.planBootstrap(file, entries)
+	}
 
 	if err := requireTrust(entries); err != nil {
 		return nil, err
@@ -72,6 +75,28 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		return nil, err
 	}
 	return append(append(trust, install...), cleanup...), nil
+}
+
+// homebrewInstall primes sudo while a terminal is attached, so the official
+// installer can run NONINTERACTIVE (no "press RETURN") with cached credentials.
+const homebrewInstall = `sudo -v && NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+
+// planBootstrap installs Homebrew, then everything in the Brewfile; taps are
+// trusted by `brew bundle install` from their `trusted:` options. A fresh
+// Homebrew has nothing to clean up.
+func (m *Module) planBootstrap(file string, entries []Entry) ([]engine.Change, error) {
+	if err := requireTrust(entries); err != nil {
+		return nil, err
+	}
+	cmd := runner.Cmd{Name: "/bin/bash", Args: []string{"-c", homebrewInstall}, Stream: true}
+	changes := []engine.Change{{
+		Action: engine.Create, Target: "Homebrew",
+		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
+	}}
+	for _, e := range entries {
+		changes = append(changes, engine.Change{Action: engine.Create, Target: e.Kind + " " + e.Name})
+	}
+	return append(changes, m.bundleInstall(file)), nil
 }
 
 type trustJSON struct {

@@ -19,14 +19,9 @@ curl -fsSL https://raw.githubusercontent.com/Automaat/zakwas/main/install.sh |
   bash -s -- --repo https://github.com/you/dotfiles.git
 ```
 
-Installs Xcode CLI tools, Homebrew, mise and zakwas, clones your config to `~/dotfiles` (`--dir` to change), then runs `zakwas apply`. `--no-apply` stops before applying, for configs that need manual steps first (e.g. registering an SSH key). `--version X.Y.Z` pins the release.
+Installs the Xcode Command Line Tools and zakwas (checksum-verified, to `~/.local/bin/zakwas`), clones your config to `~/dotfiles` (`--dir` to change), then runs `zakwas apply`. `--no-apply` stops before applying, for configs that need manual steps first (e.g. registering an SSH key). `--version X.Y.Z` pins the release; re-run with `--no-apply` to update zakwas.
 
-Keep zakwas itself in your managed mise config so it stays installed and gets bumped with the rest:
-
-```toml
-[tools]
-"github:Automaat/zakwas" = "0.1.0"
-```
+zakwas needs nothing else: when the config has a `brew` section and Homebrew is missing, the plan installs it first (official installer, asks for your password); when it has a `mise` section and mise is missing, it downloads a pinned mise release to `~/.local/bin/mise`, verifies its SHA256, then installs your tools with it. If the Brewfile lists `mise`, the Homebrew one is used instead.
 
 ## Usage
 
