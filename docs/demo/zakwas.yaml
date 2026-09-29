@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json
+protect:
+  immutable: true
+files:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+  - {src: dotfiles/gitconfig, dst: ~/.config/git/config}
+templates:
+  vars:
+    email: you@example.com
+  files:
+    - {src: dotfiles/gituser.tmpl, dst: ~/.config/git/user}
+commands:
+  - name: projects dir
+    check: test -d Projects
+    run: mkdir Projects && echo "created ~/Projects"

@@ -1,0 +1,29 @@
+name: Bug report
+description: zakwas did something wrong or unexpected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: "`zakwas plan --diff` or the failing apply output. Remove anything private."
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant zakwas.yaml
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: "`zakwas version`, macOS version, `brew --version`, `mise --version`"
+    validations:
+      required: true
