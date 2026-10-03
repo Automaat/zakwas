@@ -468,7 +468,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Paths: paths, Runner: env.Runner})
 	}
 	if cfg.Agents != nil {
-		mods = append(mods, &agents.Module{Agents: *cfg.Agents, Paths: paths, Runner: env.Runner, ClaudeDir: claudeDir(env)})
+		mods = append(mods, &agents.Module{Agents: *cfg.Agents, Paths: paths, Runner: env.Runner, ClaudeConfigDir: claudeConfigDir(env)})
 	}
 	return append(mods,
 		&commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner},
@@ -476,12 +476,14 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	)
 }
 
-// claudeDir is where Claude Code keeps its settings and plugin state.
-func claudeDir(env Env) string {
-	if dir := env.ClaudeConfigDir; dir != "" {
+// claudeConfigDir makes $CLAUDE_CONFIG_DIR absolute: zakwas reads it from
+// its own working directory but runs claude from /.
+func claudeConfigDir(env Env) string {
+	dir := env.ClaudeConfigDir
+	if dir == "" || filepath.IsAbs(dir) {
 		return dir
 	}
-	return filepath.Join(env.Home, ".claude")
+	return filepath.Join(env.Cwd, dir)
 }
 
 func templateDsts(cfg *config.Config, paths config.Paths) []string {

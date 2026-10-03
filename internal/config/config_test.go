@@ -143,6 +143,8 @@ defaults:
 		{"unquoted timestamp default", "defaults: [{domain: d, key: k, value: 2024-01-01T10:00:00Z}]", []string{"YAML reads 2024-01-01T10:00:00Z as a date"}},
 		{"template mode 0o unreadable by owner", "templates: {files: [{src: a, dst: ~/a, mode: 0o044}]}", []string{"e.g. 0o644"}},
 		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode)`}},
+		{"duplicate agent provider", "agents: {providers: [claude, claude]}", []string{`agents.providers: provider "claude" is listed twice`}},
+		{"duplicate plugin provider", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: [codex, codex]}]}", []string{`agents.plugins[0].providers: provider "codex" is listed twice`}},
 		{"empty agent providers", "agents: {providers: []}", []string{"agents.providers: list at least one provider"}},
 		{"plugin from undeclared marketplace", "agents: {plugins: [humanize@sai]}", []string{`agents.plugins[0]: marketplace "sai" of humanize@sai is not declared`}},
 		{"plugin id without marketplace", "agents: {marketplaces: {sai: o/sai}, plugins: [humanize]}", []string{`agents.plugins[0]: id "humanize" must be name@marketplace`}},

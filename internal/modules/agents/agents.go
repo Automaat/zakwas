@@ -16,13 +16,13 @@ import (
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
-// Module converges the agents section. ClaudeDir is Claude Code's config
-// directory: $CLAUDE_CONFIG_DIR or ~/.claude.
+// Module converges the agents section. ClaudeConfigDir is an absolute
+// $CLAUDE_CONFIG_DIR, or empty for Claude's default ~/.claude.
 type Module struct {
-	Agents    config.Agents
-	Paths     config.Paths
-	Runner    runner.Runner
-	ClaudeDir string
+	Agents          config.Agents
+	Paths           config.Paths
+	Runner          runner.Runner
+	ClaudeConfigDir string
 }
 
 func (m *Module) Name() string { return "agents" }
@@ -35,8 +35,18 @@ type backend interface {
 
 func (m *Module) backends() map[string]backend {
 	return map[string]backend{
-		config.ProviderClaude: &claude{runner: m.Runner, dir: m.ClaudeDir},
+		config.ProviderClaude: m.claudeBackend(),
 	}
+}
+
+// claudeBackend passes an explicit config dir on to claude, so its reads
+// and zakwas's own match; the default is left implicit because setting it
+// also moves Claude's global ~/.claude.json.
+func (m *Module) claudeBackend() *claude {
+	if m.ClaudeConfigDir != "" {
+		return &claude{runner: m.Runner, dir: m.ClaudeConfigDir, env: []string{"CLAUDE_CONFIG_DIR=" + m.ClaudeConfigDir}}
+	}
+	return &claude{runner: m.Runner, dir: filepath.Join(m.Paths.Home, ".claude")}
 }
 
 // desired is what one provider should end up with; sources maps each

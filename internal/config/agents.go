@@ -139,8 +139,10 @@ func (a *Agents) validate() []error {
 		if list != nil && len(list) == 0 {
 			errs = append(errs, fmt.Errorf("%s: list at least one provider, or omit it for %s", what, allowedWhat))
 		}
-		for _, p := range list {
+		for i, p := range list {
 			switch {
+			case slices.Contains(list[:i], p):
+				errs = append(errs, fmt.Errorf("%s: provider %q is listed twice", what, p))
 			case !slices.Contains(Providers, p):
 				errs = append(errs, fmt.Errorf("%s: unknown provider %q (want %s)", what, p, strings.Join(Providers, ", ")))
 			case !slices.Contains(allowed, p):

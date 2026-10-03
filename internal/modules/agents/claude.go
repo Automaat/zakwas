@@ -24,6 +24,7 @@ import (
 type claude struct {
 	runner runner.Runner
 	dir    string
+	env    []string
 }
 
 const scopeUser = "user"
@@ -31,7 +32,7 @@ const scopeUser = "user"
 // cmd runs claude from / so a project's .claude settings in zakwas's working
 // directory can't add marketplaces or plugins to what it sees.
 func (c *claude) cmd(args ...string) runner.Cmd {
-	return runner.Cmd{Name: "claude", Args: args, Dir: "/"}
+	return runner.Cmd{Name: "claude", Args: args, Dir: "/", Env: c.env}
 }
 
 type claudeMarketplace struct {
@@ -288,13 +289,18 @@ func (c *claude) refresh(ctx context.Context, d desired) error {
 		return err
 	}
 	names := make([]string, 0, len(d.sources))
-	for n := range d.sources {
-		if _, ok := markets[n]; ok {
+	var errs []error
+	for n, src := range d.sources {
+		cur, ok := markets[n]
+		switch {
+		case !ok:
+		case canonical(cur.source()) != canonical(src):
+			errs = append(errs, fmt.Errorf("claude: marketplace %q comes from %s, but zakwas.yaml declares %s; not refreshing it", n, cur.source(), src))
+		default:
 			names = append(names, n)
 		}
 	}
 	sort.Strings(names)
-	var errs []error
 	for _, n := range names {
 		errs = append(errs, c.mutate(ctx, "marketplace", "update", n))
 	}

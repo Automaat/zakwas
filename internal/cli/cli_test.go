@@ -370,3 +370,15 @@ func TestHelpPrintsUsageOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeConfigDir(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ""},
+		{"/abs/claude", "/abs/claude"},
+		{"rel/claude", "/work/rel/claude"},
+	} {
+		if got := claudeConfigDir(Env{Cwd: "/work", ClaudeConfigDir: tc.in}); got != tc.want {
+			t.Errorf("claudeConfigDir(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

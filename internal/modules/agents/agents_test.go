@@ -27,10 +27,9 @@ func newModule(t *testing.T, a config.Agents) (*Module, *runnertest.Fake) {
 	home, root := t.TempDir(), t.TempDir()
 	fake := runnertest.New()
 	return &Module{
-		Agents:    a,
-		Paths:     config.Paths{Home: home, Root: root},
-		Runner:    fake,
-		ClaudeDir: filepath.Join(home, ".claude"),
+		Agents: a,
+		Paths:  config.Paths{Home: home, Root: root},
+		Runner: fake,
 	}, fake
 }
 
@@ -99,8 +98,8 @@ func assertNoYes(t *testing.T, fake *runnertest.Fake) {
 				t.Errorf("%s: zakwas must never accept marketplace commands", c)
 			}
 		}
-		if c.Dir != "/" {
-			t.Errorf("%s: dir %q, want /", c, c.Dir)
+		if c.Dir != "/" || len(c.Env) != 0 {
+			t.Errorf("%s: dir %q env %v, want / and no env", c, c.Dir, c.Env)
 		}
 	}
 }
@@ -158,7 +157,7 @@ func TestConvergeFromScratch(t *testing.T) {
 	}
 }
 
-func (m *Module) claude() *claude { return m.backends()[config.ProviderClaude].(*claude) }
+func (m *Module) claude() *claude { return m.claudeBackend() }
 
 func TestEnableAndUpgrade(t *testing.T) {
 	for _, upgrade := range []bool{false, true} {
@@ -541,5 +540,33 @@ func TestWriteObjectKeepsText(t *testing.T) {
 	}
 	if got := readFile(t, path); !strings.Contains(got, `"a && b > /dev/null < x"`) || !strings.Contains(got, `"autoUpdate": true`) {
 		t.Errorf("got:\n%s", got)
+	}
+}
+
+func TestRefreshSkipsMismatchedSource(t *testing.T) {
+	m, fake := newModule(t, config.Agents{Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}}})
+	fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"evil/sai"}]`)
+	err := m.Refresh(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not refreshing") {
+		t.Errorf("err = %v", err)
+	}
+	if fake.Ran("claude plugin marketplace update") {
+		t.Errorf("refreshed a mismatched source: %v", fake.Lines())
+	}
+}
+
+func TestClaudeConfigDir(t *testing.T) {
+	m, fake := newModule(t, config.Agents{Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}}})
+	m.ClaudeConfigDir = filepath.Join(t.TempDir(), "cfg")
+	if got := m.claude().knownPath(); got != filepath.Join(m.ClaudeConfigDir, "plugins", "known_marketplaces.json") {
+		t.Errorf("knownPath = %q", got)
+	}
+	fake.OnOK(marketList, `[]`)
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	plan(t, m)
+	for _, c := range fake.Calls {
+		if want := []string{"CLAUDE_CONFIG_DIR=" + m.ClaudeConfigDir}; !reflect.DeepEqual(c.Env, want) {
+			t.Errorf("%s: env %v, want %v", c, c.Env, want)
+		}
 	}
 }

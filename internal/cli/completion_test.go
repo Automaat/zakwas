@@ -42,7 +42,7 @@ func TestCompletionCoversEverything(t *testing.T) {
 }
 
 func TestCompletionModulesMatchCLI(t *testing.T) {
-	env, _ := setup(t, "brew: {file: Brewfile}\nmise: {config: m.toml}\n")
+	env, _ := setup(t, "brew: {file: Brewfile}\nmise: {config: m.toml}\nagents: {prune: true}\n")
 	cfg, err := loadConfig("", env.Cwd, env.Home)
 	if err != nil {
 		t.Fatal(err)
