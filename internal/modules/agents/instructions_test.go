@@ -312,3 +312,41 @@ func TestInstructionsNeverLinkUntracked(t *testing.T) {
 		t.Errorf("link made without recording it: %v", err)
 	}
 }
+
+func TestInstructionsFailureSkipsProvider(t *testing.T) {
+	m, fake, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	m.Agents.Marketplaces = map[string]config.Marketplace{"sai": {Source: "o/sai", Providers: []string{config.ProviderClaude}}}
+	if err := os.MkdirAll(filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "claude: instructions:") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"codex: + ~/.codex/AGENTS.md"}) {
+		t.Errorf("plan = %v", got)
+	}
+	if len(fake.Calls) != 0 {
+		t.Errorf("planned the failed provider's plugins: %v", fake.Lines())
+	}
+}
+
+func TestInstructionsSharedPathChangesOwner(t *testing.T) {
+	m, fake, src := newInstructions(t, config.ProviderCodex, config.ProviderOpencode)
+	m.CodexHome = filepath.Join(m.Paths.Home, ".config", "opencode")
+	apply(t, plan(t, m))
+	m.Agents.Providers = []string{config.ProviderOpencode}
+	fake.Install("opencode")
+	if got := targets(plan(t, m)); !reflect.DeepEqual(got, []string{"~ ~/.config/opencode/AGENTS.md (track as opencode instructions)"}) {
+		t.Fatalf("plan = %v", got)
+	}
+	apply(t, plan(t, m))
+	assertConverged(t, m)
+	m.Agents.Providers = []string{config.ProviderCodex}
+	changes := plan(t, m)
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"codex: ~ ~/.config/opencode/AGENTS.md"}) {
+		t.Fatalf("plan = %v", got)
+	}
+	apply(t, changes)
+	assertLink(t, filepath.Join(m.CodexHome, "AGENTS.md"), src)
+}

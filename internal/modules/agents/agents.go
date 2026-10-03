@@ -108,14 +108,20 @@ func (m *Module) desired(provider string) desired {
 }
 
 // Plan plans every provider with a backend, each provider's instructions
-// link first. A provider that fails to plan doesn't hold back the others:
-// their changes are returned along with the error.
+// link first. A provider that fails to plan, its instructions included,
+// plans nothing and doesn't hold back the others: their changes are
+// returned along with the error.
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
-	instructions, err := m.planInstructions()
+	instructions, failed, err := m.planInstructions()
 	errs := []error{err}
 	var changes []engine.Change
 	backends := m.backends()
 	for _, p := range config.Providers {
+		if err := failed[p]; err != nil {
+			errs = append(errs, err)
+			delete(instructions, p)
+			continue
+		}
 		changes = append(changes, instructions[p]...)
 		delete(instructions, p)
 		b, ok := backends[p]

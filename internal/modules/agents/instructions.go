@@ -106,28 +106,29 @@ func samePath(path string) string {
 // opencode when zakwas.yaml names them, are strict: a link that can't be
 // made fails the plan. Codex is opt-in, as for plugins, and opencode by
 // the all-providers default is best effort: linked only when opencode is
-// installed and nothing blocks it, its link otherwise left as is.
-func (m *Module) planInstructions() (map[string][]engine.Change, error) {
+// installed and nothing blocks it, its link otherwise left as is. A
+// strict provider that can't be linked is returned in failed.
+func (m *Module) planInstructions() (map[string][]engine.Change, map[string]error, error) {
 	statePath := m.instructionsStatePath()
 	if m.Agents.Instructions == "" {
 		if _, err := os.Lstat(statePath); errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
 	}
 	if info, err := os.Lstat(statePath); err == nil && info.Mode()&fs.ModeSymlink != 0 {
-		return nil, fmt.Errorf("agents.instructions: %s is a symlink; remove it", m.Paths.Pretty(statePath))
+		return nil, nil, fmt.Errorf("agents.instructions: %s is a symlink; remove it", m.Paths.Pretty(statePath))
 	}
 	if err := install.CheckParents(m.Paths, statePath); err != nil {
-		return nil, fmt.Errorf("agents.instructions: %w", err)
+		return nil, nil, fmt.Errorf("agents.instructions: %w", err)
 	}
 	st, err := m.loadInstructions()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	byProvider := map[string][]engine.Change{}
 	keep := map[string]bool{}
-	var errs []error
+	failed := map[string]error{}
 	if m.Agents.Instructions != "" {
 		src := filepath.Clean(m.Paths.Src(m.Agents.Instructions))
 		info, err := os.Stat(src)
@@ -135,10 +136,10 @@ func (m *Module) planInstructions() (map[string][]engine.Change, error) {
 			err = pe.Err
 		}
 		if err != nil {
-			return nil, fmt.Errorf("agents.instructions: source %s: %w", m.Paths.Pretty(src), err)
+			return nil, nil, fmt.Errorf("agents.instructions: source %s: %w", m.Paths.Pretty(src), err)
 		}
 		if info.IsDir() {
-			return nil, fmt.Errorf("agents.instructions: %s is a directory; point it at a file", src)
+			return nil, nil, fmt.Errorf("agents.instructions: %s is a directory; point it at a file", src)
 		}
 		for _, p := range config.Providers {
 			if !m.Agents.Manages(p) {
@@ -160,7 +161,7 @@ func (m *Module) planInstructions() (map[string][]engine.Change, error) {
 			c, err := m.planInstruction(p, src, dst, st)
 			if err != nil {
 				if strict {
-					errs = append(errs, fmt.Errorf("%s: instructions: %w", p, err))
+					failed[p] = fmt.Errorf("%s: instructions: %w", p, err)
 				}
 				continue
 			}
@@ -180,7 +181,7 @@ func (m *Module) planInstructions() (map[string][]engine.Change, error) {
 		c.Group = l.Provider
 		byProvider[l.Provider] = append(byProvider[l.Provider], c)
 	}
-	return byProvider, errors.Join(errs...)
+	return byProvider, failed, nil
 }
 
 // planInstruction links dst to src like the links module does, and
@@ -200,7 +201,7 @@ func (m *Module) planInstruction(provider, src, dst string, st instructionsState
 		st.Links[dst] = want
 	}
 	if c == nil {
-		if !ours || owned.Target == src {
+		if !ours || owned == want {
 			return nil, nil
 		}
 		return &engine.Change{
