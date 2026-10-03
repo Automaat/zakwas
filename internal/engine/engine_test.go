@@ -193,6 +193,21 @@ func TestRenderColorOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+func TestRenderPartialModule(t *testing.T) {
+	plan := Plan{{Module: "agents", Err: errors.New("codex: not installed"), Changes: []Change{{Action: Create, Target: "claude plugin x"}}}}
+	var out bytes.Buffer
+	_ = Render(&out, plan, Style{})
+	want := `✗ agents: plan failed: codex: not installed
+agents
+  + claude plugin x
+
+Plan: 1 to add, 0 to change, 0 to remove, 0 to run.
+`
+	if out.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
 func TestRenderSummaryWithoutChanges(t *testing.T) {
 	for _, tt := range []struct {
 		plan Plan

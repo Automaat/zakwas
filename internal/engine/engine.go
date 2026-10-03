@@ -69,7 +69,8 @@ type Module interface {
 }
 
 // ModulePlan is the plan for one module. Err is set when the module could
-// not be planned; its changes are then unknown and nothing is applied for it.
+// not be planned, or only in part: changes it did plan alongside the error
+// are shown and applied, the rest are unknown.
 type ModulePlan struct {
 	Module  string
 	Changes []Change

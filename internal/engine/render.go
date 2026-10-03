@@ -67,7 +67,9 @@ func Render(w io.Writer, p Plan, s Style) error {
 		switch {
 		case mp.Err != nil:
 			fmt.Fprintf(&b, "%s %s: plan failed: %v\n", s.Fail("✗"), s.Bold(mp.Module), mp.Err)
-			continue
+			if len(mp.Changes) == 0 {
+				continue
+			}
 		case len(mp.Changes) == 0:
 			upToDate = append(upToDate, mp.Module)
 			continue
