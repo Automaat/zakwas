@@ -261,15 +261,16 @@ func TestProviderFailureKeepsOthers(t *testing.T) {
 	}
 }
 
-// A config that gets codex only from the default providers keeps working
-// without codex; naming it anywhere makes a missing codex an error.
-func TestCodexMissingUnnamed(t *testing.T) {
+// Codex is opt-in: a config that gets it only from the default providers
+// leaves Codex alone, installed or not; naming it anywhere makes a missing
+// codex an error.
+func TestCodexOptIn(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		agents  config.Agents
 		wantErr bool
 	}{
-		{name: "default providers", agents: config.Agents{Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}}}},
+		{name: "default providers", agents: config.Agents{Prune: true, Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}}}},
 		{name: "marketplace names codex", agents: config.Agents{Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai", Providers: []string{config.ProviderClaude, config.ProviderCodex}}}}, wantErr: true},
 		{name: "plugin names codex", agents: config.Agents{
 			Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
@@ -289,6 +290,16 @@ func TestCodexMissingUnnamed(t *testing.T) {
 			}
 			if fake.Ran("codex") {
 				t.Errorf("ran a missing codex: %v", fake.Lines())
+			}
+			if !tc.wantErr {
+				fake.Install("codex")
+				if _, err := m.Plan(context.Background()); err != nil || fake.Ran("codex") {
+					t.Errorf("codex not named: err %v, calls %v", err, fake.Lines())
+				}
+				fake.OnOK("claude plugin marketplace update sai --json", `{"outcome":"ok"}`)
+				if err := m.Refresh(context.Background()); err != nil || fake.Ran("codex") {
+					t.Errorf("refresh, codex not named: err %v, calls %v", err, fake.Lines())
+				}
 			}
 		})
 	}
@@ -316,8 +327,14 @@ func TestProvidersPlanSeparately(t *testing.T) {
 		"+ codex marketplace cdx (o/cdx)",
 		"+ codex plugin p@both",
 	}
-	if got := targets(plan(t, m)); !reflect.DeepEqual(got, want) {
+	changes := plan(t, m)
+	if got := targets(changes); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
+	}
+	for _, c := range changes {
+		if g, _, _ := strings.Cut(c.Target, " "); c.Group != g {
+			t.Errorf("%s: group %q, want %q so its failures don't stop the other provider", c, c.Group, g)
+		}
 	}
 }
 

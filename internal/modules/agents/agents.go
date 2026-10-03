@@ -70,7 +70,13 @@ type desired struct {
 	named   bool
 }
 
-func (d desired) empty() bool {
+// skip reports whether a provider has nothing to converge. Codex is opt-in:
+// a config that gets it only from the default providers predates Codex
+// support and leaves Codex alone.
+func (d desired) skip(provider string) bool {
+	if provider == config.ProviderCodex && !d.named {
+		return true
+	}
 	return len(d.sources) == 0 && len(d.plugins) == 0 && !d.prune
 }
 
@@ -109,13 +115,16 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			continue
 		}
 		d := m.desired(p)
-		if d.empty() {
+		if d.skip(p) {
 			continue
 		}
 		c, err := b.plan(ctx, d)
 		if err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		for i := range c {
+			c[i].Group = p
 		}
 		changes = append(changes, c...)
 	}
@@ -133,7 +142,7 @@ func (m *Module) Refresh(ctx context.Context) error {
 			continue
 		}
 		d := m.desired(p)
-		if len(d.sources) == 0 {
+		if len(d.sources) == 0 || d.skip(p) {
 			continue
 		}
 		errs = append(errs, b.refresh(ctx, d))

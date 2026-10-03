@@ -377,7 +377,7 @@
           },
           "minItems": 1,
           "uniqueItems": true,
-          "description": "Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. claude and codex are converged; opencode is accepted and skipped. A provider named here or in an entry whose CLI is missing fails its plan; the others still converge. Default: all three.",
+          "description": "Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. claude and codex are converged; opencode is accepted and skipped. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three.",
           "type": [
             "array",
             "null"
