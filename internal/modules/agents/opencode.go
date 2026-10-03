@@ -2,7 +2,6 @@ package agents
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -56,16 +55,9 @@ type opencodeSkill struct {
 }
 
 func (o *opencode) load() (opencodeState, error) {
-	st := opencodeState{Marketplaces: map[string]string{}, Failed: map[string]string{}, Skills: map[string]opencodeSkill{}}
-	data, err := os.ReadFile(o.statePath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return st, nil
-	}
-	if err != nil {
+	st := opencodeState{}
+	if err := loadState(o.statePath, &st); err != nil {
 		return st, err
-	}
-	if err := json.Unmarshal(data, &st); err != nil {
-		return st, fmt.Errorf("%s: %w", o.statePath, err)
 	}
 	if st.Marketplaces == nil {
 		st.Marketplaces = map[string]string{}
@@ -87,26 +79,7 @@ func (o *opencode) update(edit func(*opencodeState)) error {
 		return err
 	}
 	edit(&st)
-	data, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(o.statePath), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(o.statePath), ".opencode.json.zakwas-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), o.statePath)
+	return saveState(o.statePath, st)
 }
 
 func (o *opencode) git(args ...string) runner.Cmd {

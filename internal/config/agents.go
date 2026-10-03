@@ -29,6 +29,7 @@ type Agents struct {
 	Prune        bool                   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false."`
 	Marketplaces map[string]Marketplace `yaml:"marketplaces" jsonschema_description:"Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'."`
 	Plugins      []Plugin               `yaml:"plugins" jsonschema_description:"Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own."`
+	Instructions string                 `yaml:"instructions" jsonschema:"minLength=1" jsonschema_description:"Global instructions file in the config repo, relative to the directory holding zakwas.yaml (or absolute), linked to each managed provider's global instructions: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). A file already there is backed up; links zakwas made for providers no longer managed are removed."`
 	Opencode     *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
 }
 
@@ -194,6 +195,9 @@ func (a *Agents) validate() []error {
 			errs = append(errs, fmt.Errorf("%s: source is required", what))
 		}
 		checkProviders(what+".providers", m.Providers, a.DefaultProviders(), "agents.providers")
+	}
+	if a.Instructions == "~" || strings.HasPrefix(a.Instructions, "~/") {
+		errs = append(errs, fmt.Errorf("agents.instructions: %q must be relative to the directory holding zakwas.yaml, or absolute", a.Instructions))
 	}
 	if a.Opencode != nil {
 		dir := a.Opencode.SkillsDir

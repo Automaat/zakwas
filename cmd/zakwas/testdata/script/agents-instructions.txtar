@@ -1,0 +1,78 @@
+mkdir claude
+cp mine.md claude/CLAUDE.md
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+
+zakwas plan --only agents
+cmpenv stdout plan.golden
+! exists codex
+! exists home/.config/opencode
+! exists home/.local/state/zakwas/instructions.json
+
+zakwas apply -y --only agents
+stdout 'Applied 3 of 3 steps'
+linkto claude/CLAUDE.md AGENTS.md
+linkto codex/AGENTS.md AGENTS.md
+linkto home/.config/opencode/AGENTS.md AGENTS.md
+cmp claude/CLAUDE.md.zakwas-bak mine.md
+exists home/.local/state/zakwas/instructions.json
+
+zakwas check --only agents
+stdout 'up to date: agents'
+
+cp zakwas-claude.yaml zakwas.yaml
+zakwas plan --only agents
+cmpenv stdout drop.golden
+zakwas apply -y --only agents
+! exists codex/AGENTS.md
+! exists home/.config/opencode/AGENTS.md
+linkto claude/CLAUDE.md AGENTS.md
+zakwas check --only agents
+stdout 'up to date: agents'
+
+cp zakwas-missing.yaml zakwas.yaml
+! zakwas plan --only agents
+stdout 'agents.instructions: source .*/nope.md: no such file or directory'
+linkto claude/CLAUDE.md AGENTS.md
+
+cp zakwas-none.yaml zakwas.yaml
+zakwas apply -y --only agents
+! exists claude/CLAUDE.md
+exists claude/CLAUDE.md.zakwas-bak
+zakwas check --only agents
+stdout 'up to date: agents'
+
+-- mine.md --
+hand-written
+-- AGENTS.md --
+be terse
+-- zakwas.yaml --
+agents:
+  providers: [claude, codex, opencode]
+  instructions: AGENTS.md
+-- zakwas-claude.yaml --
+agents:
+  providers: [claude]
+  instructions: AGENTS.md
+-- zakwas-missing.yaml --
+agents:
+  providers: [claude]
+  instructions: nope.md
+-- zakwas-none.yaml --
+agents:
+  providers: [claude]
+-- plan.golden --
+agents
+  ~ $WORK/claude/CLAUDE.md  back up to CLAUDE.md.zakwas-bak, link → $WORK/AGENTS.md
+  + $WORK/codex/AGENTS.md  → $WORK/AGENTS.md
+  + ~/.config/opencode/AGENTS.md              → $WORK/AGENTS.md
+
+Plan: 2 to add, 1 to change, 0 to remove, 0 to run.
+-- drop.golden --
+agents
+  - $WORK/codex/AGENTS.md  codex instructions
+  - ~/.config/opencode/AGENTS.md              opencode instructions
+
+⚠ destructive: $WORK/codex/AGENTS.md, ~/.config/opencode/AGENTS.md
+
+Plan: 0 to add, 0 to change, 2 to remove, 0 to run.

@@ -483,6 +483,14 @@
             "null"
           ]
         },
+        "instructions": {
+          "minLength": 1,
+          "description": "Global instructions file in the config repo, relative to the directory holding zakwas.yaml (or absolute), linked to each managed provider's global instructions: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). A file already there is backed up; links zakwas made for providers no longer managed are removed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "opencode": {
           "properties": {
             "skillsDir": {
