@@ -130,8 +130,13 @@ func (c *codex) state(ctx context.Context) (codexState, error) {
 	return st, nil
 }
 
+// plan skips a missing codex unless zakwas.yaml names the provider: a
+// config that only gets codex from the default providers predates it.
 func (c *codex) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 	if !c.runner.Installed("codex") {
+		if !d.named {
+			return nil, nil
+		}
 		return nil, errors.New("codex: Codex is not installed (no codex on PATH); install it, or remove codex from agents.providers")
 	}
 	st, err := c.state(ctx)
@@ -181,7 +186,7 @@ func (c *codex) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 			continue
 		}
 		var latest string
-		if d.upgrade {
+		if d.upgrade || !inst.Enabled {
 			latest = codexLatestVersion(st.listed[mk].Root, name)
 		}
 		newer := newerVersion(latest, inst.Version)

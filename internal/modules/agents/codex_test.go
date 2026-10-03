@@ -127,7 +127,7 @@ func TestCodexEnableAndUpgrade(t *testing.T) {
 			{"pluginId":"d@sai","version":"1.0.0","enabled":true},
 			{"pluginId":"e@sai","version":"1.0.0","enabled":false}], "available": []}`)
 
-		want := []string{"~ codex plugin a@sai (enable)", "~ codex plugin e@sai (enable)"}
+		want := []string{"~ codex plugin a@sai (1.0.0 → 1.1.0, enable)", "~ codex plugin e@sai (enable)"}
 		if upgrade {
 			want = []string{"~ codex plugin a@sai (1.0.0 → 1.1.0, enable)", "~ codex plugin b@sai (2.0.0 → 3.0.0)", "~ codex plugin e@sai (enable)"}
 		}
@@ -248,6 +248,39 @@ func TestProviderFailureKeepsOthers(t *testing.T) {
 	}
 	if err := m.Refresh(context.Background()); err != nil {
 		t.Errorf("refresh with codex missing: %v", err)
+	}
+}
+
+// A config that gets codex only from the default providers keeps working
+// without codex; naming it anywhere makes a missing codex an error.
+func TestCodexMissingUnnamed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		agents  config.Agents
+		wantErr bool
+	}{
+		{name: "default providers", agents: config.Agents{Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}}}},
+		{name: "marketplace names codex", agents: config.Agents{Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai", Providers: []string{config.ProviderClaude, config.ProviderCodex}}}}, wantErr: true},
+		{name: "plugin names codex", agents: config.Agents{
+			Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
+			Plugins:      []config.Plugin{{ID: "p@sai", Providers: []string{config.ProviderCodex}}},
+		}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, fake := newModule(t, config.Agents{Providers: []string{config.ProviderOpencode}})
+			m.Agents = tc.agents
+			fake.Missing("codex")
+			fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai"}]`)
+			fake.OnOK(pluginList, `{"installed": [{"id":"p@sai","version":"1","scope":"user","enabled":true}], "available": []}`)
+			writeFile(t, m.claude().knownPath(), knownJSON(map[string]bool{"sai": true}))
+			_, err := m.Plan(context.Background())
+			if (err != nil) != tc.wantErr {
+				t.Errorf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if fake.Ran("codex") {
+				t.Errorf("ran a missing codex: %v", fake.Lines())
+			}
+		})
 	}
 }
 

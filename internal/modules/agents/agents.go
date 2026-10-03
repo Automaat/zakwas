@@ -60,12 +60,14 @@ func (m *Module) claudeBackend() *claude {
 }
 
 // desired is what one provider should end up with; sources maps each
-// marketplace name to its resolved source.
+// marketplace name to its resolved source. named is set when zakwas.yaml
+// lists the provider itself rather than getting it from the default.
 type desired struct {
 	sources map[string]string
 	plugins []string
 	upgrade bool
 	prune   bool
+	named   bool
 }
 
 func (d desired) empty() bool {
@@ -77,16 +79,19 @@ func (m *Module) desired(provider string) desired {
 		sources: map[string]string{},
 		upgrade: m.Agents.Upgrade,
 		prune:   m.Agents.Prune && m.Agents.Manages(provider),
+		named:   slices.Contains(m.Agents.Providers, provider),
 	}
 	for _, name := range m.Agents.MarketplaceNames() {
 		if slices.Contains(m.Agents.MarketplaceProviders(name), provider) {
 			d.sources[name] = m.source(m.Agents.Marketplaces[name].Source)
 		}
+		d.named = d.named || slices.Contains(m.Agents.Marketplaces[name].Providers, provider)
 	}
 	for _, p := range m.Agents.Plugins {
 		if slices.Contains(m.Agents.PluginProviders(p), provider) {
 			d.plugins = append(d.plugins, p.ID)
 		}
+		d.named = d.named || slices.Contains(p.Providers, provider)
 	}
 	return d
 }
