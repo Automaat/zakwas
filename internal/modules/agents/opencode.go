@@ -216,7 +216,7 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 	ids := slices.Sorted(maps.Keys(waiting))
 	return append(append(fetches, changes...), engine.Change{
 		Action: engine.Create, Target: "opencode skills", Detail: "of " + strings.Join(ids, ", ") + " once fetched",
-		Apply: func(ctx context.Context) error { return o.converge(ctx, d, shown) },
+		Apply: func(ctx context.Context) error { return o.converge(ctx, d, shown, waiting) },
 	}), nil
 }
 
@@ -524,9 +524,9 @@ func (o *opencode) planPrune(d desired, st opencodeState, want map[string]wanted
 
 // converge plans again once the pending marketplaces are fetched and
 // applies the result. A removal the plan didn't show is left for the next
-// plan to show, unless it only drops zakwas's own link to a skill the
-// fetch took away.
-func (o *opencode) converge(ctx context.Context, d desired, shown map[string]bool) error {
+// plan to show, unless it drops zakwas's own link to a skill of a plugin
+// the plan listed as waiting for the fetch, or to one the fetch took away.
+func (o *opencode) converge(ctx context.Context, d desired, shown, waiting map[string]bool) error {
 	changes, err := o.planFrom(d, false)
 	if err != nil {
 		return err
@@ -535,14 +535,14 @@ func (o *opencode) converge(ctx context.Context, d desired, shown map[string]boo
 	if err != nil {
 		return err
 	}
-	dangling := map[string]bool{}
+	allowed := map[string]bool{}
 	for link, s := range st.Skills {
-		if _, err := os.Stat(s.Target); errors.Is(err, fs.ErrNotExist) {
-			dangling[o.label(link)] = true
+		if _, err := os.Stat(s.Target); errors.Is(err, fs.ErrNotExist) || waiting[s.Plugin] {
+			allowed[o.label(link)] = true
 		}
 	}
 	for _, c := range changes {
-		if c.Destructive && !shown[c.Target] && !dangling[c.Target] {
+		if c.Destructive && !shown[c.Target] && !allowed[c.Target] {
 			continue
 		}
 		if err := c.Apply(ctx); err != nil {
@@ -591,7 +591,8 @@ func (o *opencode) fetch(ctx context.Context, name, src string) error {
 }
 
 // refresh pulls the declared git marketplaces zakwas already fetched;
-// apply fetches missing ones fresh. git is pinned to the cache's own .git,
+// apply fetches missing ones fresh. A failed pull of a marketplace only
+// default-targeted plugins use keeps the copy it has. git is pinned to the cache's own .git,
 // so it can never walk up into an enclosing repo such as a dotfiles $HOME.
 func (o *opencode) refresh(ctx context.Context, d desired) error {
 	if !o.runner.Installed("opencode") {
@@ -619,11 +620,13 @@ func (o *opencode) refresh(ctx context.Context, d desired) error {
 			ref = "HEAD"
 		}
 		repo := []string{"--git-dir=" + filepath.Join(dir, ".git"), "--work-tree=" + dir}
-		if err := runner.Check(ctx, o.runner, o.git(append(repo, "fetch", "--quiet", "--depth", "1", "origin", ref)...)); err != nil {
-			errs = append(errs, err)
-			continue
+		err := runner.Check(ctx, o.runner, o.git(append(repo, "fetch", "--quiet", "--depth", "1", "origin", ref)...))
+		if err == nil {
+			err = runner.Check(ctx, o.runner, o.git(append(repo, "reset", "--quiet", "--hard", "FETCH_HEAD")...))
 		}
-		errs = append(errs, runner.Check(ctx, o.runner, o.git(append(repo, "reset", "--quiet", "--hard", "FETCH_HEAD")...)))
+		if err != nil && (explicitIn(d, name) || ctx.Err() != nil) {
+			errs = append(errs, fmt.Errorf("%w; to fetch it fresh, remove %s and apply again", err, o.paths.Pretty(dir)))
+		}
 	}
 	return errors.Join(errs...)
 }

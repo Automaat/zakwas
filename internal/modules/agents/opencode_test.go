@@ -815,3 +815,34 @@ func TestOpencodeRefusesSymlinkedDataDir(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestOpencodeRefreshFailureOfDefaultTargetedMarketplace(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		m, r := newOpencode(t, config.Agents{
+			Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
+			Plugins:      []config.Plugin{{ID: "p@sai"}},
+		})
+		if !named {
+			m.Agents.Providers = nil
+			r.Missing("claude", "codex")
+		}
+		r.repos["https://github.com/o/sai.git"] = func(dir string) { marketplace(t, dir, "sai", map[string][]string{"p": {"s"}}) }
+		o := m.opencodeBackend()
+		changes, err := o.plan(context.Background(), m.desired(config.ProviderOpencode))
+		if err != nil {
+			t.Fatal(err)
+		}
+		apply(t, changes)
+		r.Fake = runnertest.New()
+		if !named {
+			r.Missing("claude", "codex")
+		}
+		err = o.refresh(context.Background(), m.desired(config.ProviderOpencode))
+		if named != (err != nil) {
+			t.Errorf("named=%v: refresh err = %v", named, err)
+		}
+		if named && !strings.Contains(err.Error(), "remove ~/.local/share/zakwas/agents/sai") {
+			t.Errorf("no recovery hint: %v", err)
+		}
+	}
+}
