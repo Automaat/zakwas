@@ -1,6 +1,6 @@
 // Package agents converges coding-agent plugins and marketplaces per
-// provider. Only Claude Code has a backend so far; providers without one
-// are skipped.
+// provider. Claude Code and Codex have backends; providers without one are
+// skipped.
 package agents
 
 import (
@@ -17,12 +17,14 @@ import (
 )
 
 // Module converges the agents section. ClaudeConfigDir is an absolute
-// $CLAUDE_CONFIG_DIR, or empty for Claude's default ~/.claude.
+// $CLAUDE_CONFIG_DIR, or empty for Claude's default ~/.claude; CodexHome
+// likewise for $CODEX_HOME and ~/.codex.
 type Module struct {
 	Agents          config.Agents
 	Paths           config.Paths
 	Runner          runner.Runner
 	ClaudeConfigDir string
+	CodexHome       string
 }
 
 func (m *Module) Name() string { return "agents" }
@@ -36,7 +38,15 @@ type backend interface {
 func (m *Module) backends() map[string]backend {
 	return map[string]backend{
 		config.ProviderClaude: m.claudeBackend(),
+		config.ProviderCodex:  m.codexBackend(),
 	}
+}
+
+func (m *Module) codexBackend() *codex {
+	if m.CodexHome != "" {
+		return &codex{runner: m.Runner, home: m.CodexHome, env: []string{"CODEX_HOME=" + m.CodexHome}}
+	}
+	return &codex{runner: m.Runner, home: filepath.Join(m.Paths.Home, ".codex")}
 }
 
 // claudeBackend passes an explicit config dir on to claude, so its reads
@@ -50,15 +60,23 @@ func (m *Module) claudeBackend() *claude {
 }
 
 // desired is what one provider should end up with; sources maps each
-// marketplace name to its resolved source.
+// marketplace name to its resolved source. named is set when zakwas.yaml
+// lists the provider itself rather than getting it from the default.
 type desired struct {
 	sources map[string]string
 	plugins []string
 	upgrade bool
 	prune   bool
+	named   bool
 }
 
-func (d desired) empty() bool {
+// skip reports whether a provider has nothing to converge. Codex is opt-in:
+// a config that gets it only from the default providers predates Codex
+// support and leaves Codex alone.
+func (d desired) skip(provider string) bool {
+	if provider == config.ProviderCodex && !d.named {
+		return true
+	}
 	return len(d.sources) == 0 && len(d.plugins) == 0 && !d.prune
 }
 
@@ -67,22 +85,26 @@ func (m *Module) desired(provider string) desired {
 		sources: map[string]string{},
 		upgrade: m.Agents.Upgrade,
 		prune:   m.Agents.Prune && m.Agents.Manages(provider),
+		named:   slices.Contains(m.Agents.Providers, provider),
 	}
 	for _, name := range m.Agents.MarketplaceNames() {
 		if slices.Contains(m.Agents.MarketplaceProviders(name), provider) {
 			d.sources[name] = m.source(m.Agents.Marketplaces[name].Source)
 		}
+		d.named = d.named || slices.Contains(m.Agents.Marketplaces[name].Providers, provider)
 	}
 	for _, p := range m.Agents.Plugins {
 		if slices.Contains(m.Agents.PluginProviders(p), provider) {
 			d.plugins = append(d.plugins, p.ID)
 		}
+		d.named = d.named || slices.Contains(p.Providers, provider)
 	}
 	return d
 }
 
-// Plan plans every provider with a backend; codex and opencode have none
-// yet and are skipped.
+// Plan plans every provider with a backend; opencode has none yet and is
+// skipped. A provider that fails to plan doesn't hold back the others: their
+// changes are returned along with the error.
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	var changes []engine.Change
 	var errs []error
@@ -93,7 +115,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			continue
 		}
 		d := m.desired(p)
-		if d.empty() {
+		if d.skip(p) {
 			continue
 		}
 		c, err := b.plan(ctx, d)
@@ -101,12 +123,12 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			errs = append(errs, err)
 			continue
 		}
+		for i := range c {
+			c[i].Group = p
+		}
 		changes = append(changes, c...)
 	}
-	if err := errors.Join(errs...); err != nil {
-		return nil, err
-	}
-	return changes, nil
+	return changes, errors.Join(errs...)
 }
 
 // Refresh fetches new versions of the declared marketplaces, for `zakwas
@@ -120,7 +142,7 @@ func (m *Module) Refresh(ctx context.Context) error {
 			continue
 		}
 		d := m.desired(p)
-		if len(d.sources) == 0 {
+		if len(d.sources) == 0 || d.skip(p) {
 			continue
 		}
 		errs = append(errs, b.refresh(ctx, d))

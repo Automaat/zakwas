@@ -33,16 +33,19 @@ Pin exact tool versions in `dotfiles/mise/config.toml` and let Renovate bump the
 
 ## Coding-agent plugins
 
-Claude Code marketplaces and plugins; `prune` removes user-scope ones you didn't declare (read the plan first).
+Claude Code and Codex marketplaces and plugins; `prune` removes user-scope ones you didn't declare (read the plan first). Codex reads Claude marketplaces too, so one entry serves both; `providers` narrows an entry to one agent.
 
 ```yaml
 agents:
-  providers: [claude]
+  providers: [claude, codex]
   prune: true
   marketplaces:
-    claude-plugins-official: anthropics/claude-plugins-official
+    claude-plugins-official: {source: anthropics/claude-plugins-official, providers: [claude]}
+    team: example/agent-plugins
   plugins:
     - commit-commands@claude-plugins-official
+    - review@team
+    - {id: codex-only@team, providers: [codex]}
 ```
 
 ## Per-machine values

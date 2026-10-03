@@ -22,8 +22,13 @@ const (
 	pluginList = "claude plugin list --json --available"
 )
 
+// newModule manages only claude unless a says otherwise, so claude tests
+// don't depend on the other backends.
 func newModule(t *testing.T, a config.Agents) (*Module, *runnertest.Fake) {
 	t.Helper()
+	if a.Providers == nil {
+		a.Providers = []string{config.ProviderClaude}
+	}
 	home, root := t.TempDir(), t.TempDir()
 	fake := runnertest.New()
 	return &Module{
@@ -121,10 +126,9 @@ func TestConvergeFromScratch(t *testing.T) {
 	m, fake := newModule(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{
 			"sai":   {Source: "o/sai"},
-			"cdx":   {Source: "o/cdx", Providers: []string{config.ProviderCodex}},
 			"local": {Source: "./mp"},
 		},
-		Plugins: []config.Plugin{{ID: "humanize@sai"}, {ID: "x@cdx"}},
+		Plugins: []config.Plugin{{ID: "humanize@sai"}},
 	})
 	localDir := filepath.Join(m.Paths.Root, "mp")
 	fake.OnOK(marketList, "[]")
@@ -252,13 +256,17 @@ func TestPrune(t *testing.T) {
 	assertNoYes(t, fake)
 
 	m.Agents.Providers = []string{config.ProviderCodex}
-	m.Agents.Marketplaces["sai"] = config.Marketplace{Source: "o/sai"}
+	m.Agents.Marketplaces = map[string]config.Marketplace{}
+	m.Agents.Plugins = nil
+	m.CodexHome = t.TempDir()
 	fake = runnertest.New()
 	m.Runner = fake
+	fake.OnOK(codexMarketList, `{"marketplaces": []}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
 	if got := plan(t, m); len(got) != 0 {
 		t.Errorf("claude not managed: got %v", targets(got))
 	}
-	if len(fake.Calls) != 0 {
+	if fake.Ran("claude") {
 		t.Errorf("unmanaged provider must not be queried: %v", fake.Lines())
 	}
 }
@@ -421,7 +429,7 @@ func TestAutoUpdate(t *testing.T) {
 
 func TestRefresh(t *testing.T) {
 	m, fake := newModule(t, config.Agents{
-		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}, "new": {Source: "o/new"}, "cdx": {Source: "o/cdx", Providers: []string{config.ProviderCodex}}},
+		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}, "new": {Source: "o/new"}},
 	})
 	fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai"},{"name":"cdx","source":"github","repo":"o/cdx"}]`)
 	fake.OnOK(pluginList, `{"installed": [], "available": []}`)

@@ -36,7 +36,10 @@ type Change struct {
 	Destructive bool
 	// Streams marks changes whose Apply passes a tool's output through.
 	Streams bool
-	Apply   func(ctx context.Context) error
+	// Group scopes a failure within the module: it skips only the later
+	// changes of the same group, e.g. one agent provider of several.
+	Group string
+	Apply func(ctx context.Context) error
 }
 
 // Step reports whether the change runs something itself, as opposed to only
@@ -69,7 +72,8 @@ type Module interface {
 }
 
 // ModulePlan is the plan for one module. Err is set when the module could
-// not be planned; its changes are then unknown and nothing is applied for it.
+// not be planned, or only in part: changes it did plan alongside the error
+// are shown and applied, the rest are unknown.
 type ModulePlan struct {
 	Module  string
 	Changes []Change
@@ -178,9 +182,10 @@ type Result struct {
 }
 
 // Apply executes the plan in order, reporting each step to obs. Within a
-// module the first failure stops that module, since later changes often
-// depend on earlier ones; other modules still run and all failures are
-// returned together. Cancelling ctx stops before the next change.
+// module the first failure stops that module's later changes of the same
+// Group, since they often depend on earlier ones; other groups and modules
+// still run and all failures are returned together. Cancelling ctx stops
+// before the next change.
 func Apply(ctx context.Context, obs Observer, p Plan) (Result, error) {
 	start := time.Now()
 	res := Result{}
@@ -188,13 +193,13 @@ func Apply(ctx context.Context, obs Observer, p Plan) (Result, error) {
 	n := 0
 	var errs []error
 	for _, mp := range p {
-		failed := false
+		failed := map[string]bool{}
 		for _, c := range mp.Changes {
 			if !c.Step() {
 				continue
 			}
 			n++
-			if failed || ctx.Err() != nil {
+			if failed[c.Group] || ctx.Err() != nil {
 				res.Skipped++
 				continue
 			}
@@ -205,7 +210,7 @@ func Apply(ctx context.Context, obs Observer, p Plan) (Result, error) {
 			obs.Done(step, time.Since(t), err)
 			if err != nil {
 				res.Failed++
-				failed = true
+				failed[c.Group] = true
 				errs = append(errs, fmt.Errorf("%s: %s: %w", mp.Module, c.Target, err))
 				continue
 			}

@@ -371,14 +371,14 @@ func TestHelpPrintsUsageOnce(t *testing.T) {
 	}
 }
 
-func TestClaudeConfigDir(t *testing.T) {
+func TestAbsFromCwd(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"", ""},
 		{"/abs/claude", "/abs/claude"},
 		{"rel/claude", "/work/rel/claude"},
 	} {
-		if got := claudeConfigDir(Env{Cwd: "/work", ClaudeConfigDir: tc.in}); got != tc.want {
-			t.Errorf("claudeConfigDir(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := absFromCwd(Env{Cwd: "/work"}, tc.in); got != tc.want {
+			t.Errorf("absFromCwd(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
