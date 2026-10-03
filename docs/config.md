@@ -250,7 +250,7 @@ mise:
 
 Coding-agent plugins and the marketplaces they come from, declared once for every provider they target. Omit the section to leave agent plugins alone.
 
-Only the `claude` provider (Claude Code) is converged so far. `codex` and `opencode` are accepted everywhere a provider is, and skipped: entries that target only them do nothing yet, so configs written for them stay valid.
+The `claude` (Claude Code) and `codex` (Codex) providers are converged. `opencode` is accepted everywhere a provider is, and skipped: entries that target only it do nothing yet, so configs written for it stay valid. Each managed provider plans on its own: when one fails (its CLI is missing, a source conflicts), the plan reports the error and the other providers' changes still apply.
 
 | Key | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -270,17 +270,25 @@ For Claude Code, `apply` adds missing marketplaces (`claude plugin marketplace a
 
 The plan fails when `claude` is not on `PATH` (run `apply` again once brew or mise has installed it), when a declared marketplace is already configured from a different source, or when a declared plugin is not in its marketplace. zakwas runs `claude` from `/`, so a project's `.claude` settings don't leak in, and honors `CLAUDE_CONFIG_DIR` (a relative one resolves from the directory zakwas runs in).
 
+For Codex, `apply` adds missing marketplaces (`codex plugin marketplace add`, a `#ref` becomes `--ref`) and installs missing plugins (`codex plugin add`), which also re-enables disabled ones. Codex reads both `.agents/plugins/marketplace.json` and `.claude-plugin/marketplace.json`, so the same marketplace can target both providers.
+
+- `upgrade`: Codex has no plugin update command. Plugins whose marketplace snapshot offers a newer semver version (`.codex-plugin/plugin.json`, then `.claude-plugin/plugin.json`, then the manifest entry) are installed again with `codex plugin add`. `zakwas upgrade` runs `codex plugin marketplace upgrade` for the declared Git marketplaces, which already moves their installed plugins to the new versions; local marketplaces are read in place, so `upgrade: true` is what picks up their new versions.
+- `prune`: undeclared plugins are removed (`codex plugin remove`), then undeclared marketplaces (`codex plugin marketplace remove`). Only marketplaces listed under `[marketplaces]` in Codex's `config.toml` and their plugins count; marketplaces Codex finds on its own (such as a personal `~/.agents/plugins` one) and their plugins are never touched.
+
+The Codex plan fails when `codex` is not on `PATH`, when a declared marketplace is already in `config.toml` from a different source or ref, when a marketplace Codex finds on its own already has the declared name, or when a declared plugin is not in its marketplace. zakwas runs `codex` from `/`, so a project's marketplace doesn't leak in, and honors `CODEX_HOME` (a relative one resolves from the directory zakwas runs in).
+
 ```yaml
 agents:
-  providers: [claude]
+  providers: [claude, codex]
   upgrade: true
   prune: true
   marketplaces:
-    claude-plugins-official: anthropics/claude-plugins-official
-    team: {source: git@github.com:example/agent-plugins.git, providers: [claude]}
+    claude-plugins-official: {source: anthropics/claude-plugins-official, providers: [claude]}
+    team: git@github.com:example/agent-plugins.git#v2
   plugins:
     - commit-commands@claude-plugins-official
-    - {id: review@team, providers: [claude]}
+    - review@team
+    - {id: lint@team, providers: [codex]}
 ```
 
 ## system

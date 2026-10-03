@@ -1,6 +1,6 @@
 // Package agents converges coding-agent plugins and marketplaces per
-// provider. Only Claude Code has a backend so far; providers without one
-// are skipped.
+// provider. Claude Code and Codex have backends; providers without one are
+// skipped.
 package agents
 
 import (
@@ -17,12 +17,14 @@ import (
 )
 
 // Module converges the agents section. ClaudeConfigDir is an absolute
-// $CLAUDE_CONFIG_DIR, or empty for Claude's default ~/.claude.
+// $CLAUDE_CONFIG_DIR, or empty for Claude's default ~/.claude; CodexHome
+// likewise for $CODEX_HOME and ~/.codex.
 type Module struct {
 	Agents          config.Agents
 	Paths           config.Paths
 	Runner          runner.Runner
 	ClaudeConfigDir string
+	CodexHome       string
 }
 
 func (m *Module) Name() string { return "agents" }
@@ -36,7 +38,15 @@ type backend interface {
 func (m *Module) backends() map[string]backend {
 	return map[string]backend{
 		config.ProviderClaude: m.claudeBackend(),
+		config.ProviderCodex:  m.codexBackend(),
 	}
+}
+
+func (m *Module) codexBackend() *codex {
+	if m.CodexHome != "" {
+		return &codex{runner: m.Runner, home: m.CodexHome, env: []string{"CODEX_HOME=" + m.CodexHome}}
+	}
+	return &codex{runner: m.Runner, home: filepath.Join(m.Paths.Home, ".codex")}
 }
 
 // claudeBackend passes an explicit config dir on to claude, so its reads
@@ -81,8 +91,9 @@ func (m *Module) desired(provider string) desired {
 	return d
 }
 
-// Plan plans every provider with a backend; codex and opencode have none
-// yet and are skipped.
+// Plan plans every provider with a backend; opencode has none yet and is
+// skipped. A provider that fails to plan doesn't hold back the others: their
+// changes are returned along with the error.
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	var changes []engine.Change
 	var errs []error
@@ -103,10 +114,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		}
 		changes = append(changes, c...)
 	}
-	if err := errors.Join(errs...); err != nil {
-		return nil, err
-	}
-	return changes, nil
+	return changes, errors.Join(errs...)
 }
 
 // Refresh fetches new versions of the declared marketplaces, for `zakwas

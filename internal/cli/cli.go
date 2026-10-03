@@ -86,6 +86,7 @@ type Env struct {
 	// ReleaseURL overrides where self-update downloads releases (tests).
 	ReleaseURL      string
 	ClaudeConfigDir string
+	CodexHome       string
 }
 
 func (e Env) now() time.Time {
@@ -468,7 +469,10 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Paths: paths, Runner: env.Runner})
 	}
 	if cfg.Agents != nil {
-		mods = append(mods, &agents.Module{Agents: *cfg.Agents, Paths: paths, Runner: env.Runner, ClaudeConfigDir: claudeConfigDir(env)})
+		mods = append(mods, &agents.Module{
+			Agents: *cfg.Agents, Paths: paths, Runner: env.Runner,
+			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
+		})
 	}
 	return append(mods,
 		&commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner},
@@ -476,10 +480,10 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	)
 }
 
-// claudeConfigDir makes $CLAUDE_CONFIG_DIR absolute: zakwas reads it from
-// its own working directory but runs claude from /.
-func claudeConfigDir(env Env) string {
-	dir := env.ClaudeConfigDir
+// absFromCwd makes an agent's config dir ($CLAUDE_CONFIG_DIR, $CODEX_HOME)
+// absolute: zakwas reads it from its own working directory but runs the
+// agent from /.
+func absFromCwd(env Env, dir string) string {
 	if dir == "" || filepath.IsAbs(dir) {
 		return dir
 	}

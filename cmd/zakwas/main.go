@@ -61,6 +61,7 @@ func run() int {
 		PAMFile: os.Getenv("ZAKWAS_PAM_FILE"),
 
 		ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
+		CodexHome:       os.Getenv("CODEX_HOME"),
 
 		StdinTTY:      term.IsTerminal(int(os.Stdin.Fd())),
 		Color:         colorOutput(),

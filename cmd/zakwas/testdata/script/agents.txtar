@@ -18,7 +18,6 @@ stdout 'up to date: agents'
 
 zakwas upgrade -y --only agents
 grep '^claude plugin marketplace update sai --json$' calls
-! grep 'marketplace update codexonly' calls
 rm calls
 
 cp zakwas-prune.yaml zakwas.yaml
@@ -31,13 +30,14 @@ zakwas check --only agents
 
 -- zakwas.yaml --
 agents:
+  providers: [claude]
   marketplaces:
     sai: Owner/sai
-    codexonly: {source: owner/codex, providers: [codex]}
   plugins:
     - humanize@sai
 -- zakwas-prune.yaml --
 agents:
+  providers: [claude]
   prune: true
   marketplaces:
     sai: owner/sai

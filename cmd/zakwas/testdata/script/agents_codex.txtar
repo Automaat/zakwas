@@ -1,0 +1,134 @@
+chmod 755 bin/claude
+chmod 755 bin/codex
+mkdir state codex
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+
+zakwas plan --only agents
+cmpenv stdout plan.golden
+! exists codex/config.toml
+! grep 'codex plugin (add|marketplace add)' calls
+rm calls
+
+zakwas apply -y --only agents
+stdout 'Applied 4 of 4 steps'
+grep '^codex plugin marketplace add Owner/sai --ref v1 --json$' calls
+grep '^codex plugin add humanize@sai --json$' calls
+! grep '^codex .*codexless' calls
+! grep '^claude .*codexonly' calls
+rm calls
+
+zakwas check --only agents
+stdout 'up to date: agents'
+
+zakwas upgrade -y --only agents
+grep '^codex plugin marketplace upgrade codexonly --json$' calls
+grep '^codex plugin marketplace upgrade sai --json$' calls
+grep '^claude plugin marketplace update codexless --json$' calls
+rm calls
+
+cp zakwas-prune.yaml zakwas.yaml
+zakwas plan --only agents
+stdout '- codex plugin stale@sai'
+stdout '- codex marketplace old'
+! stdout 'personal'
+! stdout 'claude'
+zakwas apply -y --only agents
+grep '^codex plugin remove stale@sai --json$' calls
+grep '^codex plugin marketplace remove old --json$' calls
+zakwas check --only agents
+
+-- zakwas.yaml --
+agents:
+  providers: [claude, codex]
+  marketplaces:
+    sai: {source: Owner/sai#v1, providers: [codex]}
+    codexonly: {source: owner/codexonly, providers: [codex]}
+    codexless: {source: owner/codexless, providers: [claude]}
+  plugins:
+    - humanize@sai
+-- zakwas-prune.yaml --
+agents:
+  providers: [codex]
+  prune: true
+  marketplaces:
+    sai: owner/sai#v1
+    codexonly: owner/codexonly
+  plugins:
+    - humanize@sai
+-- plan.golden --
+agents
+  + claude marketplace codexless  owner/codexless, autoUpdate on
+  + codex marketplace codexonly   owner/codexonly
+  + codex marketplace sai         Owner/sai#v1
+  + codex plugin humanize@sai     → 2.5.0
+
+Plan: 4 to add, 0 to change, 0 to remove, 0 to run.
+-- bin/claude --
+#!/bin/sh
+echo "claude $*" >> "$WORK/calls"
+case "$*" in
+  "plugin marketplace list --json")
+    if [ -f "$WORK/state/codexless" ]; then
+      echo '[{"name":"codexless","source":"github","repo":"owner/codexless"}]'
+    else
+      echo '[]'
+    fi ;;
+  "plugin list --json --available")
+    echo '{"installed":[],"available":[]}' ;;
+  "plugin marketplace add owner/codexless --scope user --json")
+    touch "$WORK/state/codexless"
+    mkdir -p "$CLAUDE_CONFIG_DIR/plugins"
+    echo '{"codexless":{"source":{"source":"github","repo":"owner/codexless"}}}' > "$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json"
+    echo '{"outcome":"ok","marketplace":"codexless"}' ;;
+  "plugin marketplace update codexless --json")
+    echo '{"outcome":"ok"}' ;;
+  *) echo "unexpected claude $*" >&2; exit 99 ;;
+esac
+-- bin/codex --
+#!/bin/sh
+echo "codex $*" >> "$WORK/calls"
+[ "$(pwd)" = / ] || { echo "codex must run from /, not $(pwd)" >&2; exit 97; }
+[ "$CODEX_HOME" = "$WORK/codex" ] || { echo "CODEX_HOME=$CODEX_HOME" >&2; exit 98; }
+st="$WORK/state"
+writecfg() {
+  {
+    if [ -f "$st/sai" ]; then printf '[marketplaces.sai]\nsource_type = "git"\nsource = "https://github.com/Owner/sai.git"\nref = "v1"\n\n'; fi
+    if [ -f "$st/codexonly" ]; then printf '[marketplaces.codexonly]\nsource_type = "git"\nsource = "https://github.com/owner/codexonly.git"\n\n'; fi
+    if [ ! -f "$st/old-gone" ]; then printf '[marketplaces.old]\nsource_type = "local"\nsource = "/old"\n\n'; fi
+  } > "$CODEX_HOME/config.toml"
+}
+case "$*" in
+  "plugin marketplace list --json")
+    m='{"name":"personal","root":"/home/.agents/plugins","marketplaceSource":null}'
+    [ -f "$st/old-gone" ] || m="$m,{\"name\":\"old\",\"root\":\"/old\"}"
+    [ -f "$st/sai" ] && m="$m,{\"name\":\"sai\",\"root\":\"/nowhere\"}"
+    [ -f "$st/codexonly" ] && m="$m,{\"name\":\"codexonly\",\"root\":\"/nowhere\"}"
+    echo "{\"marketplaces\":[$m]}" ;;
+  "plugin list --available --json")
+    i='{"pluginId":"mine@personal","version":"1","enabled":true}'
+    [ -f "$st/stale-gone" ] || i="$i,{\"pluginId\":\"stale@sai\",\"version\":\"1.0.0\",\"enabled\":true}"
+    if [ -f "$st/humanize" ]; then
+      echo "{\"installed\":[$i,{\"pluginId\":\"humanize@sai\",\"version\":\"2.5.0\",\"enabled\":true}],\"available\":[]}"
+    else
+      echo "{\"installed\":[$i],\"available\":[{\"pluginId\":\"humanize@sai\",\"version\":\"2.5.0\"}]}"
+    fi ;;
+  "plugin marketplace add Owner/sai --ref v1 --json")
+    touch "$st/sai"; writecfg
+    echo '{"marketplaceName":"sai","installedRoot":"/nowhere","alreadyAdded":false}' ;;
+  "plugin marketplace add owner/codexonly --json")
+    touch "$st/codexonly"; writecfg
+    echo '{"marketplaceName":"codexonly","installedRoot":"/nowhere","alreadyAdded":false}' ;;
+  "plugin add humanize@sai --json")
+    touch "$st/humanize"
+    echo '{"pluginId":"humanize@sai","version":"2.5.0"}' ;;
+  "plugin marketplace upgrade sai --json"|"plugin marketplace upgrade codexonly --json")
+    echo '{"selectedMarketplaces":[],"upgradedRoots":[],"errors":[]}' ;;
+  "plugin remove stale@sai --json")
+    touch "$st/stale-gone"
+    echo '{"pluginId":"stale@sai"}' ;;
+  "plugin marketplace remove old --json")
+    touch "$st/old-gone"; writecfg
+    echo '{"marketplaceName":"old"}' ;;
+  *) echo "unexpected codex $*" >&2; exit 99 ;;
+esac

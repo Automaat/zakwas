@@ -46,7 +46,7 @@ system → files → links → templates → brew → mise → agents → comman
 ## Rules
 
 - `plan`/`check` must never change the system; every brew call (apply too) sets `HOMEBREW_NO_AUTO_UPDATE=1`, so only `zakwas upgrade` refreshes Homebrew. Likewise only `upgrade` refreshes agent marketplaces.
-- agents: each provider is a `backend` in `internal/modules/agents` (only claude so far; codex/opencode are validated and skipped). Never pass `-y`/`--accept-command` to `claude plugin`; never prune project/local-scope installs.
+- agents: each provider is a `backend` in `internal/modules/agents` (claude, codex; opencode is validated and skipped). A provider that fails to plan returns its error alongside the other providers' changes, which still apply. Never pass `-y`/`--accept-command` to `claude plugin`; never prune project/local-scope installs. Codex prune only touches marketplaces in `$CODEX_HOME/config.toml` and their plugins. Tests that run a real `codex` must set `CODEX_HOME` to a temp dir.
 - Replaced files zakwas didn't write (or that were edited) are backed up to `<file>.zakwas-bak` (`.zakwas-bak.N` if taken), never deleted or overwritten.
 - `files`/`links`/`templates` destinations must be absolute or `~/…` (no `$VAR`) and must not overlap (case-insensitive). Modes are octal: `0644`, not `644`.
 - zakwas refuses to write through a symlinked parent dir under `$HOME` or one resolving into the config repo.
