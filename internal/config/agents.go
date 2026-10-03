@@ -179,9 +179,14 @@ func (a *Agents) validate() []error {
 		}
 	}
 	checkProviders("agents.providers", a.Providers, Providers, "the default (all)")
+	folded := map[string]string{}
 	for _, name := range a.MarketplaceNames() {
 		m := a.Marketplaces[name]
 		what := "agents.marketplaces." + name
+		if other, dup := folded[strings.ToLower(name)]; dup {
+			errs = append(errs, fmt.Errorf("%s: differs from %s only in case; macOS file names ignore case, so use distinct names", what, other))
+		}
+		folded[strings.ToLower(name)] = name
 		if !marketplaceName.MatchString(name) {
 			errs = append(errs, fmt.Errorf("%s: name may only contain letters, digits, '.', '_' and '-'", what))
 		}

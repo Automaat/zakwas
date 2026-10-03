@@ -160,6 +160,7 @@ defaults:
 		{"unknown agents field", "agents: {marketplace: {}}", []string{"field marketplace not found"}},
 		{"relative opencode skills dir", "agents: {opencode: {skillsDir: skills}}", []string{`agents.opencode.skillsDir: "skills" must be absolute or start with ~/`}},
 		{"env var opencode skills dir", "agents: {opencode: {skillsDir: $HOME/skills}}", []string{"agents.opencode.skillsDir"}},
+		{"marketplace names differing in case", "agents: {marketplaces: {Foo: o/a, foo: o/b}}", []string{"agents.marketplaces.foo: differs from Foo only in case"}},
 		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"field dir not found"}},
 		{"reports all errors", `
 links: [{src: a}]

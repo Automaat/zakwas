@@ -151,10 +151,22 @@ type skillDir struct {
 // pluginSkills lists the skills of a plugin, sorted by name: the paths its
 // plugin.json or marketplace entry declares under "skills", each a skill
 // directory or a directory of them, or else each skills/<name> holding a
-// SKILL.md. A declared list replaces the default, since plugins sharing
+// SKILL.md. Paths that resolve outside root through a symlink are
+// skipped, and a plugin dir that does fails. A declared list replaces the default, since plugins sharing
 // one repo (anthropics/skills) each pick their own subset. Paths outside
 // root are ignored; the first skill of a name wins.
 func pluginSkills(root, dir string, extra []string) ([]skillDir, error) {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, err
+	}
+	inside := func(p string) bool {
+		real, err := filepath.EvalSymlinks(p)
+		return err == nil && within(real, realRoot)
+	}
+	if !inside(dir) {
+		return nil, fmt.Errorf("%s resolves outside the marketplace repo", dir)
+	}
 	var own struct {
 		Skills json.RawMessage `json:"skills"`
 	}
@@ -185,10 +197,10 @@ func pluginSkills(root, dir string, extra []string) ([]skillDir, error) {
 			continue
 		}
 		base := filepath.Join(dir, rel)
-		if base != clean && !strings.HasPrefix(base, clean+string(filepath.Separator)) {
+		if base != clean && !strings.HasPrefix(base, clean+string(filepath.Separator)) || !inside(base) {
 			continue
 		}
-		if isSkill(base) {
+		if isSkill(base) && inside(filepath.Join(base, "SKILL.md")) {
 			add(filepath.Base(base), base)
 			continue
 		}
@@ -200,7 +212,7 @@ func pluginSkills(root, dir string, extra []string) ([]skillDir, error) {
 			return nil, err
 		}
 		for _, e := range entries {
-			if p := filepath.Join(base, e.Name()); !strings.HasPrefix(e.Name(), ".") && isSkill(p) {
+			if p := filepath.Join(base, e.Name()); !strings.HasPrefix(e.Name(), ".") && isSkill(p) && inside(filepath.Join(p, "SKILL.md")) {
 				add(e.Name(), p)
 			}
 		}

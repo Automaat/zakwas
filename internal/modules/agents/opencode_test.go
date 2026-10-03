@@ -846,3 +846,70 @@ func TestOpencodeRefreshFailureOfDefaultTargetedMarketplace(t *testing.T) {
 		}
 	}
 }
+
+func TestOpencodeIgnoresSkillsEscapingThroughSymlinks(t *testing.T) {
+	m, _ := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
+		Plugins:      []config.Plugin{{ID: "a@mp"}, {ID: "out@mp"}},
+	})
+	root := filepath.Join(m.Paths.Root, "mp")
+	marketplace(t, root, "mp", map[string][]string{"a": {"ok"}})
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "skills", "evil", "SKILL.md"), "")
+	if err := os.Symlink(filepath.Join(outside, "skills", "evil"), filepath.Join(root, "plugins", "a", "skills", "evil")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "plugins", "out")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, ".claude-plugin", "marketplace.json"), `{"name":"mp","plugins":[{"name":"a","source":"./plugins/a"},{"name":"out","source":"./plugins/out"}]}`)
+	_, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "resolves outside the marketplace repo") {
+		t.Errorf("err = %v", err)
+	}
+	m.Agents.Plugins = []config.Plugin{{ID: "a@mp"}}
+	if got := targets(plan(t, m)); !reflect.DeepEqual(got, []string{"+ opencode skill ok (a@mp)"}) {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestOpencodeRefusesSymlinkedCacheDir(t *testing.T) {
+	m, r := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
+		Plugins:      []config.Plugin{{ID: "p@sai"}},
+	})
+	cache := filepath.Join(m.Paths.Home, ".local", "share", "zakwas", "agents")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(cache, "sai")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "is a symlink") {
+		t.Errorf("plan: err = %v", err)
+	}
+	if err := m.Refresh(context.Background()); err == nil || !strings.Contains(err.Error(), "is a symlink") || len(r.Calls) != 0 {
+		t.Errorf("refresh: err = %v, ran %v", err, r.Lines())
+	}
+}
+
+func TestOpencodePrunesWithoutOpencodeInstalled(t *testing.T) {
+	m, r := newOpencode(t, config.Agents{
+		Prune:        true,
+		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
+		Plugins:      []config.Plugin{{ID: "a@mp"}, {ID: "b@mp"}},
+	})
+	marketplace(t, filepath.Join(m.Paths.Root, "mp"), "mp", map[string][]string{"a": {"keep"}, "b": {"gone"}})
+	apply(t, plan(t, m))
+	m.Agents.Providers = nil
+	m.Agents.Plugins = []config.Plugin{{ID: "a@mp"}}
+	r.Missing("opencode", "claude", "codex")
+	o := m.opencodeBackend()
+	changes, err := o.plan(context.Background(), m.desired(config.ProviderOpencode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := targets(changes); !reflect.DeepEqual(got, []string{"- opencode skill gone (b@mp)"}) {
+		t.Errorf("got %v", got)
+	}
+}

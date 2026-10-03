@@ -157,10 +157,8 @@ func (o *opencode) plan(ctx context.Context, d desired) ([]engine.Change, error)
 // plans without, so a fetch that failed for a default-targeted plugin is
 // not retried in a loop.
 func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
-	if !o.runner.Installed("opencode") {
-		if !slices.Contains(slices.Collect(maps.Values(d.explicit)), true) {
-			return nil, nil
-		}
+	installed := o.runner.Installed("opencode")
+	if !installed && slices.Contains(slices.Collect(maps.Values(d.explicit)), true) {
 		return nil, errors.New("opencode: opencode is not installed (no opencode on PATH); install it, or remove opencode from agents.providers")
 	}
 	d = usedMarketplaces(d)
@@ -170,6 +168,9 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 	st, err := o.load()
 	if err != nil {
 		return nil, err
+	}
+	if !installed {
+		return o.planPruneOnly(d, st), nil
 	}
 	var fetches []engine.Change
 	pending := map[string]bool{}
@@ -220,17 +221,34 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 	}), nil
 }
 
-// checkOwnDirs refuses zakwas's state and cache paths when reached through
-// a symlinked directory under $HOME, which could point into the config
-// repo.
+// planPruneOnly is the plan without opencode installed, when no plugin
+// names it: nothing is linked, but with prune the links and clones of
+// plugins and marketplaces no longer declared are still cleaned up.
+func (o *opencode) planPruneOnly(d desired, st opencodeState) []engine.Change {
+	if !d.prune {
+		return nil
+	}
+	declared := map[string]bool{}
+	for _, id := range d.plugins {
+		declared[id] = true
+	}
+	return o.planPrune(d, st, nil, declared)
+}
+
+// checkOwnDirs refuses zakwas's state and cache paths when they, or a
+// directory above them, are a symlink under $HOME, which could point into
+// the config repo.
 func (o *opencode) checkOwnDirs(d desired) error {
-	paths := []string{o.statePath}
+	paths := []string{o.statePath, filepath.Join(o.cacheDir, ".zakwas")}
 	for name, src := range d.sources {
 		if !IsLocalSource(src) {
-			paths = append(paths, filepath.Join(o.cacheDir, name))
+			paths = append(paths, filepath.Join(o.cacheDir, name, ".git"))
 		}
 	}
 	var errs []error
+	if info, err := os.Lstat(o.statePath); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		errs = append(errs, fmt.Errorf("opencode: %s is a symlink; remove it", o.paths.Pretty(o.statePath)))
+	}
 	for _, p := range paths {
 		if err := install.CheckParents(o.paths, p); err != nil {
 			errs = append(errs, fmt.Errorf("opencode: %w", err))
@@ -599,6 +617,9 @@ func (o *opencode) refresh(ctx context.Context, d desired) error {
 		return nil
 	}
 	d = usedMarketplaces(d)
+	if err := o.checkOwnDirs(d); err != nil {
+		return err
+	}
 	st, err := o.load()
 	if err != nil {
 		return err
