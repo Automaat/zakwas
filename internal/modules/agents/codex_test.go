@@ -193,6 +193,16 @@ source = "/old"
 	if got := plan(t, m); len(got) != 0 {
 		t.Errorf("prune off: got %v", targets(got))
 	}
+
+	m.Agents.Prune = true
+	m.Agents.Providers = nil
+	fake.OnOK(marketList, `[]`)
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	for _, c := range plan(t, m) {
+		if strings.HasPrefix(c.Target, "codex ") {
+			t.Errorf("codex not named: must not prune, got %s", c)
+		}
+	}
 }
 
 func TestCodexPlanErrors(t *testing.T) {

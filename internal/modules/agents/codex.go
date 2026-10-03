@@ -130,8 +130,9 @@ func (c *codex) state(ctx context.Context) (codexState, error) {
 	return st, nil
 }
 
-// plan skips a missing codex unless zakwas.yaml names the provider: a
-// config that only gets codex from the default providers predates it.
+// plan skips a missing codex, and never prunes, unless zakwas.yaml names
+// the provider: a config that only gets codex from the default providers
+// may predate Codex support and must not remove what it never declared.
 func (c *codex) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 	if !c.runner.Installed("codex") {
 		if !d.named {
@@ -200,7 +201,7 @@ func (c *codex) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 		}
 	}
 
-	if d.prune {
+	if d.prune && d.named {
 		changes = append(changes, c.planPrune(d, st)...)
 	}
 	if err := errors.Join(errs...); err != nil {
