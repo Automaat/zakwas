@@ -99,12 +99,9 @@ func (c *codex) state(ctx context.Context) (codexState, error) {
 		return st, err
 	}
 	st.configured = configured
-	if err := brokenLocal(configured); err != nil {
-		return st, err
-	}
 	out, err := runner.Output(ctx, c.runner, c.cmd("plugin", "marketplace", "list", "--json"))
 	if err != nil {
-		return st, err
+		return st, errors.Join(err, brokenLocal(configured))
 	}
 	var markets struct {
 		Marketplaces []codexMarketplace `json:"marketplaces"`
@@ -134,8 +131,8 @@ func (c *codex) state(ctx context.Context) (codexState, error) {
 }
 
 // brokenLocal names local marketplaces in config.toml whose directory has
-// no manifest: Codex then fails every list command, prune included, until
-// they are removed by hand.
+// no manifest, to explain a failed list: Codex then fails every list
+// command, prune included, until they are removed by hand.
 func brokenLocal(configured map[string]codexSource) error {
 	names := make([]string, 0, len(configured))
 	for n := range configured {
@@ -148,15 +145,28 @@ func brokenLocal(configured map[string]codexSource) error {
 		if s.SourceType != "local" {
 			continue
 		}
-		if codexManifest(s.Source) == "" {
+		if !hasAnyManifest(s.Source) {
 			errs = append(errs, fmt.Errorf("codex: local marketplace %q at %s has no marketplace manifest, so codex can't list plugins; restore it or run `codex plugin marketplace remove %s`", n, s.Source, n))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// codexManifest returns the manifest Codex reads in a marketplace root, or
-// "" when there is none.
+// hasAnyManifest reports whether root has any manifest Codex 0.160 loads.
+func hasAnyManifest(root string) bool {
+	if codexManifest(root) != "" {
+		return true
+	}
+	for _, rel := range []string{filepath.Join(".agents", "plugins", "api_marketplace.json"), filepath.Join(".cursor-plugin", "marketplace.json")} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// codexManifest returns the plugin manifest Codex reads in a marketplace
+// root, or "" when there is none.
 func codexManifest(root string) string {
 	for _, rel := range []string{filepath.Join(".agents", "plugins", "marketplace.json"), filepath.Join(".claude-plugin", "marketplace.json")} {
 		p := filepath.Join(root, rel)

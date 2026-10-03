@@ -342,13 +342,25 @@ func TestProvidersPlanSeparately(t *testing.T) {
 func TestCodexBrokenLocalMarketplace(t *testing.T) {
 	m, fake := newCodexModule(t, config.Agents{Prune: true})
 	gone := filepath.Join(t.TempDir(), "gone")
-	writeFile(t, m.codex().configPath(), "[marketplaces.gone]\nsource_type = \"local\"\nsource = \""+gone+"\"\n")
+	cursor := t.TempDir()
+	writeFile(t, filepath.Join(cursor, ".cursor-plugin", "marketplace.json"), `{"name":"cur","plugins":[]}`)
+	writeFile(t, m.codex().configPath(), "[marketplaces.gone]\nsource_type = \"local\"\nsource = \""+gone+"\"\n\n[marketplaces.cur]\nsource_type = \"local\"\nsource = \""+cursor+"\"\n")
+	fake.On(codexMarketList, runner.Result{ExitCode: 1, Stderr: "Error: failed to load marketplace(s)"})
 	_, err := m.Plan(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "codex plugin marketplace remove gone") {
+	if err == nil || !strings.Contains(err.Error(), "failed to load") || !strings.Contains(err.Error(), "codex plugin marketplace remove gone") {
 		t.Errorf("err = %v", err)
 	}
-	if len(fake.Calls) != 0 {
-		t.Errorf("ran codex against a broken marketplace: %v", fake.Lines())
+	if strings.Contains(err.Error(), `"cur"`) {
+		t.Errorf("a marketplace with a cursor manifest is not broken: %v", err)
+	}
+
+	m.Agents.Prune = false
+	fake = runnertest.New()
+	m.Runner = fake
+	fake.OnOK(codexMarketList, `{"marketplaces": [{"name":"cur","root":"`+cursor+`"}]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	if _, err := m.Plan(context.Background()); err != nil {
+		t.Errorf("codex lists fine, so no pre-check may fail the plan: %v", err)
 	}
 }
 
