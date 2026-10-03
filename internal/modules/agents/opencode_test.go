@@ -31,7 +31,7 @@ func (r *cloneRunner) Run(ctx context.Context, c runner.Cmd) (runner.Result, err
 			return runner.Result{ExitCode: 128, Stderr: "fatal: repository '" + url + "' not found"}, nil
 		}
 		write(dir)
-		return runner.Result{}, nil
+		return runner.Result{}, os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
 	}
 	return r.Fake.Run(ctx, c)
 }
@@ -136,8 +136,9 @@ func TestOpencodeGitMarketplace(t *testing.T) {
 	assertConverged(t, m)
 
 	r.Fake = runnertest.New()
-	r.OnOK("git -C "+cache+" fetch --quiet --depth 1 origin v1", "")
-	r.OnOK("git -C "+cache+" reset --quiet --hard FETCH_HEAD", "")
+	repo := "git --git-dir=" + filepath.Join(cache, ".git") + " --work-tree=" + cache
+	r.OnOK(repo+" fetch --quiet --depth 1 origin v1", "")
+	r.OnOK(repo+" reset --quiet --hard FETCH_HEAD", "")
 	if err := m.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -693,6 +694,40 @@ func TestOpencodeDefaultTargetedFetchFailureSkips(t *testing.T) {
 		t.Errorf("ran %v, want one clone of the .git-less URL", got)
 	}
 	assertLink(t, filepath.Join(skillsDir(m), "s"), filepath.Join(m.Paths.Root, "mp", "plugins", "a", "skills", "s"))
+
+	r.Fake = runnertest.New()
+	r.Missing("claude", "codex")
+	if again, err := o.plan(context.Background(), m.desired(config.ProviderOpencode)); err != nil || len(again) != 0 {
+		t.Errorf("failed fetch must not be retried by every plan: %v, %v", targets(again), err)
+	}
+	if err := o.refresh(context.Background(), m.desired(config.ProviderOpencode)); err != nil {
+		t.Fatal(err)
+	}
+	again, err := o.plan(context.Background(), m.desired(config.ProviderOpencode))
+	if err != nil || len(again) != 2 {
+		t.Errorf("upgrade must retry the fetch: %v, %v", targets(again), err)
+	}
+}
+
+func TestOpencodeKeepsCacheDeclaredAsLocalSource(t *testing.T) {
+	m, r := newOpencode(t, config.Agents{
+		Prune:        true,
+		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
+		Plugins:      []config.Plugin{{ID: "p@sai"}},
+	})
+	r.repos["https://github.com/o/sai.git"] = func(dir string) { marketplace(t, dir, "sai", map[string][]string{"p": {"s"}}) }
+	apply(t, plan(t, m))
+	m.Agents.Marketplaces["sai"] = config.Marketplace{Source: "~/.local/share/zakwas/agents/sai"}
+	changes := plan(t, m)
+	for _, c := range changes {
+		if c.Target == "opencode marketplace sai" {
+			t.Errorf("plans to delete the declared local marketplace: %s", c)
+		}
+	}
+	apply(t, changes)
+	if _, err := os.Stat(filepath.Join(m.Paths.Home, ".local", "share", "zakwas", "agents", "sai", ".claude-plugin")); err != nil {
+		t.Errorf("cache removed: %v", err)
+	}
 }
 
 func TestOpencodePluginsSharingARepo(t *testing.T) {
@@ -708,6 +743,26 @@ func TestOpencodePluginsSharingARepo(t *testing.T) {
 		writeFile(t, filepath.Join(root, "skills", s, "SKILL.md"), "")
 	}
 	want := []string{"+ opencode skill art (examples@mp)", "+ opencode skill pdf (docs@mp)", "+ opencode skill xlsx (docs@mp)"}
+	if got := targets(plan(t, m)); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v\nwant %v", got, want)
+	}
+}
+
+func TestOpencodeCacheWithoutGitIsRefetched(t *testing.T) {
+	m, r := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
+		Plugins:      []config.Plugin{{ID: "p@sai"}},
+	})
+	r.repos["https://github.com/o/sai.git"] = func(dir string) { marketplace(t, dir, "sai", map[string][]string{"p": {"s"}}) }
+	apply(t, plan(t, m))
+	if err := os.RemoveAll(filepath.Join(m.Paths.Home, ".local", "share", "zakwas", "agents", "sai", ".git")); err != nil {
+		t.Fatal(err)
+	}
+	r.Fake = runnertest.New()
+	if err := m.Refresh(context.Background()); err != nil || len(r.Lines()) != 0 {
+		t.Errorf("refresh of a cache without .git: %v, ran %v", err, r.Lines())
+	}
+	want := []string{"+ opencode marketplace sai (fetch o/sai)", "+ opencode skills (of p@sai once fetched)"}
 	if got := targets(plan(t, m)); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
 	}

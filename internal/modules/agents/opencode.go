@@ -40,11 +40,13 @@ func (m *Module) opencodeBackend() *opencode {
 	}
 }
 
-// opencodeState maps each fetched git marketplace to its source, and each
-// skill link zakwas made (by absolute path, so a changed skillsDir still
-// finds the old ones) to its target and plugin.
+// opencodeState maps each fetched git marketplace to its source, each
+// marketplace whose best-effort fetch failed to that source (retried by
+// `zakwas upgrade`), and each skill link zakwas made (by absolute path, so
+// a changed skillsDir still finds the old ones) to its target and plugin.
 type opencodeState struct {
 	Marketplaces map[string]string        `json:"marketplaces"`
+	Failed       map[string]string        `json:"failed,omitempty"`
 	Skills       map[string]opencodeSkill `json:"skills"`
 }
 
@@ -54,7 +56,7 @@ type opencodeSkill struct {
 }
 
 func (o *opencode) load() (opencodeState, error) {
-	st := opencodeState{Marketplaces: map[string]string{}, Skills: map[string]opencodeSkill{}}
+	st := opencodeState{Marketplaces: map[string]string{}, Failed: map[string]string{}, Skills: map[string]opencodeSkill{}}
 	data, err := os.ReadFile(o.statePath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return st, nil
@@ -70,6 +72,9 @@ func (o *opencode) load() (opencodeState, error) {
 	}
 	if st.Skills == nil {
 		st.Skills = map[string]opencodeSkill{}
+	}
+	if st.Failed == nil {
+		st.Failed = map[string]string{}
 	}
 	return st, nil
 }
@@ -131,7 +136,7 @@ func (o *opencode) fetched(st opencodeState, name, src string) bool {
 	if !ok || canonical(have) != canonical(src) {
 		return false
 	}
-	info, err := os.Stat(o.root(name, src))
+	info, err := os.Stat(filepath.Join(o.root(name, src), ".git"))
 	return err == nil && info.IsDir()
 }
 
@@ -220,24 +225,28 @@ func (o *opencode) planFetches(d desired, st opencodeState) ([]engine.Change, ma
 	pending := map[string]bool{}
 	for _, name := range slices.Sorted(maps.Keys(d.sources)) {
 		src := d.sources[name]
+		strict := explicitIn(d, name)
 		if IsLocalSource(src) || o.fetched(st, name, src) {
 			continue
 		}
+		if failed, ok := st.Failed[name]; ok && !strict && canonical(failed) == canonical(src) {
+			continue
+		}
 		if !o.runner.Installed("git") {
-			if explicitIn(d, name) {
+			if strict {
 				errs = append(errs, fmt.Errorf("opencode: marketplace %q needs git to fetch %s, and git is not installed", name, src))
 			}
 			continue
 		}
 		pending[name] = true
-		strict := explicitIn(d, name)
 		c := engine.Change{
 			Action: engine.Create, Target: "opencode marketplace " + name, Detail: "fetch " + src,
 			Apply: func(ctx context.Context) error {
-				if err := o.fetch(ctx, name, src); err != nil && (strict || ctx.Err() != nil) {
+				err := o.fetch(ctx, name, src)
+				if err == nil || strict || ctx.Err() != nil {
 					return err
 				}
-				return nil
+				return o.update(func(st *opencodeState) { st.Failed[name] = src })
 			},
 		}
 		if have, ok := st.Marketplaces[name]; ok && canonical(have) != canonical(src) {
@@ -470,10 +479,10 @@ func (o *opencode) planPrune(d desired, st opencodeState, want map[string]wanted
 		})
 	}
 	for _, name := range slices.Sorted(maps.Keys(st.Marketplaces)) {
-		if src, ok := d.sources[name]; ok && !IsLocalSource(src) {
+		dir := filepath.Join(o.cacheDir, name)
+		if src, ok := d.sources[name]; ok && (!IsLocalSource(src) || within(canonical(src), canonical(dir))) {
 			continue
 		}
-		dir := filepath.Join(o.cacheDir, name)
 		changes = append(changes, engine.Change{
 			Action: engine.Remove, Target: "opencode marketplace " + name, Detail: o.paths.Pretty(dir), Destructive: true,
 			Apply: func(context.Context) error {
@@ -523,6 +532,12 @@ func (o *opencode) fetch(ctx context.Context, name, src string) error {
 	if err := os.MkdirAll(o.cacheDir, 0o755); err != nil {
 		return err
 	}
+	stale, _ := filepath.Glob(filepath.Join(o.cacheDir, "."+name+".zakwas-*"))
+	for _, dir := range stale {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+	}
 	tmp, err := os.MkdirTemp(o.cacheDir, "."+name+".zakwas-*")
 	if err != nil {
 		return err
@@ -543,11 +558,15 @@ func (o *opencode) fetch(ctx context.Context, name, src string) error {
 	if err := os.Rename(tmp, dir); err != nil {
 		return err
 	}
-	return o.update(func(st *opencodeState) { st.Marketplaces[name] = src })
+	return o.update(func(st *opencodeState) {
+		st.Marketplaces[name] = src
+		delete(st.Failed, name)
+	})
 }
 
 // refresh pulls the declared git marketplaces zakwas already fetched;
-// apply fetches missing ones fresh.
+// apply fetches missing ones fresh. git is pinned to the cache's own .git,
+// so it can never walk up into an enclosing repo such as a dotfiles $HOME.
 func (o *opencode) refresh(ctx context.Context, d desired) error {
 	if !o.runner.Installed("opencode") {
 		return nil
@@ -556,6 +575,11 @@ func (o *opencode) refresh(ctx context.Context, d desired) error {
 	st, err := o.load()
 	if err != nil {
 		return err
+	}
+	if len(st.Failed) > 0 {
+		if err := o.update(func(st *opencodeState) { clear(st.Failed) }); err != nil {
+			return err
+		}
 	}
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(d.sources)) {
@@ -568,11 +592,17 @@ func (o *opencode) refresh(ctx context.Context, d desired) error {
 		if ref == "" {
 			ref = "HEAD"
 		}
-		if err := runner.Check(ctx, o.runner, o.git("-C", dir, "fetch", "--quiet", "--depth", "1", "origin", ref)); err != nil {
+		repo := []string{"--git-dir=" + filepath.Join(dir, ".git"), "--work-tree=" + dir}
+		if err := runner.Check(ctx, o.runner, o.git(append(repo, "fetch", "--quiet", "--depth", "1", "origin", ref)...)); err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		errs = append(errs, runner.Check(ctx, o.runner, o.git("-C", dir, "reset", "--quiet", "--hard", "FETCH_HEAD")))
+		errs = append(errs, runner.Check(ctx, o.runner, o.git(append(repo, "reset", "--quiet", "--hard", "FETCH_HEAD")...)))
 	}
 	return errors.Join(errs...)
+}
+
+// within reports whether path is dir or inside it.
+func within(path, dir string) bool {
+	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
 }

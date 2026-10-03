@@ -53,6 +53,17 @@ linkto home/.config/opencode/skills/humanize home/.local/share/zakwas/agents/sai
 zakwas check --only agents
 stdout 'up to date: agents'
 
+exec git -C home init -q
+exec git -C home add dot
+exec git -C home commit -qm dot
+exec sh -c 'echo edit >> $WORK/home/dot'
+rm home/.local/share/zakwas/agents/sai/.git
+zakwas upgrade -y --only agents
+grep edit home/dot
+linkto home/.config/opencode/skills/humanize home/.local/share/zakwas/agents/sai/plugins/humanize/skills/humanize
+exists home/.local/share/zakwas/agents/sai/.git
+zakwas check --only agents
+
 cp zakwas-dup.yaml zakwas.yaml
 ! zakwas plan --only agents
 stdout 'skill "humanize" is shipped by both humanize@sai and copy@mp'
@@ -137,3 +148,5 @@ description: copy
 name: humanize
 description: fork
 ---
+-- home/dot --
+committed
