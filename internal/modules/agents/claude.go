@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Automaat/zakwas/internal/config"
@@ -38,17 +39,22 @@ type claudeMarketplace struct {
 	Repo            string `json:"repo"`
 	URL             string `json:"url"`
 	Path            string `json:"path"`
+	Ref             string `json:"ref"`
 	InstallLocation string `json:"installLocation"`
 }
 
 func (m claudeMarketplace) source() string {
+	src := m.Path
 	switch {
 	case m.Repo != "":
-		return m.Repo
+		src = m.Repo
 	case m.URL != "":
-		return m.URL
+		src = m.URL
 	}
-	return m.Path
+	if m.Ref != "" {
+		src += "#" + m.Ref
+	}
+	return src
 }
 
 type claudeInstalled struct {
@@ -199,7 +205,7 @@ func (c *claude) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 		if !d.upgrade {
 			continue
 		}
-		if latest := latestVersion(st.marketplaces[mk], name); latest != "" && latest != inst.Version {
+		if latest := latestVersion(st.marketplaces[mk], name); newerVersion(latest, inst.Version) {
 			changes = append(changes, engine.Change{
 				Action: engine.Update, Target: "claude plugin " + id, From: inst.Version, To: latest,
 				Apply: func(ctx context.Context) error { return c.mutate(ctx, "update", id, "--scope", scopeUser) },
@@ -368,6 +374,9 @@ func latestVersion(m claudeMarketplace, plugin string) string {
 		return ""
 	}
 	var manifest struct {
+		Metadata struct {
+			PluginRoot string `json:"pluginRoot"`
+		} `json:"metadata"`
 		Plugins []struct {
 			Name    string          `json:"name"`
 			Version string          `json:"version"`
@@ -381,7 +390,7 @@ func latestVersion(m claudeMarketplace, plugin string) string {
 		if p.Name != plugin {
 			continue
 		}
-		if own := inRepoVersion(m.InstallLocation, p.Source); own != "" {
+		if own := inRepoVersion(m.InstallLocation, manifest.Metadata.PluginRoot, p.Source); own != "" {
 			return own
 		}
 		return p.Version
@@ -389,15 +398,69 @@ func latestVersion(m claudeMarketplace, plugin string) string {
 	return ""
 }
 
+// newerVersion reports whether semver latest is newer than installed.
+// Anything else, like a commit hash, is never newer: the plan can't tell,
+// and guessing would plan a no-op update on every run.
+func newerVersion(latest, installed string) bool {
+	l, okL := parseVersion(latest)
+	i, okI := parseVersion(installed)
+	if !okL || !okI {
+		return false
+	}
+	for k := range 3 {
+		if l.core[k] != i.core[k] {
+			return l.core[k] > i.core[k]
+		}
+	}
+	switch {
+	case l.pre == i.pre:
+		return false
+	case l.pre == "":
+		return true
+	case i.pre == "":
+		return false
+	}
+	return l.pre > i.pre
+}
+
+type version struct {
+	core [3]int
+	pre  string
+}
+
+func parseVersion(s string) (version, bool) {
+	var v version
+	s, _, _ = strings.Cut(strings.TrimPrefix(s, "v"), "+")
+	s, v.pre, _ = strings.Cut(s, "-")
+	parts := strings.Split(s, ".")
+	if len(parts) > 3 {
+		return v, false
+	}
+	for k, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return v, false
+		}
+		v.core[k] = n
+	}
+	return v, true
+}
+
 // inRepoVersion reads plugin.json of a plugin stored in the marketplace
 // repo; Claude installs that version over the marketplace entry's.
-func inRepoVersion(root string, source json.RawMessage) string {
+func inRepoVersion(root, pluginRoot string, source json.RawMessage) string {
 	var rel string
-	if json.Unmarshal(source, &rel) != nil || !strings.HasPrefix(rel, "./") {
+	if json.Unmarshal(source, &rel) != nil || rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, ":") {
 		return ""
 	}
 	dir := filepath.Join(root, rel)
-	if !strings.HasPrefix(dir, filepath.Clean(root)+string(filepath.Separator)) {
+	if !strings.HasPrefix(rel, "./") {
+		if pluginRoot == "" {
+			return ""
+		}
+		dir = filepath.Join(root, pluginRoot, rel)
+	}
+	if clean := filepath.Clean(root); dir != clean && !strings.HasPrefix(dir, clean+string(filepath.Separator)) {
 		return ""
 	}
 	var own struct {

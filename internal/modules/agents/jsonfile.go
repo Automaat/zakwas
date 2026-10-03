@@ -54,7 +54,7 @@ func (o object) MarshalJSON() ([]byte, error) {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		key, err := json.Marshal(k)
+		key, err := marshal(k)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func (o *object) get(key string) (json.RawMessage, bool) {
 }
 
 func (o *object) set(key string, v any) error {
-	raw, err := json.Marshal(v)
+	raw, err := marshal(v)
 	if err != nil {
 		return err
 	}
@@ -84,6 +84,18 @@ func (o *object) set(key string, v any) error {
 	}
 	o.values[key] = raw
 	return nil
+}
+
+// marshal skips json.Marshal's HTML escaping, which would rewrite "&&" in
+// untouched fields such as hook commands.
+func marshal(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(b.Bytes(), "\n"), nil
 }
 
 // readObject reads a JSON object file; a missing file is an empty object.
@@ -105,7 +117,7 @@ func readObject(path string) (object, bool, error) {
 // writeObject replaces path atomically, writing through a symlink (a
 // dotfiles link) rather than over it and keeping the file's mode.
 func writeObject(path string, o object) error {
-	compact, err := json.Marshal(o)
+	compact, err := marshal(o)
 	if err != nil {
 		return err
 	}

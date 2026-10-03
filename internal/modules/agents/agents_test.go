@@ -165,10 +165,13 @@ func TestEnableAndUpgrade(t *testing.T) {
 		m, fake := newModule(t, config.Agents{
 			Upgrade:      upgrade,
 			Marketplaces: map[string]config.Marketplace{"sai": {Source: "https://github.com/O/sai.git"}},
-			Plugins:      []config.Plugin{{ID: "a@sai"}, {ID: "b@sai"}, {ID: "c@sai"}, {ID: "d@sai"}, {ID: "e@sai"}},
+			Plugins:      []config.Plugin{{ID: "a@sai"}, {ID: "b@sai"}, {ID: "c@sai"}, {ID: "d@sai"}, {ID: "e@sai"}, {ID: "f@sai"}, {ID: "g@sai"}, {ID: "r@sai"}},
 		})
 		loc := t.TempDir()
-		writeFile(t, filepath.Join(loc, ".claude-plugin", "marketplace.json"), `{"name":"sai","plugins":[
+		writeFile(t, filepath.Join(loc, ".claude-plugin", "marketplace.json"), `{"name":"sai","metadata":{"pluginRoot":"./plugins"},"plugins":[
+			{"name":"f","version":"1.0.0","source":"f"},
+			{"name":"r","version":"0.1.0","source":"./"},
+			{"name":"g","version":"0.9.0","source":{"source":"github","repo":"x/g"}},
 			{"name":"a","version":"1.1.0","source":"./a"},
 			{"name":"e","version":"9.0.0","source":"./e"},
 			{"name":"b","source":"./b"},
@@ -176,6 +179,8 @@ func TestEnableAndUpgrade(t *testing.T) {
 			{"name":"d","source":"../escape"}]}`)
 		writeFile(t, filepath.Join(loc, "b", ".claude-plugin", "plugin.json"), `{"version":"3.0.0"}`)
 		writeFile(t, filepath.Join(loc, "e", ".claude-plugin", "plugin.json"), `{"version":"1.0.0"}`)
+		writeFile(t, filepath.Join(loc, "plugins", "f", ".claude-plugin", "plugin.json"), `{"version":"1.3.0"}`)
+		writeFile(t, filepath.Join(loc, ".claude-plugin", "plugin.json"), `{"version":"5.0.0"}`)
 		writeFile(t, m.claude().knownPath(), knownJSON(map[string]bool{"sai": true}))
 		fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai","installLocation":"`+loc+`"}]`)
 		fake.OnOK(pluginList, `{"installed": [
@@ -183,11 +188,14 @@ func TestEnableAndUpgrade(t *testing.T) {
 			{"id":"b@sai","version":"2.0.0","scope":"user","enabled":true},
 			{"id":"c@sai","version":"abc123","scope":"user","enabled":true},
 			{"id":"d@sai","version":"1.0.0","scope":"user","enabled":true},
-			{"id":"e@sai","version":"1.0.0","scope":"user","enabled":true}], "available": []}`)
+			{"id":"e@sai","version":"1.0.0","scope":"user","enabled":true},
+			{"id":"f@sai","version":"1.2.0","scope":"user","enabled":true},
+			{"id":"g@sai","version":"1.0.0","scope":"user","enabled":true},
+			{"id":"r@sai","version":"4.0.0","scope":"user","enabled":true}], "available": []}`)
 
 		want := []string{"~ claude plugin a@sai (enable)"}
 		if upgrade {
-			want = append(want, "~ claude plugin a@sai (1.0.0 → 1.1.0)", "~ claude plugin b@sai (2.0.0 → 3.0.0)")
+			want = append(want, "~ claude plugin a@sai (1.0.0 → 1.1.0)", "~ claude plugin b@sai (2.0.0 → 3.0.0)", "~ claude plugin f@sai (1.2.0 → 1.3.0)", "~ claude plugin r@sai (4.0.0 → 5.0.0)")
 		}
 		changes := plan(t, m)
 		if got := targets(changes); !reflect.DeepEqual(got, want) {
@@ -196,6 +204,8 @@ func TestEnableAndUpgrade(t *testing.T) {
 		fake.OnOK("claude plugin enable a@sai --scope user --json", `{"outcome":"ok"}`)
 		fake.OnOK("claude plugin update a@sai --scope user --json", `{"outcome":"ok"}`)
 		fake.OnOK("claude plugin update b@sai --scope user --json", `{"outcome":"ok"}`)
+		fake.OnOK("claude plugin update f@sai --scope user --json", `{"outcome":"ok"}`)
+		fake.OnOK("claude plugin update r@sai --scope user --json", `{"outcome":"ok"}`)
 		apply(t, changes)
 		assertNoYes(t, fake)
 	}
@@ -448,6 +458,8 @@ func TestCanonical(t *testing.T) {
 		{"owner/repo", "https://github.com/owner/repo/"},
 		{link, dir},
 		{"https://example.com/m.git", "https://example.com/m"},
+		{"owner/repo#main", "https://github.com/owner/repo.git#main"},
+		{claudeMarketplace{Repo: "Owner/repo", Ref: "v1"}.source(), "owner/repo#v1"},
 	}
 	for _, p := range same {
 		if canonical(p[0]) != canonical(p[1]) {
@@ -456,6 +468,9 @@ func TestCanonical(t *testing.T) {
 	}
 	if canonical("owner/repo") == canonical("owner/other") {
 		t.Error("different repos match")
+	}
+	if canonical("owner/repo#main") == canonical("owner/repo") {
+		t.Error("a ref must not match the default branch")
 	}
 }
 
@@ -472,5 +487,55 @@ func TestSource(t *testing.T) {
 		if got := m.source(in); got != want {
 			t.Errorf("source(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestNewerVersion(t *testing.T) {
+	for _, tc := range []struct {
+		latest, installed string
+		want              bool
+	}{
+		{"1.1.0", "1.0.0", true},
+		{"1.10.0", "1.9.0", true},
+		{"v2", "1.9.9", true},
+		{"1.0.0", "1.0.0", false},
+		{"1.0.0", "1.2.0", false},
+		{"1.0.0", "1.0.0-rc.1", true},
+		{"1.0.0-rc.1", "1.0.0", false},
+		{"1.0.0+build.2", "1.0.0+build.1", false},
+		{"abc123", "def456", false},
+		{"1.0.0", "unknown", false},
+		{"", "1.0.0", false},
+		{"1.2.3.4", "1.0.0", false},
+	} {
+		if got := newerVersion(tc.latest, tc.installed); got != tc.want {
+			t.Errorf("newerVersion(%q, %q) = %v, want %v", tc.latest, tc.installed, got, tc.want)
+		}
+	}
+}
+
+func TestWriteObjectKeepsText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	writeFile(t, path, `{"hooks": {"cmd": "a && b > /dev/null < x"}, "extra": {"k": 1}}`)
+	o, _, err := readObject(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var extra object
+	raw, _ := o.get("extra")
+	if err := json.Unmarshal(raw, &extra); err != nil {
+		t.Fatal(err)
+	}
+	if err := extra.set("autoUpdate", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.set("extra", extra); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeObject(path, o); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); !strings.Contains(got, `"a && b > /dev/null < x"`) || !strings.Contains(got, `"autoUpdate": true`) {
+		t.Errorf("got:\n%s", got)
 	}
 }

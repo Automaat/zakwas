@@ -145,6 +145,11 @@ var (
 // canonical maps the spellings of one source to the same key, so a
 // marketplace added as "owner/repo" matches one declared by its GitHub URL.
 func canonical(src string) string {
+	if !IsLocalSource(src) {
+		if base, ref, ok := strings.Cut(src, "#"); ok {
+			return canonical(base) + "#" + ref
+		}
+	}
 	switch {
 	case IsLocalSource(src):
 		if p, err := filepath.EvalSymlinks(src); err == nil {
