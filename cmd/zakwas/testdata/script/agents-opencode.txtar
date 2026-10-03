@@ -1,0 +1,139 @@
+chmod 755 bin/opencode
+env OPENCODE_CONFIG_DIR=$WORK/orca
+exec sh -c 'git config --global url."file://$WORK/repo".insteadOf https://github.com/owner/sai.git'
+exec git config --global user.name test
+exec git config --global user.email test@example.com
+exec git config --global commit.gpgsign false
+exec git -C repo init -q
+exec git -C repo add -A
+exec git -C repo commit -qm init
+
+zakwas plan --only agents
+cmp stdout plan.golden
+! exists home/.local/share/zakwas
+! exists home/.config/opencode
+
+zakwas apply -y --only agents
+stdout 'Applied 2 of 2 steps'
+linkto home/.config/opencode/skills/humanize home/.local/share/zakwas/agents/sai/plugins/humanize/skills/humanize
+linkto home/.config/opencode/skills/tool mp/plugins/tool/skills/tool
+! exists orca
+
+zakwas check --only agents
+stdout 'up to date: agents'
+
+mkdir repo/plugins/humanize/skills/fresh
+cp repo/plugins/humanize/skills/humanize/SKILL.md repo/plugins/humanize/skills/fresh/SKILL.md
+exec git -C repo add -A
+exec git -C repo commit -qm fresh
+zakwas check --only agents
+stdout 'up to date: agents'
+zakwas upgrade -y --only agents
+linkto home/.config/opencode/skills/fresh home/.local/share/zakwas/agents/sai/plugins/humanize/skills/fresh
+zakwas check --only agents
+
+mkdir home/.config/opencode/skills/mine
+cp zakwas-prune.yaml zakwas.yaml
+zakwas plan --only agents
+cmp stdout prune.golden
+zakwas apply -y --only agents
+! exists home/.config/opencode/skills/tool
+exists home/.config/opencode/skills/mine
+exists home/.config/opencode/skills/humanize/SKILL.md
+zakwas check --only agents
+
+exec sh -c 'git config --global url."file://$WORK/fork".insteadOf https://github.com/owner/fork.git'
+exec git -C fork init -q
+exec git -C fork add -A
+exec git -C fork commit -qm init
+cp zakwas-fork.yaml zakwas.yaml
+zakwas apply -y --only agents
+! exists home/.config/opencode/skills/fresh
+linkto home/.config/opencode/skills/humanize home/.local/share/zakwas/agents/sai/plugins/humanize/skills/humanize
+zakwas check --only agents
+stdout 'up to date: agents'
+
+cp zakwas-dup.yaml zakwas.yaml
+! zakwas plan --only agents
+stdout 'skill "humanize" is shipped by both humanize@sai and copy@mp'
+
+-- zakwas.yaml --
+agents:
+  providers: [opencode]
+  marketplaces:
+    sai: owner/sai
+    mp: ./mp
+  plugins:
+    - humanize@sai
+    - tool@mp
+-- zakwas-prune.yaml --
+agents:
+  providers: [opencode]
+  prune: true
+  marketplaces:
+    sai: owner/sai
+    mp: ./mp
+  plugins:
+    - humanize@sai
+-- zakwas-fork.yaml --
+agents:
+  providers: [opencode]
+  prune: true
+  opencode: {}
+  marketplaces:
+    sai: owner/fork
+    mp: ./mp
+  plugins:
+    - humanize@sai
+-- zakwas-dup.yaml --
+agents:
+  providers: [opencode]
+  marketplaces:
+    sai: owner/fork
+    mp: ./mp
+  plugins:
+    - humanize@sai
+    - copy@mp
+-- plan.golden --
+agents
+  + opencode marketplace sai  fetch owner/sai
+  + opencode skill tool       tool@mp
+  + opencode skills           of humanize@sai once fetched
+
+Plan: 3 to add, 0 to change, 0 to remove, 0 to run.
+-- prune.golden --
+agents
+  - opencode skill tool  tool@mp
+
+⚠ destructive: opencode skill tool
+
+Plan: 0 to add, 0 to change, 1 to remove, 0 to run.
+-- bin/opencode --
+#!/bin/sh
+exit 0
+-- repo/.claude-plugin/marketplace.json --
+{"name": "sai", "plugins": [{"name": "humanize", "source": "./plugins/humanize"}]}
+-- repo/plugins/humanize/skills/humanize/SKILL.md --
+---
+name: humanize
+description: test
+---
+-- mp/.claude-plugin/marketplace.json --
+{"name": "mp", "metadata": {"pluginRoot": "./plugins"}, "plugins": [{"name": "tool", "source": "tool"}, {"name": "copy", "source": "copy"}]}
+-- mp/plugins/tool/skills/tool/SKILL.md --
+---
+name: tool
+description: test
+---
+-- mp/plugins/copy/skills/humanize/SKILL.md --
+---
+name: humanize
+description: copy
+---
+-- fork/.claude-plugin/marketplace.json --
+{"name": "sai", "plugins": [{"name": "humanize", "source": "./plugins/humanize"}]}
+-- fork/plugins/humanize/skills/humanize/SKILL.md --
+---
+name: humanize
+description: fork
+---

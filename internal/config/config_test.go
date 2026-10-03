@@ -158,6 +158,9 @@ defaults:
 		{"unknown marketplace field", "agents: {marketplaces: {sai: {source: o/sai, auto: true}}}", []string{"field auto not found"}},
 		{"unknown plugin field", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, scope: user}]}", []string{"field scope not found"}},
 		{"unknown agents field", "agents: {marketplace: {}}", []string{"field marketplace not found"}},
+		{"relative opencode skills dir", "agents: {opencode: {skillsDir: skills}}", []string{`agents.opencode.skillsDir: "skills" must be absolute or start with ~/`}},
+		{"env var opencode skills dir", "agents: {opencode: {skillsDir: $HOME/skills}}", []string{"agents.opencode.skillsDir"}},
+		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"field dir not found"}},
 		{"reports all errors", `
 links: [{src: a}]
 commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
@@ -198,6 +201,11 @@ agents:
     - humanize@sai
     - {id: kup@local}
     - {id: x@sai, providers: [codex]}`},
+		{"opencode skills dir", `
+agents:
+  providers: [opencode]
+  opencode: {skillsDir: ~/.agents/skills}`},
+		{"empty opencode settings", "agents: {providers: [opencode], opencode: {}}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
 	}
 	for _, tt := range tests {

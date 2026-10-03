@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -10,8 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Agent providers. ProviderOpencode is accepted but not converged yet, so
-// configs written for it stay valid while its backend lands.
+// Agent providers, all converged.
 const (
 	ProviderClaude   = "claude"
 	ProviderCodex    = "codex"
@@ -24,11 +24,29 @@ var Providers = []string{ProviderClaude, ProviderCodex, ProviderOpencode}
 // Agents declares agent plugin marketplaces and plugins once, for every
 // provider they target.
 type Agents struct {
-	Providers    []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. claude and codex are converged; opencode is accepted and skipped. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three."`
+	Providers    []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three."`
 	Upgrade      bool                   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Update installed plugins to the version their marketplace offers on apply. Run 'zakwas upgrade' to refresh the marketplaces first. Default false."`
 	Prune        bool                   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false."`
 	Marketplaces map[string]Marketplace `yaml:"marketplaces" jsonschema_description:"Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'."`
 	Plugins      []Plugin               `yaml:"plugins" jsonschema_description:"Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own."`
+	Opencode     *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
+}
+
+// Opencode configures the opencode provider, which has no plugin system:
+// zakwas links each plugin's skills into its skills directory.
+type Opencode struct {
+	SkillsDir string `yaml:"skillsDir" jsonschema:"minLength=1" jsonschema_description:"Directory opencode loads user skills from, absolute or '~/...'. Default: ~/.config/opencode/skills. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere."`
+}
+
+// DefaultOpencodeSkillsDir is where opencode loads user skills from.
+const DefaultOpencodeSkillsDir = "~/.config/opencode/skills"
+
+// OpencodeSkillsDir is agents.opencode.skillsDir or the default.
+func (a *Agents) OpencodeSkillsDir() string {
+	if a.Opencode != nil && a.Opencode.SkillsDir != "" {
+		return a.Opencode.SkillsDir
+	}
+	return DefaultOpencodeSkillsDir
 }
 
 // Marketplace is a plugin marketplace. In YAML it is either the source
@@ -121,6 +139,16 @@ func (a *Agents) PluginProviders(p Plugin) []string {
 	return a.MarketplaceProviders(mk)
 }
 
+// NamesProvider reports whether a plugin targets provider because the
+// config lists it, in the plugin's, its marketplace's or agents.providers,
+// rather than by the all-providers default.
+func (a *Agents) NamesProvider(p Plugin, provider string) bool {
+	_, mk, _ := SplitPluginID(p.ID)
+	return slices.Contains(p.Providers, provider) ||
+		slices.Contains(a.Marketplaces[mk].Providers, provider) ||
+		slices.Contains(a.Providers, provider)
+}
+
 // MarketplaceNames returns the declared marketplace names, sorted.
 func (a *Agents) MarketplaceNames() []string {
 	names := make([]string, 0, len(a.Marketplaces))
@@ -161,6 +189,12 @@ func (a *Agents) validate() []error {
 			errs = append(errs, fmt.Errorf("%s: source is required", what))
 		}
 		checkProviders(what+".providers", m.Providers, a.DefaultProviders(), "agents.providers")
+	}
+	if a.Opencode != nil {
+		dir := a.Opencode.SkillsDir
+		if dir != "" && !filepath.IsAbs(dir) && !strings.HasPrefix(dir, "~/") {
+			errs = append(errs, fmt.Errorf("agents.opencode.skillsDir: %q must be absolute or start with ~/", dir))
+		}
 	}
 	seen := map[string]int{}
 	for i, p := range a.Plugins {
