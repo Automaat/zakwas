@@ -330,8 +330,8 @@ func (c *claude) run(ctx context.Context, args ...string) (claudeResult, error) 
 		return out, nil
 	}
 	if len(out.ShownCommand) > 0 && string(out.ShownCommand) != "null" {
-		return out, fmt.Errorf("%s: the marketplace declares a command that must be accepted first, and zakwas never accepts one; review it with `claude %s` (without --json) and run it yourself: %s",
-			cmd, strings.Join(args[:len(args)-1], " "), shownCommand(out.ShownCommand))
+		return out, fmt.Errorf("%s: the marketplace declares a command that must be accepted first, and zakwas never accepts one (%s); to accept it, run `claude %s` in a terminal",
+			cmd, shownCommand(out.ShownCommand), strings.Join(args[:len(args)-1], " "))
 	}
 	if out.Message != "" {
 		return out, fmt.Errorf("%s: %s", cmd, out.Message)
