@@ -304,7 +304,7 @@ func TestRepoWarnings(t *testing.T) {
 
 func TestUpgradeRefreshesBrewFirst(t *testing.T) {
 	env, _ := setup(t, linksOnly)
-	if r := invoke(env, "", "upgrade", "-y"); r.code != ExitUsage || !strings.Contains(r.stderr, "needs a brew section") {
+	if r := invoke(env, "", "upgrade", "-y"); r.code != ExitUsage || !strings.Contains(r.stderr, "needs a brew or agents section") {
 		t.Errorf("upgrade without brew: %+v", r)
 	}
 
@@ -368,5 +368,17 @@ func TestHelpPrintsUsageOnce(t *testing.T) {
 				t.Errorf("usage also on the other stream: %q", other)
 			}
 		})
+	}
+}
+
+func TestClaudeConfigDir(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ""},
+		{"/abs/claude", "/abs/claude"},
+		{"rel/claude", "/work/rel/claude"},
+	} {
+		if got := claudeConfigDir(Env{Cwd: "/work", ClaudeConfigDir: tc.in}); got != tc.want {
+			t.Errorf("claudeConfigDir(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

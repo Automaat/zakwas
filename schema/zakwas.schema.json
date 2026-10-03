@@ -363,11 +363,138 @@
         "array",
         "null"
       ]
+    },
+    "agents": {
+      "properties": {
+        "providers": {
+          "items": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex",
+              "opencode"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. Only claude is converged so far; codex and opencode are accepted and skipped. Default: all three.",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "upgrade": {
+          "description": "Update installed plugins to the version their marketplace offers on apply. Run 'zakwas upgrade' to refresh the marketplaces first. Default false.",
+          "default": false,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "prune": {
+          "description": "Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false.",
+          "default": false,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "marketplaces": {
+          "additionalProperties": {
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "description": "GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/' (relative paths resolve from the directory holding zakwas.yaml)."
+              },
+              "providers": {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "opencode"
+                  ]
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Providers to add this marketplace to; must be in agents.providers. Default: agents.providers.",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "minLength": 1,
+            "required": [
+              "source"
+            ],
+            "type": [
+              "string",
+              "object"
+            ]
+          },
+          "description": "Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "plugins": {
+          "items": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Plugin id 'name@marketplace'; the marketplace must be declared under agents.marketplaces."
+              },
+              "providers": {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "opencode"
+                  ]
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Providers to install this plugin for; must be targeted by its marketplace. Default: the marketplace's providers.",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "minLength": 1,
+            "required": [
+              "id"
+            ],
+            "type": [
+              "string",
+              "object"
+            ]
+          },
+          "description": "Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own.",
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "Coding-agent plugins and the marketplaces they come from, converged per provider. Only the claude provider is converged so far; codex and opencode are accepted and skipped. Omit the section to leave agent plugins alone.",
+      "type": [
+        "object",
+        "null"
+      ]
     }
   },
   "additionalProperties": false,
   "title": "zakwas.yaml",
-  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, defaults, system, commands.",
+  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands.",
   "type": [
     "object",
     "null"

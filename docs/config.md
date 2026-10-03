@@ -110,7 +110,7 @@ Other editors (Helix, JetBrains, Sublime) that run yaml-language-server honor th
 
 **Backups.** When zakwas replaces a file it didn't write, or one that was edited in place, it moves it to `<file>.zakwas-bak` (`.zakwas-bak.N` if taken) first. It never deletes or overwrites such a file.
 
-**Module order**: system → files → links → templates → brew → mise → commands → defaults. `--only brew,defaults` runs a subset.
+**Module order**: system → files → links → templates → brew → mise → agents → commands → defaults. `--only brew,defaults` runs a subset.
 
 ## protect
 
@@ -244,6 +244,43 @@ files:
 mise:
   config: dotfiles/mise/config.toml
   prune: true
+```
+
+## agents
+
+Coding-agent plugins and the marketplaces they come from, declared once for every provider they target. Omit the section to leave agent plugins alone.
+
+Only the `claude` provider (Claude Code) is converged so far. `codex` and `opencode` are accepted everywhere a provider is, and skipped: entries that target only them do nothing yet, so configs written for them stay valid.
+
+| Key | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `providers` | list of `claude` \| `codex` \| `opencode` | no | all three | Providers zakwas manages. Marketplaces target these unless they set their own; `prune` only touches these. |
+| `marketplaces` | map | no | | Marketplace name → source string, or `{source, providers}`. The name must match the `name` in the marketplace's own manifest. |
+| `plugins` | list | no | | `name@marketplace` strings, or `{id, providers}`. The marketplace must be declared under `marketplaces`. |
+| `upgrade` | bool | no | `false` | Update installed plugins to the version their marketplace offers on `apply`. |
+| `prune` | bool | no | `false` | Remove undeclared user-scope plugins and marketplaces of the managed providers. |
+
+A marketplace `source` is a GitHub `owner/repo` or a git URL (either optionally with `#ref`), or a local path starting with `./`, `../`, `~/` or `/` (relative paths resolve from the directory holding `zakwas.yaml`). A marketplace targets `agents.providers` unless it lists its own `providers`; a plugin targets its marketplace's providers unless it lists its own, which must be a subset.
+
+For Claude Code, `apply` adds missing marketplaces (`claude plugin marketplace add`), turns on their `autoUpdate` flag (the same flag the `/plugin` menu sets, in `known_marketplaces.json` and in user settings), installs missing plugins at user scope, and enables disabled ones. zakwas never accepts a marketplace-declared install command (it never passes `-y`): such a plugin fails with the command shown, for you to review and install yourself.
+
+`upgrade`: plugins whose marketplace manifest carries a newer semver version than the installed one are updated (`claude plugin update`), shown in the plan as `from → to`. Plugins versioned only by commit are left to Claude's own auto-update. `plan`, `check` and `apply` never fetch marketplaces; `zakwas upgrade` refreshes the declared ones first (`claude plugin marketplace update`).
+
+`prune`: undeclared user-scope plugins are uninstalled, then undeclared marketplaces declared in Claude's user settings removed (`--scope user`). Plugins installed for a single project (project or local scope), the marketplaces they come from, and marketplaces declared only by a project or by older Claude versions outside user settings are never touched; neither are plugins from marketplaces Claude doesn't list as configured (built-in ones, `skills-dir`). Removals show in `zakwas plan` as destructive first.
+
+The plan fails when `claude` is not on `PATH` (run `apply` again once brew or mise has installed it), when a declared marketplace is already configured from a different source, or when a declared plugin is not in its marketplace. zakwas runs `claude` from `/`, so a project's `.claude` settings don't leak in, and honors `CLAUDE_CONFIG_DIR` (a relative one resolves from the directory zakwas runs in).
+
+```yaml
+agents:
+  providers: [claude]
+  upgrade: true
+  prune: true
+  marketplaces:
+    claude-plugins-official: anthropics/claude-plugins-official
+    team: {source: git@github.com:example/agent-plugins.git, providers: [claude]}
+  plugins:
+    - commit-commands@claude-plugins-official
+    - {id: review@team, providers: [claude]}
 ```
 
 ## system

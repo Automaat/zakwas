@@ -30,6 +30,21 @@ files:
 
 Pin exact tool versions in `dotfiles/mise/config.toml` and let Renovate bump them; a CI job that runs `zakwas apply -y --only files,mise` on a macOS runner gates every bump.
 
+
+## Coding-agent plugins
+
+Claude Code marketplaces and plugins; `prune` removes user-scope ones you didn't declare (read the plan first).
+
+```yaml
+agents:
+  providers: [claude]
+  prune: true
+  marketplaces:
+    claude-plugins-official: anthropics/claude-plugins-official
+  plugins:
+    - commit-commands@claude-plugins-official
+```
+
 ## Per-machine values
 
 Templates get `.Home` and your `vars`:

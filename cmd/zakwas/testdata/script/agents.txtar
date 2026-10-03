@@ -1,0 +1,95 @@
+chmod 755 bin/claude
+mkdir state
+env CLAUDE_CONFIG_DIR=$WORK/claude
+
+zakwas plan --only agents
+cmpenv stdout plan.golden
+cmp calls plan-calls.golden
+rm calls
+
+zakwas apply -y --only agents
+stdout 'Applied 2 of 2 steps'
+cmpenv calls apply-calls.golden
+grep '"autoUpdate": true' claude/plugins/known_marketplaces.json
+rm calls
+
+zakwas check --only agents
+stdout 'up to date: agents'
+
+zakwas upgrade -y --only agents
+grep '^claude plugin marketplace update sai --json$' calls
+! grep 'marketplace update codexonly' calls
+rm calls
+
+cp zakwas-prune.yaml zakwas.yaml
+zakwas plan --only agents
+stdout '- claude plugin stale@sai'
+! stdout 'team@sai'
+zakwas apply -y --only agents
+grep '^claude plugin uninstall stale@sai --scope user --json$' calls
+zakwas check --only agents
+
+-- zakwas.yaml --
+agents:
+  marketplaces:
+    sai: Owner/sai
+    codexonly: {source: owner/codex, providers: [codex]}
+  plugins:
+    - humanize@sai
+-- zakwas-prune.yaml --
+agents:
+  prune: true
+  marketplaces:
+    sai: owner/sai
+  plugins:
+    - humanize@sai
+-- plan.golden --
+agents
+  + claude marketplace sai      Owner/sai, autoUpdate on
+  + claude plugin humanize@sai  → 2.5.0
+
+Plan: 2 to add, 0 to change, 0 to remove, 0 to run.
+-- plan-calls.golden --
+claude plugin marketplace list --json
+claude plugin list --json --available
+-- apply-calls.golden --
+claude plugin marketplace list --json
+claude plugin list --json --available
+claude plugin marketplace add Owner/sai --scope user --json
+claude plugin install humanize@sai --scope user --json
+-- bin/claude --
+#!/bin/sh
+echo "claude $*" >> "$WORK/calls"
+[ "$(pwd)" = / ] || { echo "claude must run from /, not $(pwd)" >&2; exit 97; }
+known="$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json"
+case "$*" in
+  "plugin marketplace list --json")
+    if [ -f "$WORK/state/sai" ]; then
+      echo '[{"name":"sai","source":"github","repo":"Owner/sai","installLocation":"/nowhere"}]'
+    else
+      echo '[]'
+    fi ;;
+  "plugin list --json --available")
+    stale='{"id":"stale@sai","version":"1.0.0","scope":"user","enabled":true},'
+    [ -f "$WORK/state/stale-gone" ] && stale=''
+    team='{"id":"team@sai","version":"1.0.0","scope":"project","enabled":true}'
+    if [ -f "$WORK/state/humanize" ]; then
+      echo "{\"installed\":[$stale{\"id\":\"humanize@sai\",\"version\":\"2.5.0\",\"scope\":\"user\",\"enabled\":true},$team],\"available\":[]}"
+    else
+      echo "{\"installed\":[$stale$team],\"available\":[{\"pluginId\":\"humanize@sai\",\"version\":\"2.5.0\"}]}"
+    fi ;;
+  "plugin marketplace add Owner/sai --scope user --json")
+    touch "$WORK/state/sai"
+    mkdir -p "$(dirname "$known")"
+    echo '{"sai":{"source":{"source":"github","repo":"Owner/sai"},"installLocation":"/nowhere"}}' > "$known"
+    echo '{"command":"marketplace-add","outcome":"ok","marketplace":"sai"}' ;;
+  "plugin install humanize@sai --scope user --json")
+    touch "$WORK/state/humanize"
+    echo '{"command":"install","outcome":"ok"}' ;;
+  "plugin marketplace update sai --json")
+    echo '{"command":"marketplace-update","outcome":"ok"}' ;;
+  "plugin uninstall stale@sai --scope user --json")
+    touch "$WORK/state/stale-gone"
+    echo '{"command":"uninstall","outcome":"ok"}' ;;
+  *) echo "unexpected claude $*" >&2; exit 99 ;;
+esac

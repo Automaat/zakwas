@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -141,6 +142,22 @@ defaults:
 		{"unquoted date default", "defaults: [{domain: d, key: k, value: 2024-01-01}]", []string{"defaults[0] d k: YAML reads 2024-01-01 as a date; quote it"}},
 		{"unquoted timestamp default", "defaults: [{domain: d, key: k, value: 2024-01-01T10:00:00Z}]", []string{"YAML reads 2024-01-01T10:00:00Z as a date"}},
 		{"template mode 0o unreadable by owner", "templates: {files: [{src: a, dst: ~/a, mode: 0o044}]}", []string{"e.g. 0o644"}},
+		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode)`}},
+		{"duplicate agent provider", "agents: {providers: [claude, claude]}", []string{`agents.providers: provider "claude" is listed twice`}},
+		{"duplicate plugin provider", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: [codex, codex]}]}", []string{`agents.plugins[0].providers: provider "codex" is listed twice`}},
+		{"empty agent providers", "agents: {providers: []}", []string{"agents.providers: list at least one provider"}},
+		{"plugin from undeclared marketplace", "agents: {plugins: [humanize@sai]}", []string{`agents.plugins[0]: marketplace "sai" of humanize@sai is not declared`}},
+		{"plugin id without marketplace", "agents: {marketplaces: {sai: o/sai}, plugins: [humanize]}", []string{`agents.plugins[0]: id "humanize" must be name@marketplace`}},
+		{"plugin id with two @", "agents: {marketplaces: {sai: o/sai}, plugins: [a@b@sai]}", []string{"must be name@marketplace"}},
+		{"duplicate plugin", "agents: {marketplaces: {sai: o/sai}, plugins: [a@sai, {id: a@sai}]}", []string{"agents.plugins[1]: a@sai is already declared by agents.plugins[0]"}},
+		{"marketplace without source", "agents: {marketplaces: {sai: {providers: [claude]}}}", []string{"agents.marketplaces.sai: source is required"}},
+		{"null marketplace", "agents: {marketplaces: {sai: }}", []string{"agents.marketplaces.sai: source is required"}},
+		{"bad marketplace name", "agents: {marketplaces: {'my market': o/m}}", []string{"agents.marketplaces.my market: name may only contain"}},
+		{"marketplace provider not managed", "agents: {providers: [claude], marketplaces: {sai: {source: o/sai, providers: [codex]}}}", []string{`agents.marketplaces.sai.providers: provider "codex" is not in agents.providers`}},
+		{"plugin provider not in marketplace", "agents: {marketplaces: {sai: {source: o/sai, providers: [claude]}}, plugins: [{id: a@sai, providers: [opencode]}]}", []string{`agents.plugins[0].providers: provider "opencode" is not in the providers of marketplace sai`}},
+		{"unknown marketplace field", "agents: {marketplaces: {sai: {source: o/sai, auto: true}}}", []string{"field auto not found"}},
+		{"unknown plugin field", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, scope: user}]}", []string{"field scope not found"}},
+		{"unknown agents field", "agents: {marketplace: {}}", []string{"field marketplace not found"}},
 		{"reports all errors", `
 links: [{src: a}]
 commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
@@ -169,6 +186,18 @@ links: [{src: d, dst: /etc/x}]`},
 defaults: [{domain: a, key: k, value: 1}, {domain: b, key: k, value: 1}]`},
 		{"same key per host and global", `
 defaults: [{domain: a, key: k, value: 1}, {domain: a, key: k, value: 1, currentHost: true}]`},
+		{"agents shorthands and objects", `
+agents:
+  providers: [claude, codex]
+  upgrade: true
+  prune: true
+  marketplaces:
+    sai: o/sai
+    local: {source: ./mp, providers: [claude]}
+  plugins:
+    - humanize@sai
+    - {id: kup@local}
+    - {id: x@sai, providers: [codex]}`},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
 	}
 	for _, tt := range tests {
@@ -187,6 +216,41 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func TestAgentsProviders(t *testing.T) {
+	c, err := Load(writeConfig(t, `
+agents:
+  marketplaces:
+    sai: o/sai
+    cl: {source: o/cl, providers: [claude]}
+  plugins:
+    - a@sai
+    - b@cl
+    - {id: c@sai, providers: [opencode]}
+`), "/h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.Agents
+	if got := a.DefaultProviders(); !slices.Equal(got, Providers) {
+		t.Errorf("default providers = %v", got)
+	}
+	if a.Marketplaces["sai"].Source != "o/sai" || a.Plugins[0].ID != "a@sai" {
+		t.Errorf("shorthands not decoded: %+v", a)
+	}
+	for _, tc := range []struct {
+		plugin int
+		want   []string
+	}{
+		{0, Providers},
+		{1, []string{ProviderClaude}},
+		{2, []string{ProviderOpencode}},
+	} {
+		if got := a.PluginProviders(a.Plugins[tc.plugin]); !slices.Equal(got, tc.want) {
+			t.Errorf("plugin %s providers = %v, want %v", a.Plugins[tc.plugin].ID, got, tc.want)
+		}
+	}
 }
 
 func TestFind(t *testing.T) {
