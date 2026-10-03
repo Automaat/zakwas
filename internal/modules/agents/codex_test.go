@@ -130,13 +130,13 @@ func TestCodexEnableAndUpgrade(t *testing.T) {
 
 		want := []string{"~ codex plugin a@sai (1.0.0 → 1.1.0, enable)", "~ codex plugin e@sai (enable)"}
 		if upgrade {
-			want = []string{"~ codex plugin a@sai (1.0.0 → 1.1.0, enable)", "~ codex plugin b@sai (2.0.0 → 3.0.0)", "~ codex plugin e@sai (enable)"}
+			want = []string{"~ codex plugin a@sai (1.0.0 → 1.1.0, enable)", "~ codex plugin b@sai (2.0.0 → 3.0.0)", "~ codex plugin d@sai (1.0.0 → 3.0.0)", "~ codex plugin e@sai (enable)"}
 		}
 		changes := plan(t, m)
 		if got := targets(changes); !reflect.DeepEqual(got, want) {
 			t.Errorf("upgrade=%v: got %v\nwant %v", upgrade, got, want)
 		}
-		for _, id := range []string{"a", "b", "e"} {
+		for _, id := range []string{"a", "b", "d", "e"} {
 			fake.OnOK("codex plugin add "+id+"@sai --json", `{"pluginId":"`+id+`@sai"}`)
 		}
 		apply(t, changes)
@@ -462,16 +462,31 @@ func TestCodexLatestVersion(t *testing.T) {
 		{"name":"own","version":"1.0.0","source":"./own"},
 		{"name":"escape","version":"1.0.0","source":"./../x"},
 		{"name":"rootless","version":"1.0.0","source":"rootless"},
-		{"name":"remote","version":"1.0.0","source":{"source":"github","repo":"o/r"}}]}`)
+		{"name":"remote","version":"1.0.0","source":{"source":"github","repo":"o/r"}},
+		{"name":"git","version":"3.1.0","source":{"source":"git","url":"https://example.com/p.git"}},
+		{"name":"unversioned","source":{"source":"git","url":"https://example.com/u.git"}}]}`)
 	writeFile(t, filepath.Join(root, "own", ".claude-plugin", "plugin.json"), `{"version":"2.0.0"}`)
-	for plugin, want := range map[string]string{
-		"entry": "1.0.0", "own": "2.0.0", "escape": "", "rootless": "", "remote": "", "missing": "",
-	} {
-		if got := codexLatestVersion(root, plugin); got != want {
-			t.Errorf("%s: got %q, want %q", plugin, got, want)
-		}
+	tests := []struct {
+		name   string
+		root   string
+		plugin string
+		want   string
+	}{
+		{name: "local dir without plugin.json uses manifest entry", root: root, plugin: "entry", want: "1.0.0"},
+		{name: "local plugin.json wins over manifest entry", root: root, plugin: "own", want: "2.0.0"},
+		{name: "escaping path uses manifest entry", root: root, plugin: "escape", want: "1.0.0"},
+		{name: "path without ./ uses manifest entry", root: root, plugin: "rootless", want: "1.0.0"},
+		{name: "github source uses manifest entry", root: root, plugin: "remote", want: "1.0.0"},
+		{name: "git source uses manifest entry", root: root, plugin: "git", want: "3.1.0"},
+		{name: "remote source without version", root: root, plugin: "unversioned", want: ""},
+		{name: "plugin not in manifest", root: root, plugin: "missing", want: ""},
+		{name: "no snapshot root", root: "", plugin: "entry", want: ""},
 	}
-	if got := codexLatestVersion("", "entry"); got != "" {
-		t.Errorf("no root: got %q", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := codexLatestVersion(tt.root, tt.plugin); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

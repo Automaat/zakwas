@@ -359,8 +359,9 @@ func (c *codex) run(ctx context.Context, args ...string) (string, error) {
 // the marketplace snapshot at root, the way Codex picks it: the
 // .agents/plugins manifest over the .claude-plugin one, then
 // .codex-plugin/plugin.json over .claude-plugin/plugin.json over the
-// manifest entry. Plugins outside the snapshot report "", so they are never
-// shown as outdated.
+// manifest entry. Sources without a local dir (git, github, ...) use the
+// manifest entry. Plugins missing from the manifest report "", so they are
+// never shown as outdated.
 func codexLatestVersion(root, plugin string) string {
 	if root == "" {
 		return ""
@@ -384,13 +385,11 @@ func codexLatestVersion(root, plugin string) string {
 			if p.Name != plugin {
 				continue
 			}
-			dir, ok := codexPluginDir(root, p.Source)
-			if !ok {
-				return ""
-			}
-			for _, m := range []string{".codex-plugin", ".claude-plugin"} {
-				if v := pluginJSONVersion(filepath.Join(dir, m, "plugin.json")); v != "" {
-					return v
+			if dir, ok := codexPluginDir(root, p.Source); ok {
+				for _, m := range []string{".codex-plugin", ".claude-plugin"} {
+					if v := pluginJSONVersion(filepath.Join(dir, m, "plugin.json")); v != "" {
+						return v
+					}
 				}
 			}
 			return p.Version
