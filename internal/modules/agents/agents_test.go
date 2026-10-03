@@ -165,22 +165,25 @@ func TestEnableAndUpgrade(t *testing.T) {
 		m, fake := newModule(t, config.Agents{
 			Upgrade:      upgrade,
 			Marketplaces: map[string]config.Marketplace{"sai": {Source: "https://github.com/O/sai.git"}},
-			Plugins:      []config.Plugin{{ID: "a@sai"}, {ID: "b@sai"}, {ID: "c@sai"}, {ID: "d@sai"}},
+			Plugins:      []config.Plugin{{ID: "a@sai"}, {ID: "b@sai"}, {ID: "c@sai"}, {ID: "d@sai"}, {ID: "e@sai"}},
 		})
 		loc := t.TempDir()
 		writeFile(t, filepath.Join(loc, ".claude-plugin", "marketplace.json"), `{"name":"sai","plugins":[
 			{"name":"a","version":"1.1.0","source":"./a"},
+			{"name":"e","version":"9.0.0","source":"./e"},
 			{"name":"b","source":"./b"},
 			{"name":"c","source":{"source":"github","repo":"x/c"}},
 			{"name":"d","source":"../escape"}]}`)
 		writeFile(t, filepath.Join(loc, "b", ".claude-plugin", "plugin.json"), `{"version":"3.0.0"}`)
+		writeFile(t, filepath.Join(loc, "e", ".claude-plugin", "plugin.json"), `{"version":"1.0.0"}`)
 		writeFile(t, m.claude().knownPath(), knownJSON(map[string]bool{"sai": true}))
 		fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai","installLocation":"`+loc+`"}]`)
 		fake.OnOK(pluginList, `{"installed": [
 			{"id":"a@sai","version":"1.0.0","scope":"user","enabled":false},
 			{"id":"b@sai","version":"2.0.0","scope":"user","enabled":true},
 			{"id":"c@sai","version":"abc123","scope":"user","enabled":true},
-			{"id":"d@sai","version":"1.0.0","scope":"user","enabled":true}], "available": []}`)
+			{"id":"d@sai","version":"1.0.0","scope":"user","enabled":true},
+			{"id":"e@sai","version":"1.0.0","scope":"user","enabled":true}], "available": []}`)
 
 		want := []string{"~ claude plugin a@sai (enable)"}
 		if upgrade {

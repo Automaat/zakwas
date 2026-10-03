@@ -347,8 +347,8 @@ func shownCommand(raw json.RawMessage) string {
 }
 
 // latestVersion reads the version a marketplace offers for a plugin from
-// its local manifest, falling back to the plugin's own manifest for
-// in-repo plugins. Plugins versioned only by commit report "", so they
+// its local manifest, preferring the plugin's own manifest for in-repo
+// plugins. Plugins versioned only by commit report "", so they
 // are never shown as outdated.
 func latestVersion(m claudeMarketplace, plugin string) string {
 	if m.InstallLocation == "" {
@@ -372,27 +372,33 @@ func latestVersion(m claudeMarketplace, plugin string) string {
 		if p.Name != plugin {
 			continue
 		}
-		if p.Version != "" {
-			return p.Version
+		if own := inRepoVersion(m.InstallLocation, p.Source); own != "" {
+			return own
 		}
-		var rel string
-		if json.Unmarshal(p.Source, &rel) != nil || !strings.HasPrefix(rel, "./") {
-			return ""
-		}
-		dir := filepath.Join(m.InstallLocation, rel)
-		if !strings.HasPrefix(dir, filepath.Clean(m.InstallLocation)+string(filepath.Separator)) {
-			return ""
-		}
-		var own struct {
-			Version string `json:"version"`
-		}
-		data, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
-		if err != nil || json.Unmarshal(data, &own) != nil {
-			return ""
-		}
-		return own.Version
+		return p.Version
 	}
 	return ""
+}
+
+// inRepoVersion reads plugin.json of a plugin stored in the marketplace
+// repo; Claude installs that version over the marketplace entry's.
+func inRepoVersion(root string, source json.RawMessage) string {
+	var rel string
+	if json.Unmarshal(source, &rel) != nil || !strings.HasPrefix(rel, "./") {
+		return ""
+	}
+	dir := filepath.Join(root, rel)
+	if !strings.HasPrefix(dir, filepath.Clean(root)+string(filepath.Separator)) {
+		return ""
+	}
+	var own struct {
+		Version string `json:"version"`
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
+	if err != nil || json.Unmarshal(data, &own) != nil {
+		return ""
+	}
+	return own.Version
 }
 
 func (c *claude) knownPath() string {
