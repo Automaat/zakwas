@@ -21,13 +21,6 @@ mise:
   config: dotfiles/mise/config.toml
   prune: true
 
-agents:
-  providers: [claude]
-  marketplaces:
-    claude-plugins-official: anthropics/claude-plugins-official
-  plugins:
-    - commit-commands@claude-plugins-official
-
 system:
   sudoTouchID: true
   dirs:
