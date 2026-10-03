@@ -28,9 +28,13 @@ type instructionsLink struct {
 	Target   string `json:"target"`
 }
 
-func (m *Module) instructionsStatePath() string {
-	return filepath.Join(m.Paths.Home, ".local", "state", "zakwas", "instructions.json")
+// InstructionsStatePath is where zakwas records the instructions links it
+// made under home.
+func InstructionsStatePath(home string) string {
+	return filepath.Join(home, ".local", "state", "zakwas", "instructions.json")
 }
+
+func (m *Module) instructionsStatePath() string { return InstructionsStatePath(m.Paths.Home) }
 
 // instructionsPath is where a provider reads its global instructions.
 // opencode's ignores OPENCODE_CONFIG_DIR, like its skills, and doesn't
@@ -63,6 +67,12 @@ func (m *Module) updateInstructions(edit func(*instructionsState)) error {
 		return err
 	}
 	edit(&st)
+	if len(st.Links) == 0 {
+		if err := os.Remove(m.instructionsStatePath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
 	return saveState(m.instructionsStatePath(), st)
 }
 
@@ -209,8 +219,12 @@ func (m *Module) planInstructionRemove(link string, l instructionsLink) engine.C
 			Apply: func(context.Context) error { return m.updateInstructions(forget) },
 		}
 	}
+	detail := l.Provider + " instructions"
+	if _, err := os.Lstat(link + ".zakwas-bak"); err == nil {
+		detail += "; your earlier file stays at " + filepath.Base(link) + ".zakwas-bak"
+	}
 	return engine.Change{
-		Action: engine.Remove, Target: m.Paths.Pretty(link), Detail: l.Provider + " instructions", Destructive: true,
+		Action: engine.Remove, Target: m.Paths.Pretty(link), Detail: detail, Destructive: true,
 		Apply: func(context.Context) error {
 			if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err

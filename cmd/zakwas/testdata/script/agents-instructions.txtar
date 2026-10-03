@@ -36,11 +36,26 @@ stdout 'agents.instructions: source .*/nope.md: no such file or directory'
 linkto claude/CLAUDE.md AGENTS.md
 
 cp zakwas-none.yaml zakwas.yaml
+zakwas plan --only agents
+stdout 'claude instructions; your earlier file stays at CLAUDE.md.zakwas-bak'
 zakwas apply -y --only agents
 ! exists claude/CLAUDE.md
 exists claude/CLAUDE.md.zakwas-bak
+! exists home/.local/state/zakwas/instructions.json
 zakwas check --only agents
 stdout 'up to date: agents'
+
+cp zakwas-claude.yaml zakwas.yaml
+zakwas apply -y --only agents
+linkto claude/CLAUDE.md AGENTS.md
+cp zakwas-empty.yaml zakwas.yaml
+zakwas plan
+stdout 'claude instructions'
+zakwas apply -y
+! exists claude/CLAUDE.md
+! exists home/.local/state/zakwas/instructions.json
+zakwas check
+! stdout agents
 
 -- mine.md --
 hand-written
@@ -61,6 +76,8 @@ agents:
 -- zakwas-none.yaml --
 agents:
   providers: [claude]
+-- zakwas-empty.yaml --
+links: []
 -- plan.golden --
 agents
   ~ $WORK/claude/CLAUDE.md  back up to CLAUDE.md.zakwas-bak, link → $WORK/AGENTS.md
