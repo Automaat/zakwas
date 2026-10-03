@@ -24,7 +24,7 @@ var Providers = []string{ProviderClaude, ProviderCodex, ProviderOpencode}
 // Agents declares agent plugin marketplaces and plugins once, for every
 // provider they target.
 type Agents struct {
-	Providers    []string               `yaml:"providers" jsonschema:"uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. Only claude is converged so far; codex and opencode are accepted and skipped. Default: all three."`
+	Providers    []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. Only claude is converged so far; codex and opencode are accepted and skipped. Default: all three."`
 	Upgrade      bool                   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Update installed plugins to the version their marketplace offers on apply. Run 'zakwas upgrade' to refresh the marketplaces first. Default false."`
 	Prune        bool                   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false."`
 	Marketplaces map[string]Marketplace `yaml:"marketplaces" jsonschema_description:"Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'."`
@@ -35,14 +35,14 @@ type Agents struct {
 // string or a mapping.
 type Marketplace struct {
 	Source    string   `yaml:"source" jsonschema:"required,minLength=1" jsonschema_description:"GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/' (relative paths resolve from the directory holding zakwas.yaml)."`
-	Providers []string `yaml:"providers" jsonschema:"uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to add this marketplace to; must be in agents.providers. Default: agents.providers."`
+	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to add this marketplace to; must be in agents.providers. Default: agents.providers."`
 }
 
 // Plugin is one plugin. In YAML it is either the "name@marketplace" string
 // or a mapping.
 type Plugin struct {
 	ID        string   `yaml:"id" jsonschema:"required,minLength=1" jsonschema_description:"Plugin id 'name@marketplace'; the marketplace must be declared under agents.marketplaces."`
-	Providers []string `yaml:"providers" jsonschema:"uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to install this plugin for; must be targeted by its marketplace. Default: the marketplace's providers."`
+	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to install this plugin for; must be targeted by its marketplace. Default: the marketplace's providers."`
 }
 
 func (m *Marketplace) UnmarshalYAML(n *yaml.Node) error {

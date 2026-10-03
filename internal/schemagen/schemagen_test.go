@@ -235,6 +235,8 @@ func TestInvalidConfigs(t *testing.T) {
 		{"null required field", "files:\n  - {src: , dst: ~/a}\n", "src"},
 		{"list template var", "templates: {vars: {x: [1]}}\n", "vars"},
 		{"unknown agent provider", "agents: {providers: [cursor]}\n", "providers"},
+		{"empty agent providers", "agents: {providers: []}\n", "providers"},
+		{"empty plugin providers", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: []}]}\n", "providers"},
 		{"marketplaces as a list", "agents: {marketplaces: [o/sai]}\n", "marketplaces"},
 		{"empty marketplace source", "agents: {marketplaces: {sai: ''}}\n", "marketplaces"},
 		{"unknown plugin field", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, scope: user}]}\n", "scope"},

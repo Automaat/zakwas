@@ -375,6 +375,7 @@
               "opencode"
             ]
           },
+          "minItems": 1,
           "uniqueItems": true,
           "description": "Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. Only claude is converged so far; codex and opencode are accepted and skipped. Default: all three.",
           "type": [
@@ -415,6 +416,7 @@
                     "opencode"
                   ]
                 },
+                "minItems": 1,
                 "uniqueItems": true,
                 "description": "Providers to add this marketplace to; must be in agents.providers. Default: agents.providers.",
                 "type": [
@@ -456,6 +458,7 @@
                     "opencode"
                   ]
                 },
+                "minItems": 1,
                 "uniqueItems": true,
                 "description": "Providers to install this plugin for; must be targeted by its marketplace. Default: the marketplace's providers.",
                 "type": [
