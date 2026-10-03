@@ -767,3 +767,51 @@ func TestOpencodeCacheWithoutGitIsRefetched(t *testing.T) {
 		t.Errorf("got %v\nwant %v", got, want)
 	}
 }
+
+func TestOpencodeFailedRefetchDropsOldCheckout(t *testing.T) {
+	m, r := newOpencode(t, config.Agents{
+		Prune:        true,
+		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/old"}},
+		Plugins:      []config.Plugin{{ID: "p@sai"}},
+	})
+	m.Agents.Providers = nil
+	r.Missing("claude", "codex")
+	r.repos["https://github.com/o/old.git"] = func(dir string) { marketplace(t, dir, "sai", map[string][]string{"p": {"oldskill"}}) }
+	o := m.opencodeBackend()
+	d := func() desired { return m.desired(config.ProviderOpencode) }
+	run := func() []engine.Change {
+		t.Helper()
+		changes, err := o.plan(context.Background(), d())
+		if err != nil {
+			t.Fatal(err)
+		}
+		apply(t, changes)
+		return changes
+	}
+	run()
+	m.Agents.Marketplaces["sai"] = config.Marketplace{Source: "o/new"}
+	run()
+	run()
+	if _, err := os.Lstat(filepath.Join(skillsDir(m), "oldskill")); !os.IsNotExist(err) {
+		t.Errorf("skill of the old source still linked: %v", err)
+	}
+	if again, err := o.plan(context.Background(), d()); err != nil || len(again) != 0 {
+		t.Errorf("not converged: %v, %v", targets(again), err)
+	}
+}
+
+func TestOpencodeRefusesSymlinkedDataDir(t *testing.T) {
+	m, _ := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
+		Plugins:      []config.Plugin{{ID: "p@sai"}},
+	})
+	if err := os.MkdirAll(filepath.Join(m.Paths.Home, ".local"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(m.Paths.Home, ".local", "share")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "is a symlink") {
+		t.Errorf("err = %v", err)
+	}
+}

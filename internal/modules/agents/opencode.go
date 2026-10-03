@@ -164,6 +164,9 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 		return nil, errors.New("opencode: opencode is not installed (no opencode on PATH); install it, or remove opencode from agents.providers")
 	}
 	d = usedMarketplaces(d)
+	if err := o.checkOwnDirs(d); err != nil {
+		return nil, err
+	}
 	st, err := o.load()
 	if err != nil {
 		return nil, err
@@ -175,7 +178,7 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 			return nil, err
 		}
 	}
-	want, waiting, err := o.wantedSkills(d, pending)
+	want, waiting, err := o.wantedSkills(d, st, pending)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +218,25 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 		Action: engine.Create, Target: "opencode skills", Detail: "of " + strings.Join(ids, ", ") + " once fetched",
 		Apply: func(ctx context.Context) error { return o.converge(ctx, d, shown) },
 	}), nil
+}
+
+// checkOwnDirs refuses zakwas's state and cache paths when reached through
+// a symlinked directory under $HOME, which could point into the config
+// repo.
+func (o *opencode) checkOwnDirs(d desired) error {
+	paths := []string{o.statePath}
+	for name, src := range d.sources {
+		if !IsLocalSource(src) {
+			paths = append(paths, filepath.Join(o.cacheDir, name))
+		}
+	}
+	var errs []error
+	for _, p := range paths {
+		if err := install.CheckParents(o.paths, p); err != nil {
+			errs = append(errs, fmt.Errorf("opencode: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // planFetches plans a fetch of every declared git marketplace that isn't in
@@ -300,7 +322,7 @@ type marketManifests struct {
 // plugins shipping one skill name always fail, as a config conflict only
 // the user can settle. Skill names are compared case-insensitively, as
 // macOS's file system does.
-func (o *opencode) wantedSkills(d desired, pending map[string]bool) (map[string]wantedSkill, map[string]bool, error) {
+func (o *opencode) wantedSkills(d desired, st opencodeState, pending map[string]bool) (map[string]wantedSkill, map[string]bool, error) {
 	want := map[string]wantedSkill{}
 	folded := map[string]string{}
 	waiting := map[string]bool{}
@@ -321,6 +343,10 @@ func (o *opencode) wantedSkills(d desired, pending map[string]bool) (map[string]
 			if strict {
 				errs = append(errs, err)
 			}
+		}
+		if !IsLocalSource(src) && !o.fetched(st, mk, src) {
+			fail(fmt.Errorf("opencode: marketplace %q is not fetched from %s", mk, src))
+			continue
 		}
 		root := o.root(mk, src)
 		mm, seen := byMarket[mk]
