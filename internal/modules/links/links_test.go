@@ -171,6 +171,15 @@ func TestLinksErrors(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
+	t.Run("destination is the source", func(t *testing.T) {
+		f := newFixture(t)
+		f.mod.Paths.Root = f.home
+		f.write(t, f.dst(), "repo")
+		f.mod.Links[0].Src = ".config/zsh/.zshrc"
+		if _, err := f.mod.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "itself") {
+			t.Errorf("err = %v", err)
+		}
+	})
 }
 
 func TestLinkDirectory(t *testing.T) {

@@ -468,9 +468,14 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if cfg.Mise != nil {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Paths: paths, Runner: env.Runner})
 	}
-	if cfg.Agents != nil {
+	agentsCfg := cfg.Agents
+	if _, err := os.Lstat(agents.InstructionsStatePath(env.Home)); agentsCfg == nil && err == nil {
+		// Without the section, still remove the instructions links zakwas made.
+		agentsCfg = &config.Agents{}
+	}
+	if agentsCfg != nil {
 		mods = append(mods, &agents.Module{
-			Agents: *cfg.Agents, Paths: paths, Runner: env.Runner,
+			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
 		})
 	}

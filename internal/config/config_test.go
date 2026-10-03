@@ -161,6 +161,7 @@ defaults:
 		{"relative opencode skills dir", "agents: {opencode: {skillsDir: skills}}", []string{`agents.opencode.skillsDir: "skills" must be absolute or start with ~/`}},
 		{"env var opencode skills dir", "agents: {opencode: {skillsDir: $HOME/skills}}", []string{"agents.opencode.skillsDir"}},
 		{"marketplace names differing in case", "agents: {marketplaces: {Foo: o/a, foo: o/b}}", []string{"agents.marketplaces.foo: differs from Foo only in case"}},
+		{"home-relative instructions", "agents: {instructions: ~/AGENTS.md}", []string{`agents.instructions: "~/AGENTS.md" must be relative to the directory holding zakwas.yaml, or absolute`}},
 		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"field dir not found"}},
 		{"reports all errors", `
 links: [{src: a}]
@@ -207,6 +208,7 @@ agents:
   providers: [opencode]
   opencode: {skillsDir: ~/.agents/skills}`},
 		{"empty opencode settings", "agents: {providers: [opencode], opencode: {}}"},
+		{"instructions", "agents: {instructions: agents/AGENTS.md}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
 	}
 	for _, tt := range tests {

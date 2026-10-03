@@ -5,6 +5,7 @@ package agents
 import (
 	"context"
 	"errors"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -106,14 +107,23 @@ func (m *Module) desired(provider string) desired {
 	return d
 }
 
-// Plan plans every provider with a backend. A provider that fails to plan
-// doesn't hold back the others: their changes are returned along with the
-// error.
+// Plan plans every provider with a backend, each provider's instructions
+// link first. A provider that fails to plan, its instructions included,
+// plans nothing and doesn't hold back the others: their changes are
+// returned along with the error.
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
+	instructions, failed, err := m.planInstructions()
+	errs := []error{err}
 	var changes []engine.Change
-	var errs []error
 	backends := m.backends()
 	for _, p := range config.Providers {
+		if err := failed[p]; err != nil {
+			errs = append(errs, err)
+			delete(instructions, p)
+			continue
+		}
+		changes = append(changes, instructions[p]...)
+		delete(instructions, p)
 		b, ok := backends[p]
 		if !ok {
 			continue
@@ -131,6 +141,9 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			c[i].Group = p
 		}
 		changes = append(changes, c...)
+	}
+	for _, p := range slices.Sorted(maps.Keys(instructions)) {
+		changes = append(changes, instructions[p]...)
 	}
 	return changes, errors.Join(errs...)
 }
