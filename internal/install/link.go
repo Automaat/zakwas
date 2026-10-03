@@ -16,7 +16,8 @@ import (
 // it already is one. Another symlink at dst is replaced; a file is backed up
 // first; a directory fails the plan.
 func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
-	if _, err := os.Stat(src); err != nil {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
 		return nil, fmt.Errorf("source %s: %w", src, err)
 	}
 	if err := CheckParents(paths, dst); err != nil {
@@ -55,6 +56,9 @@ func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
 
 	if info.IsDir() {
 		return nil, fmt.Errorf("%s is a directory; move it away before linking", dst)
+	}
+	if os.SameFile(info, srcInfo) {
+		return nil, fmt.Errorf("%s is the source %s itself; link it somewhere else", dst, paths.Pretty(src))
 	}
 	return &engine.Change{
 		Action: engine.Update, Target: target,

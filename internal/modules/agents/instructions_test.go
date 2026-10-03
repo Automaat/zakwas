@@ -10,6 +10,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
 
@@ -277,4 +278,37 @@ func TestInstructionsSharedPathLinkedOnce(t *testing.T) {
 	apply(t, changes)
 	assertLink(t, filepath.Join(m.CodexHome, "AGENTS.md"), src)
 	assertConverged(t, m)
+}
+
+func TestInstructionsConfigDirAlias(t *testing.T) {
+	m, _, src := newInstructions(t, config.ProviderClaude)
+	real := filepath.Join(m.Paths.Home, "cc")
+	m.ClaudeConfigDir = real
+	apply(t, plan(t, m))
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatal(err)
+	}
+	m.ClaudeConfigDir = alias
+	assertConverged(t, m)
+	assertLink(t, filepath.Join(real, "CLAUDE.md"), src)
+}
+
+func TestInstructionsNeverLinkUntracked(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude)
+	stateDir := filepath.Dir(m.instructionsStatePath())
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stateDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stateDir, 0o755) })
+	changes := plan(t, m)
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Module: "agents", Changes: changes}}); err == nil {
+		t.Fatal("apply succeeded without a writable state dir")
+	}
+	if _, err := os.Lstat(filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("link made without recording it: %v", err)
+	}
 }

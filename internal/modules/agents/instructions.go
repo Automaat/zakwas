@@ -76,18 +76,28 @@ func (m *Module) updateInstructions(edit func(*instructionsState)) error {
 	return saveState(m.instructionsStatePath(), st)
 }
 
-// owner finds the state entry of link, ignoring case like macOS's file
-// system.
+// owner finds the state entry of link, by the same file: ignoring case
+// like macOS's file system and resolving symlinked parents, so the same
+// config dir reached by another path is still zakwas's.
 func (st instructionsState) owner(link string) (string, instructionsLink, bool) {
 	if l, ok := st.Links[link]; ok {
 		return link, l, true
 	}
 	for key, l := range st.Links {
-		if strings.EqualFold(key, link) {
+		if samePath(key) == samePath(link) {
 			return key, l, true
 		}
 	}
 	return "", instructionsLink{}, false
+}
+
+// samePath keys a path by its resolved parent dir, ignoring case.
+func samePath(path string) string {
+	dir := filepath.Dir(path)
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	return strings.ToLower(filepath.Join(dir, filepath.Base(path)))
 }
 
 // planInstructions links agents.instructions to the global instructions
@@ -140,10 +150,10 @@ func (m *Module) planInstructions() (map[string][]engine.Change, error) {
 			}
 			strict := p == config.ProviderClaude || named
 			dst := m.instructionsPath(p)
-			if keep[strings.ToLower(dst)] {
+			if keep[samePath(dst)] {
 				continue
 			}
-			keep[strings.ToLower(dst)] = true
+			keep[samePath(dst)] = true
 			if !strict && !m.Runner.Installed(p) {
 				continue
 			}
@@ -162,7 +172,7 @@ func (m *Module) planInstructions() (map[string][]engine.Change, error) {
 	}
 
 	for _, link := range slices.Sorted(maps.Keys(st.Links)) {
-		if keep[strings.ToLower(link)] {
+		if keep[samePath(link)] {
 			continue
 		}
 		l := st.Links[link]
@@ -190,7 +200,7 @@ func (m *Module) planInstruction(provider, src, dst string, st instructionsState
 		st.Links[dst] = want
 	}
 	if c == nil {
-		if !ours || key == dst && owned == want {
+		if !ours || owned.Target == src {
 			return nil, nil
 		}
 		return &engine.Change{
@@ -198,12 +208,14 @@ func (m *Module) planInstruction(provider, src, dst string, st instructionsState
 			Apply: func(context.Context) error { return m.updateInstructions(record) },
 		}, nil
 	}
+	// Recorded before linking: a link zakwas made must never go untracked,
+	// while an entry without its link is only forgotten later.
 	link := c.Apply
 	c.Apply = func(ctx context.Context) error {
-		if err := link(ctx); err != nil {
+		if err := m.updateInstructions(record); err != nil {
 			return err
 		}
-		return m.updateInstructions(record)
+		return link(ctx)
 	}
 	return c, nil
 }
