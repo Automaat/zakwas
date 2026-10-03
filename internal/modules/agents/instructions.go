@@ -106,7 +106,7 @@ func samePath(path string) string {
 // opencode when zakwas.yaml names them, are strict: a link that can't be
 // made fails the plan. Codex is opt-in, as for plugins, and opencode by
 // the all-providers default is best effort: linked only when opencode is
-// installed and its path is free to take, its link otherwise left as is.
+// installed and nothing blocks it, its link otherwise left as is.
 func (m *Module) planInstructions() (map[string][]engine.Change, error) {
 	statePath := m.instructionsStatePath()
 	if m.Agents.Instructions == "" {
