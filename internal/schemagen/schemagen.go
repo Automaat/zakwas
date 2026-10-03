@@ -4,6 +4,7 @@ package schemagen
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -26,9 +27,12 @@ func Generate() ([]byte, error) {
 	root := r.Reflect(&config.Config{})
 	allowNull(root)
 	orNull(root)
+	if err := scalarShorthands(root); err != nil {
+		return nil, err
+	}
 	root.ID = schema.ID
 	root.Title = "zakwas.yaml"
-	root.Description = "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, defaults, system, commands."
+	root.Description = "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands."
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return nil, err
@@ -57,6 +61,9 @@ func allowNull(s *jsonschema.Schema) {
 	if s.Items != nil {
 		allowNull(s.Items)
 	}
+	if s.AdditionalProperties != nil {
+		allowNull(s.AdditionalProperties)
+	}
 	if s.Properties == nil {
 		return
 	}
@@ -66,6 +73,37 @@ func allowNull(s *jsonschema.Schema) {
 			orNull(p.Value)
 		}
 	}
+}
+
+// scalarShorthands lets an agents marketplace be written as its source
+// string and a plugin as its id, matching their UnmarshalYAML. Widening
+// "type" keeps the object's properties for editors, where anyOf would hide
+// them.
+func scalarShorthands(root *jsonschema.Schema) error {
+	agents := property(root, "agents")
+	marketplaces := property(agents, "marketplaces")
+	plugins := property(agents, "plugins")
+	if marketplaces == nil || plugins == nil || marketplaces.AdditionalProperties == nil || plugins.Items == nil {
+		return errors.New("schemagen: agents.marketplaces or agents.plugins not found")
+	}
+	for _, s := range []*jsonschema.Schema{marketplaces.AdditionalProperties, plugins.Items} {
+		one := uint64(1)
+		s.MinLength = &one
+		if s.Extras == nil {
+			s.Extras = map[string]any{}
+		}
+		s.Extras["type"] = []string{"string", s.Type}
+		s.Type = ""
+	}
+	return nil
+}
+
+func property(s *jsonschema.Schema, name string) *jsonschema.Schema {
+	if s == nil || s.Properties == nil {
+		return nil
+	}
+	p, _ := s.Properties.Get(name)
+	return p
 }
 
 // orNull turns "type": T into "type": [T, "null"]. An anyOf wrapper would

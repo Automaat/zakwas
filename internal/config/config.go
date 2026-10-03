@@ -27,6 +27,7 @@ type Config struct {
 	Defaults  []Default `yaml:"defaults" jsonschema_description:"macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once."`
 	System    System    `yaml:"system" jsonschema_description:"Machine-level setup: directories, Touch ID for sudo, an SSH key."`
 	Commands  []Command `yaml:"commands" jsonschema_description:"One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure."`
+	Agents    *Agents   `yaml:"agents" jsonschema_description:"Coding-agent plugins and the marketplaces they come from, converged per provider. Only the claude provider is converged so far; codex and opencode are accepted and skipped. Omit the section to leave agent plugins alone."`
 
 	// Root is the directory holding zakwas.yaml; relative sources resolve from it.
 	Root string `yaml:"-"`
@@ -256,6 +257,9 @@ func (c *Config) Validate(home string) error {
 		} else if err := checkDst(paths, k.Path); err != nil {
 			errs = append(errs, fmt.Errorf("system.sshKey: %w", err))
 		}
+	}
+	if c.Agents != nil {
+		errs = append(errs, c.Agents.validate()...)
 	}
 	for i, cmd := range c.Commands {
 		if cmd.Name == "" || cmd.Check == "" || cmd.Run == "" {

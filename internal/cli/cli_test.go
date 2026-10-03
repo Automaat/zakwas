@@ -304,7 +304,7 @@ func TestRepoWarnings(t *testing.T) {
 
 func TestUpgradeRefreshesBrewFirst(t *testing.T) {
 	env, _ := setup(t, linksOnly)
-	if r := invoke(env, "", "upgrade", "-y"); r.code != ExitUsage || !strings.Contains(r.stderr, "needs a brew section") {
+	if r := invoke(env, "", "upgrade", "-y"); r.code != ExitUsage || !strings.Contains(r.stderr, "needs a brew or agents section") {
 		t.Errorf("upgrade without brew: %+v", r)
 	}
 

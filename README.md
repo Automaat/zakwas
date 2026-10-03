@@ -10,6 +10,7 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: GUI apps and formulae from a `Brewfile` (`brew bundle`, optional zap cleanup)
 - **mise**: CLI tools pinned in a global mise config
+- **agents**: coding-agent plugins and marketplaces (Claude Code so far)
 - **defaults**: macOS preferences (`defaults write`, restarts Dock/Finder when needed)
 - **system**: Touch ID for sudo, directories, SSH key
 - **commands**: guarded one-off steps (`run` only while `check` fails)
@@ -58,7 +59,7 @@ Shell completion: `zakwas completion zsh|bash|fish` ([docs/commands.md](docs/com
 ```bash
 zakwas plan            # what would change (--diff shows file contents)
 zakwas apply           # show plan, confirm, apply (-y skips the prompt)
-zakwas upgrade         # brew update, then apply: upgrades casks and formulae
+zakwas upgrade         # brew update + refresh agent marketplaces, then apply
 zakwas check           # exit 2 when the machine drifted (cron/launchd friendly)
 zakwas plan --only brew,defaults
 ```
@@ -130,6 +131,12 @@ mise:
   config: dotfiles/mise/config.toml
   prune: true                     # remove versions no mise config references
 
+agents:                           # only Claude Code is converged so far
+  marketplaces:
+    claude-plugins-official: anthropics/claude-plugins-official
+  plugins:
+    - commit-commands@claude-plugins-official
+
 system:
   sudoTouchID: true
   dirs: [{path: ~/.ssh, mode: 0o700}]
@@ -146,7 +153,7 @@ defaults:                         # YAML type picks -bool/-int/-float/-string
   - {domain: com.apple.HIToolbox, key: AppleFnUsageType, value: 0, currentHost: true}
 ```
 
-Modules run in this order: system → files → links → templates → brew → mise → commands → defaults.
+Modules run in this order: system → files → links → templates → brew → mise → agents → commands → defaults.
 
 Find a macOS preference key: `defaults read > a`, toggle it in System Settings, `defaults read > b`, `diff a b`.
 
@@ -169,7 +176,7 @@ Every apply is logged to `~/.local/state/zakwas/history.jsonl` with the config r
 
 ## Safety
 
-- `plan` and `check` never change the system. Every brew call sets `HOMEBREW_NO_AUTO_UPDATE=1`; only `zakwas upgrade` refreshes Homebrew.
+- `plan` and `check` never change the system. Every brew call sets `HOMEBREW_NO_AUTO_UPDATE=1`; only `zakwas upgrade` refreshes Homebrew and agent marketplaces.
 - `brew.cleanup: zap` removes anything not in the Brewfile: read the `-` lines of `plan` before `apply`.
 - Every third-party `tap` in the Brewfile needs `trusted: true`: `brew bundle cleanup --force` resets Homebrew's trust store to the Brewfile.
 - Destinations must be absolute or `~/…` and must not overlap. zakwas refuses to write through a symlinked parent dir under `$HOME` or one resolving into the repo.

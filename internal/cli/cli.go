@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/modules/agents"
 	"github.com/Automaat/zakwas/internal/modules/brew"
 	"github.com/Automaat/zakwas/internal/modules/commands"
 	"github.com/Automaat/zakwas/internal/modules/defaults"
@@ -33,7 +35,7 @@ import (
 var commandList = []struct{ name, args, help string }{
 	{"plan", "", "show pending changes"},
 	{"apply", "", "show pending changes, confirm, apply them"},
-	{"upgrade", "", "refresh Homebrew's package list, then apply (picks up new brew versions)"},
+	{"upgrade", "", "refresh Homebrew and agent marketplaces, then apply (picks up new versions)"},
 	{"check", "", "exit 2 when anything drifted (for CI/cron)"},
 	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
 	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
@@ -82,7 +84,8 @@ type Env struct {
 	// Executable is the binary self-update replaces (default: this one).
 	Executable string
 	// ReleaseURL overrides where self-update downloads releases (tests).
-	ReleaseURL string
+	ReleaseURL      string
+	ClaudeConfigDir string
 }
 
 func (e Env) now() time.Time {
@@ -161,14 +164,8 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 
 	if cmd == "upgrade" {
-		if cfg.Brew == nil {
-			errOut.print("zakwas: upgrade needs a brew section in zakwas.yaml\n")
-			return ExitUsage
-		}
-		refresh := runner.Cmd{Name: "brew", Args: []string{"update", "--quiet"}, Stream: true}
-		if err := runner.Check(ctx, env.Runner, refresh); err != nil {
-			errOut.fail(err)
-			return ExitErr
+		if code, ok := refresh(ctx, env, cfg, mods, errOut); !ok {
+			return code
 		}
 	}
 
@@ -273,6 +270,40 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		return ExitErr
 	}
 	return ExitOK
+}
+
+// refresh fetches new package and plugin versions for `zakwas upgrade`:
+// Homebrew's package list and the declared agent marketplaces, for the
+// selected modules. plan and apply never fetch.
+func refresh(ctx context.Context, env Env, cfg *config.Config, mods []engine.Module, errOut *console) (int, bool) {
+	var brewSelected bool
+	var agentsMod *agents.Module
+	for _, m := range mods {
+		switch m := m.(type) {
+		case *brew.Module:
+			brewSelected = true
+		case *agents.Module:
+			agentsMod = m
+		}
+	}
+	if cfg.Brew == nil && cfg.Agents == nil {
+		errOut.print("zakwas: upgrade needs a brew or agents section in zakwas.yaml\n")
+		return ExitUsage, false
+	}
+	if brewSelected {
+		update := runner.Cmd{Name: "brew", Args: []string{"update", "--quiet"}, Stream: true}
+		if err := runner.Check(ctx, env.Runner, update); err != nil {
+			errOut.fail(err)
+			return ExitErr, false
+		}
+	}
+	if agentsMod != nil {
+		if err := agentsMod.Refresh(ctx); err != nil {
+			errOut.fail(err)
+			return ExitErr, false
+		}
+	}
+	return ExitOK, true
 }
 
 type options struct {
@@ -419,8 +450,8 @@ func loadConfig(flagPath, cwd, home string) (*config.Config, error) {
 }
 
 // Modules returns every configured module in apply order. Order matters:
-// files put the mise config in place, brew installs mise, and commands may
-// need tools from either.
+// files put the mise config in place, brew installs mise, agents need the
+// agent CLIs brew or mise install, and commands may need tools from any.
 func Modules(cfg *config.Config, env Env) []engine.Module {
 	paths := config.Paths{Home: env.Home, Root: cfg.Root}
 	installer := &install.Installer{Paths: paths, StatePath: install.StatePath(env.Home), Immutable: cfg.Protect.Immutable}
@@ -436,10 +467,21 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if cfg.Mise != nil {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Paths: paths, Runner: env.Runner})
 	}
+	if cfg.Agents != nil {
+		mods = append(mods, &agents.Module{Agents: *cfg.Agents, Paths: paths, Runner: env.Runner, ClaudeDir: claudeDir(env)})
+	}
 	return append(mods,
 		&commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner},
 		&defaults.Module{Defaults: cfg.Defaults, Runner: env.Runner},
 	)
+}
+
+// claudeDir is where Claude Code keeps its settings and plugin state.
+func claudeDir(env Env) string {
+	if dir := env.ClaudeConfigDir; dir != "" {
+		return dir
+	}
+	return filepath.Join(env.Home, ".claude")
 }
 
 func templateDsts(cfg *config.Config, paths config.Paths) []string {

@@ -1,6 +1,6 @@
 # zakwas
 
-Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, links, templates, brew, mise, defaults, system, commands). Users keep the config in their own repo; see `examples/`.
+Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, links, templates, brew, mise, agents, defaults, system, commands). Users keep the config in their own repo; see `examples/`.
 
 ## Layout
 
@@ -33,7 +33,7 @@ Exit codes: 0 ok, 1 error, 2 drift (`check`), 64 usage, 130 interrupted.
 
 ## Module order
 
-system → files → links → templates → brew → mise → commands → defaults. Files put the mise config in place; brew installs mise; commands may need tools from either.
+system → files → links → templates → brew → mise → agents → commands → defaults. Files put the mise config in place; brew installs mise; agents need the agent CLIs brew or mise install; commands may need tools from any.
 
 ## Adding a module
 
@@ -45,7 +45,8 @@ system → files → links → templates → brew → mise → commands → defa
 
 ## Rules
 
-- `plan`/`check` must never change the system; every brew call (apply too) sets `HOMEBREW_NO_AUTO_UPDATE=1`, so only `zakwas upgrade` refreshes Homebrew.
+- `plan`/`check` must never change the system; every brew call (apply too) sets `HOMEBREW_NO_AUTO_UPDATE=1`, so only `zakwas upgrade` refreshes Homebrew. Likewise only `upgrade` refreshes agent marketplaces.
+- agents: each provider is a `backend` in `internal/modules/agents` (only claude so far; codex/opencode are validated and skipped). Never pass `-y`/`--accept-command` to `claude plugin`; never prune project/local-scope installs.
 - Replaced files zakwas didn't write (or that were edited) are backed up to `<file>.zakwas-bak` (`.zakwas-bak.N` if taken), never deleted or overwritten.
 - `files`/`links`/`templates` destinations must be absolute or `~/…` (no `$VAR`) and must not overlap (case-insensitive). Modes are octal: `0644`, not `644`.
 - zakwas refuses to write through a symlinked parent dir under `$HOME` or one resolving into the config repo.

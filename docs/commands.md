@@ -10,7 +10,7 @@ Flags go before or after the command: `zakwas -y apply` and `zakwas apply -y` ar
 |---|---|
 | [`plan`](#plan) | show pending changes |
 | [`apply`](#apply) | show pending changes, confirm, apply them |
-| [`upgrade`](#upgrade) | `brew update`, then apply |
+| [`upgrade`](#upgrade) | `brew update` and refresh agent marketplaces, then apply |
 | [`check`](#check) | exit 2 when anything drifted |
 | [`init`](#init) | create a starter config repo from this Mac |
 | [`self-update`](#self-update) | replace the zakwas binary with a release |
@@ -25,7 +25,7 @@ These four read `zakwas.yaml` and share one set of flags.
 | Flag | Commands | Meaning |
 |---|---|---|
 | `-c PATH` | all four | config file; default: search upward from the current directory, then `$ZAKWAS_CONFIG` |
-| `--only LIST` | all four | comma-separated modules to run: `system`, `files`, `links`, `templates`, `brew`, `mise`, `commands`, `defaults` |
+| `--only LIST` | all four | comma-separated modules to run: `system`, `files`, `links`, `templates`, `brew`, `mise`, `agents`, `commands`, `defaults` |
 | `--diff` | all four | show file content diffs and command scripts |
 | `--json` | all four | machine-readable output: one plan document (`plan`, `check`) or JSON lines events (`apply`, `upgrade`) |
 | `--no-color` | all four | disable colors (also `NO_COLOR`, or stdout not a terminal) |
@@ -57,7 +57,7 @@ zakwas apply -plan plan.json
 
 ### upgrade
 
-Runs `brew update`, then `apply`, so casks and formulae pick up new versions. Needs a `brew` section. Every other command runs brew with `HOMEBREW_NO_AUTO_UPDATE=1`.
+Refreshes package and plugin sources, then runs `apply`, so new versions get picked up: `brew update` when the `brew` module runs, and `claude plugin marketplace update` for every declared Claude marketplace that is already configured when the `agents` module runs. Needs a `brew` or `agents` section. Every other command runs brew with `HOMEBREW_NO_AUTO_UPDATE=1` and never fetches marketplaces.
 
 ### check
 

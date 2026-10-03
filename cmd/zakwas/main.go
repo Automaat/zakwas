@@ -60,6 +60,8 @@ func run() int {
 		Runner:  runner.NewExec(),
 		PAMFile: os.Getenv("ZAKWAS_PAM_FILE"),
 
+		ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
+
 		StdinTTY:      term.IsTerminal(int(os.Stdin.Fd())),
 		Color:         colorOutput(),
 		GitHubActions: os.Getenv("GITHUB_ACTIONS") == "true",

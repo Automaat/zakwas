@@ -184,6 +184,10 @@ func TestLoaderAcceptedConfigs(t *testing.T) {
 		"system: {sshKey: {path: ~/k, comment: }}\n",
 		"system: {dirs: [{path: ~/.ssh, mode: 0o700}]}\n",
 		"templates: {files: [{src: a, dst: ~/a, mode: 0o600}]}\n",
+		"agents:\n",
+		"agents: {providers: , upgrade: , prune: , marketplaces: , plugins: }\n",
+		"agents: {marketplaces: {sai: o/sai, l: {source: ./x, providers: }}, plugins: [a@sai, {id: b@sai, providers: }]}\n",
+		"agents: {providers: [claude], marketplaces: {sai: {source: o/sai, providers: [claude]}}, plugins: [{id: a@sai, providers: [claude]}]}\n",
 	} {
 		t.Run(doc, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), config.FileName)
@@ -230,6 +234,10 @@ func TestInvalidConfigs(t *testing.T) {
 		{"decimal mode", "system:\n  dirs:\n    - {path: ~/.ssh, mode: 700}\n", "mode"},
 		{"null required field", "files:\n  - {src: , dst: ~/a}\n", "src"},
 		{"list template var", "templates: {vars: {x: [1]}}\n", "vars"},
+		{"unknown agent provider", "agents: {providers: [cursor]}\n", "providers"},
+		{"marketplaces as a list", "agents: {marketplaces: [o/sai]}\n", "marketplaces"},
+		{"empty marketplace source", "agents: {marketplaces: {sai: ''}}\n", "marketplaces"},
+		{"unknown plugin field", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, scope: user}]}\n", "scope"},
 		{"string mode", "templates:\n  files:\n    - {src: a, dst: ~/a, mode: '0644'}\n", "mode"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
