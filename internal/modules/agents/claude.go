@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -420,7 +421,32 @@ func newerVersion(latest, installed string) bool {
 	case i.pre == "":
 		return false
 	}
-	return l.pre > i.pre
+	return comparePre(l.pre, i.pre) > 0
+}
+
+// comparePre orders pre-release tags per semver: dot-separated
+// identifiers, numeric ones by value and below alphanumeric ones.
+func comparePre(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for k := range min(len(as), len(bs)) {
+		x, errX := strconv.Atoi(as[k])
+		y, errY := strconv.Atoi(bs[k])
+		switch {
+		case errX == nil && errY == nil:
+			if c := cmp.Compare(x, y); c != 0 {
+				return c
+			}
+		case errX == nil:
+			return -1
+		case errY == nil:
+			return 1
+		default:
+			if c := strings.Compare(as[k], bs[k]); c != 0 {
+				return c
+			}
+		}
+	}
+	return cmp.Compare(len(as), len(bs))
 }
 
 type version struct {
