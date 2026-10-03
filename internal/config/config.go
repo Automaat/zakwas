@@ -27,7 +27,7 @@ type Config struct {
 	Defaults  []Default `yaml:"defaults" jsonschema_description:"macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once."`
 	System    System    `yaml:"system" jsonschema_description:"Machine-level setup: directories, Touch ID for sudo, an SSH key."`
 	Commands  []Command `yaml:"commands" jsonschema_description:"One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure."`
-	Agents    *Agents   `yaml:"agents" jsonschema_description:"Coding-agent plugins and the marketplaces they come from, converged per provider. Converged for claude (Claude Code) and codex (Codex); opencode is accepted and skipped. Omit the section to leave agent plugins alone."`
+	Agents    *Agents   `yaml:"agents" jsonschema_description:"Coding-agent plugins and the marketplaces they come from, converged per provider: claude (Claude Code), codex (Codex) and opencode (skills linked into its skills directory). Omit the section to leave agent plugins alone."`
 
 	// Root is the directory holding zakwas.yaml; relative sources resolve from it.
 	Root string `yaml:"-"`

@@ -482,17 +482,11 @@ func parseVersion(s string) (version, bool) {
 // repo; Claude installs that version over the marketplace entry's.
 func inRepoVersion(root, pluginRoot string, source json.RawMessage) string {
 	var rel string
-	if json.Unmarshal(source, &rel) != nil || rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, ":") {
+	if json.Unmarshal(source, &rel) != nil {
 		return ""
 	}
-	dir := filepath.Join(root, rel)
-	if !strings.HasPrefix(rel, "./") {
-		if pluginRoot == "" {
-			return ""
-		}
-		dir = filepath.Join(root, pluginRoot, rel)
-	}
-	if clean := filepath.Clean(root); dir != clean && !strings.HasPrefix(dir, clean+string(filepath.Separator)) {
+	dir, ok := pluginDir(root, pluginRoot, rel)
+	if !ok {
 		return ""
 	}
 	var own struct {

@@ -57,7 +57,7 @@ zakwas apply -plan plan.json
 
 ### upgrade
 
-Refreshes package and plugin sources, then runs `apply`, so new versions get picked up: `brew update` when the `brew` module runs, and, when the `agents` module runs, `claude plugin marketplace update` for every declared Claude marketplace and `codex plugin marketplace upgrade` for every declared Git marketplace in Codex that is already configured. Codex moves installed plugins to the upgraded marketplace's versions itself. Needs a `brew` or `agents` section. Every other command runs brew with `HOMEBREW_NO_AUTO_UPDATE=1` and never fetches marketplaces.
+Refreshes package and plugin sources, then runs `apply`, so new versions get picked up: `brew update` when the `brew` module runs, and, when the `agents` module runs, `claude plugin marketplace update` for every declared Claude marketplace and `codex plugin marketplace upgrade` for every declared Git marketplace in Codex that is already configured, and `git fetch` for every opencode Git marketplace zakwas already fetched. Codex moves installed plugins to the upgraded marketplace's versions itself. Needs a `brew` or `agents` section. Every other command runs brew with `HOMEBREW_NO_AUTO_UPDATE=1` and never refreshes marketplaces; `apply` only clones an opencode Git marketplace that isn't fetched yet.
 
 ### check
 

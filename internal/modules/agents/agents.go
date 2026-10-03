@@ -1,6 +1,5 @@
 // Package agents converges coding-agent plugins and marketplaces per
-// provider. Claude Code and Codex have backends; providers without one are
-// skipped.
+// provider. Claude Code, Codex and opencode have backends.
 package agents
 
 import (
@@ -37,8 +36,9 @@ type backend interface {
 
 func (m *Module) backends() map[string]backend {
 	return map[string]backend{
-		config.ProviderClaude: m.claudeBackend(),
-		config.ProviderCodex:  m.codexBackend(),
+		config.ProviderClaude:   m.claudeBackend(),
+		config.ProviderCodex:    m.codexBackend(),
+		config.ProviderOpencode: m.opencodeBackend(),
 	}
 }
 
@@ -61,13 +61,15 @@ func (m *Module) claudeBackend() *claude {
 
 // desired is what one provider should end up with; sources maps each
 // marketplace name to its resolved source. named is set when zakwas.yaml
-// lists the provider itself rather than getting it from the default.
+// lists the provider itself rather than getting it from the default, and
+// explicit marks the plugins targeted at the provider by name.
 type desired struct {
-	sources map[string]string
-	plugins []string
-	upgrade bool
-	prune   bool
-	named   bool
+	sources  map[string]string
+	plugins  []string
+	explicit map[string]bool
+	upgrade  bool
+	prune    bool
+	named    bool
 }
 
 // skip reports whether a provider has nothing to converge. Codex is opt-in:
@@ -82,10 +84,11 @@ func (d desired) skip(provider string) bool {
 
 func (m *Module) desired(provider string) desired {
 	d := desired{
-		sources: map[string]string{},
-		upgrade: m.Agents.Upgrade,
-		prune:   m.Agents.Prune && m.Agents.Manages(provider),
-		named:   slices.Contains(m.Agents.Providers, provider),
+		sources:  map[string]string{},
+		explicit: map[string]bool{},
+		upgrade:  m.Agents.Upgrade,
+		prune:    m.Agents.Prune && m.Agents.Manages(provider),
+		named:    slices.Contains(m.Agents.Providers, provider),
 	}
 	for _, name := range m.Agents.MarketplaceNames() {
 		if slices.Contains(m.Agents.MarketplaceProviders(name), provider) {
@@ -96,15 +99,16 @@ func (m *Module) desired(provider string) desired {
 	for _, p := range m.Agents.Plugins {
 		if slices.Contains(m.Agents.PluginProviders(p), provider) {
 			d.plugins = append(d.plugins, p.ID)
+			d.explicit[p.ID] = m.Agents.NamesProvider(p, provider)
 		}
 		d.named = d.named || slices.Contains(p.Providers, provider)
 	}
 	return d
 }
 
-// Plan plans every provider with a backend; opencode has none yet and is
-// skipped. A provider that fails to plan doesn't hold back the others: their
-// changes are returned along with the error.
+// Plan plans every provider with a backend. A provider that fails to plan
+// doesn't hold back the others: their changes are returned along with the
+// error.
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	var changes []engine.Change
 	var errs []error

@@ -377,7 +377,7 @@
           },
           "minItems": 1,
           "uniqueItems": true,
-          "description": "Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. claude and codex are converged; opencode is accepted and skipped. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three.",
+          "description": "Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three.",
           "type": [
             "array",
             "null"
@@ -482,10 +482,28 @@
             "array",
             "null"
           ]
+        },
+        "opencode": {
+          "properties": {
+            "skillsDir": {
+              "minLength": 1,
+              "description": "Directory opencode loads user skills from, absolute or '~/...'. Default: ~/.config/opencode/skills. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "description": "Settings of the opencode provider.",
+          "type": [
+            "object",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,
-      "description": "Coding-agent plugins and the marketplaces they come from, converged per provider. Converged for claude (Claude Code) and codex (Codex); opencode is accepted and skipped. Omit the section to leave agent plugins alone.",
+      "description": "Coding-agent plugins and the marketplaces they come from, converged per provider: claude (Claude Code), codex (Codex) and opencode (skills linked into its skills directory). Omit the section to leave agent plugins alone.",
       "type": [
         "object",
         "null"
