@@ -129,7 +129,11 @@ func (c *claude) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	auto, err := c.autoUpdate()
+	declared, err := c.userDeclared()
+	if err != nil {
+		return nil, err
+	}
+	auto, err := c.autoUpdate(declared)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +208,7 @@ func (c *claude) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 	}
 
 	if d.prune {
-		changes = append(changes, c.planPrune(d, st, user)...)
+		changes = append(changes, c.planPrune(d, st, user, declared)...)
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
@@ -215,8 +219,11 @@ func (c *claude) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 // planPrune removes undeclared user-scope plugins, then undeclared
 // marketplaces. Project and local installs are never touched, and neither
 // are the marketplaces they come from, nor plugins whose marketplace isn't
-// configured (built-in or skills-dir ones zakwas can't declare).
-func (c *claude) planPrune(d desired, st claudeState, user map[string]claudeInstalled) []engine.Change {
+// configured (built-in or skills-dir ones zakwas can't declare). Only
+// marketplaces declared in user settings are removed: one a project
+// declares shows up in the list too, and `remove --scope user` refuses
+// it.
+func (c *claude) planPrune(d desired, st claudeState, user map[string]claudeInstalled, userDeclared map[string]autoUpdateEntry) []engine.Change {
 	var changes []engine.Change
 	ids := make([]string, 0, len(user))
 	for id := range user {
@@ -248,7 +255,9 @@ func (c *claude) planPrune(d desired, st claudeState, user map[string]claudeInst
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if _, declared := d.sources[name]; declared || inUse[name] {
+		_, wanted := d.sources[name]
+		_, ownedByUser := userDeclared[name]
+		if wanted || inUse[name] || !ownedByUser {
 			continue
 		}
 		changes = append(changes, engine.Change{
@@ -414,11 +423,21 @@ type autoUpdateEntry struct {
 // in known_marketplaces.json, but a marketplace declared in user settings
 // (as `marketplace add` does) takes it from there on startup, so both must
 // say true.
-func (c *claude) autoUpdate() (map[string]bool, error) {
+func (c *claude) autoUpdate(declared map[string]autoUpdateEntry) (map[string]bool, error) {
 	known, err := readEntries(c.knownPath())
 	if err != nil {
 		return nil, err
 	}
+	on := map[string]bool{}
+	for name, e := range known {
+		d, isDeclared := declared[name]
+		on[name] = isTrue(e.AutoUpdate) && (!isDeclared || isTrue(d.AutoUpdate))
+	}
+	return on, nil
+}
+
+// userDeclared returns the marketplaces declared in user settings.
+func (c *claude) userDeclared() (map[string]autoUpdateEntry, error) {
 	settings, _, err := readObject(c.settingsPath())
 	if err != nil {
 		return nil, err
@@ -429,12 +448,7 @@ func (c *claude) autoUpdate() (map[string]bool, error) {
 			return nil, fmt.Errorf("%s: extraKnownMarketplaces: %w", c.settingsPath(), err)
 		}
 	}
-	on := map[string]bool{}
-	for name, e := range known {
-		d, isDeclared := declared[name]
-		on[name] = isTrue(e.AutoUpdate) && (!isDeclared || isTrue(d.AutoUpdate))
-	}
-	return on, nil
+	return declared, nil
 }
 
 func isTrue(b *bool) bool { return b != nil && *b }

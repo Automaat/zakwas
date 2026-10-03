@@ -391,7 +391,7 @@
           ]
         },
         "prune": {
-          "description": "Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, and marketplaces they still use, are never touched. Removals are shown in 'zakwas plan' first. Default false.",
+          "description": "Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false.",
           "default": false,
           "type": [
             "boolean",

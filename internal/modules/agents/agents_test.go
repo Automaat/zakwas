@@ -207,11 +207,13 @@ func TestPrune(t *testing.T) {
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
 		Plugins:      []config.Plugin{{ID: "keep@sai"}},
 	})
-	writeFile(t, m.claude().knownPath(), knownJSON(map[string]bool{"sai": true, "old": false, "proj": false}))
+	writeFile(t, m.claude().knownPath(), knownJSON(map[string]bool{"sai": true, "old": false, "proj": false, "projdecl": false}))
+	writeFile(t, m.claude().settingsPath(), `{"extraKnownMarketplaces": {"sai": {"autoUpdate": true}, "old": {}, "proj": {}}}`)
 	fake.OnOK(marketList, `[
 		{"name":"sai","source":"github","repo":"o/sai"},
 		{"name":"old","source":"git","url":"https://example.com/old.git"},
-		{"name":"proj","source":"github","repo":"o/proj"}]`)
+		{"name":"proj","source":"github","repo":"o/proj"},
+		{"name":"projdecl","source":"github","repo":"o/projdecl"}]`)
 	fake.OnOK(pluginList, `{"installed": [
 		{"id":"keep@sai","version":"1","scope":"user","enabled":true},
 		{"id":"stale@sai","version":"1","scope":"user","enabled":true},

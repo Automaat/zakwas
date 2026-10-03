@@ -266,7 +266,7 @@ For Claude Code, `apply` adds missing marketplaces (`claude plugin marketplace a
 
 `upgrade`: plugins whose marketplace manifest carries a version different from the installed one are updated (`claude plugin update`), shown in the plan as `from → to`. Plugins versioned only by commit are left to Claude's own auto-update. `plan`, `check` and `apply` never fetch marketplaces; `zakwas upgrade` refreshes the declared ones first (`claude plugin marketplace update`).
 
-`prune`: undeclared user-scope plugins are uninstalled, then undeclared marketplaces removed. Plugins installed for a single project (project or local scope), and the marketplaces they come from, are never touched; neither are plugins from marketplaces Claude doesn't list as configured (built-in ones, `skills-dir`). Removals show in `zakwas plan` as destructive first.
+`prune`: undeclared user-scope plugins are uninstalled, then undeclared marketplaces declared in Claude's user settings removed (`--scope user`). Plugins installed for a single project (project or local scope), the marketplaces they come from, and marketplaces declared only by a project or by older Claude versions outside user settings are never touched; neither are plugins from marketplaces Claude doesn't list as configured (built-in ones, `skills-dir`). Removals show in `zakwas plan` as destructive first.
 
 The plan fails when `claude` is not on `PATH` (run `apply` again once brew or mise has installed it), when a declared marketplace is already configured from a different source, or when a declared plugin is not in its marketplace. zakwas runs `claude` from `/`, so a project's `.claude` settings don't leak in, and honors `CLAUDE_CONFIG_DIR`.
 
