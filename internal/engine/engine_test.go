@@ -89,6 +89,28 @@ func TestApply(t *testing.T) {
 	}
 }
 
+func TestApplyFailureStopsOnlyItsGroup(t *testing.T) {
+	var ran []string
+	record := func(name string, err error) func(context.Context) error {
+		return func(context.Context) error {
+			ran = append(ran, name)
+			return err
+		}
+	}
+	plan := Plan{{Module: "agents", Changes: []Change{
+		{Action: Create, Target: "x1", Group: "x", Apply: record("x1", errors.New("fail"))},
+		{Action: Create, Target: "x2", Group: "x", Apply: record("x2", nil)},
+		{Action: Create, Target: "y1", Group: "y", Apply: record("y1", nil)},
+	}}}
+	res, err := Apply(context.Background(), &recorder{}, plan)
+	if got, want := strings.Join(ran, ","), "x1,y1"; got != want {
+		t.Errorf("ran %s, want %s", got, want)
+	}
+	if err == nil || res.Applied != 1 || res.Failed != 1 || res.Skipped != 1 {
+		t.Errorf("res = %+v, err = %v", res, err)
+	}
+}
+
 func TestApplyStopsWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
