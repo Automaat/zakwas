@@ -95,7 +95,7 @@ writecfg() {
   {
     if [ -f "$st/sai" ]; then printf '[marketplaces.sai]\nsource_type = "git"\nsource = "https://github.com/Owner/sai.git"\nref = "v1"\n\n'; fi
     if [ -f "$st/codexonly" ]; then printf '[marketplaces.codexonly]\nsource_type = "git"\nsource = "https://github.com/owner/codexonly.git"\n\n'; fi
-    if [ ! -f "$st/old-gone" ]; then printf '[marketplaces.old]\nsource_type = "local"\nsource = "/old"\n\n'; fi
+    if [ ! -f "$st/old-gone" ]; then printf '[marketplaces.old]\nsource_type = "git"\nsource = "https://example.com/old.git"\n\n'; fi
   } > "$CODEX_HOME/config.toml"
 }
 case "$*" in

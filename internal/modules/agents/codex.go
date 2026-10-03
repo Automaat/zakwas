@@ -99,6 +99,9 @@ func (c *codex) state(ctx context.Context) (codexState, error) {
 		return st, err
 	}
 	st.configured = configured
+	if err := brokenLocal(configured); err != nil {
+		return st, err
+	}
 	out, err := runner.Output(ctx, c.runner, c.cmd("plugin", "marketplace", "list", "--json"))
 	if err != nil {
 		return st, err
@@ -128,6 +131,40 @@ func (c *codex) state(ctx context.Context) (codexState, error) {
 		st.available[p.PluginID] = p
 	}
 	return st, nil
+}
+
+// brokenLocal names local marketplaces in config.toml whose directory has
+// no manifest: Codex then fails every list command, prune included, until
+// they are removed by hand.
+func brokenLocal(configured map[string]codexSource) error {
+	names := make([]string, 0, len(configured))
+	for n := range configured {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var errs []error
+	for _, n := range names {
+		s := configured[n]
+		if s.SourceType != "local" {
+			continue
+		}
+		if codexManifest(s.Source) == "" {
+			errs = append(errs, fmt.Errorf("codex: local marketplace %q at %s has no marketplace manifest, so codex can't list plugins; restore it or run `codex plugin marketplace remove %s`", n, s.Source, n))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// codexManifest returns the manifest Codex reads in a marketplace root, or
+// "" when there is none.
+func codexManifest(root string) string {
+	for _, rel := range []string{filepath.Join(".agents", "plugins", "marketplace.json"), filepath.Join(".claude-plugin", "marketplace.json")} {
+		p := filepath.Join(root, rel)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func (c *codex) plan(ctx context.Context, d desired) ([]engine.Change, error) {
@@ -318,11 +355,8 @@ func codexLatestVersion(root, plugin string) string {
 	if root == "" {
 		return ""
 	}
-	for _, rel := range []string{filepath.Join(".agents", "plugins", "marketplace.json"), filepath.Join(".claude-plugin", "marketplace.json")} {
-		data, err := os.ReadFile(filepath.Join(root, rel))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
+	if path := codexManifest(root); path != "" {
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return ""
 		}

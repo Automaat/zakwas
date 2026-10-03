@@ -57,6 +57,7 @@ func TestCodexConvergeFromScratch(t *testing.T) {
 		Plugins: []config.Plugin{{ID: "humanize@sai"}},
 	})
 	localDir := filepath.Join(m.Paths.Root, "mp")
+	writeFile(t, filepath.Join(localDir, ".claude-plugin", "marketplace.json"), `{"name":"local","plugins":[]}`)
 	fake.OnOK(codexMarketList, `{"marketplaces": []}`)
 	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
 
@@ -154,8 +155,8 @@ source_type = "git"
 source = "https://github.com/o/sai.git"
 
 [marketplaces.old]
-source_type = "local"
-source = "/old"
+source_type = "git"
+source = "https://example.com/old.git"
 `)
 	fake.OnOK(codexMarketList, `{"marketplaces": [
 		{"name":"sai","root":"/r/sai"},
@@ -172,7 +173,7 @@ source = "/old"
 	want := []string{
 		"- codex plugin gone@old (2)",
 		"- codex plugin stale@sai (1)",
-		"- codex marketplace old (/old)",
+		"- codex marketplace old (https://example.com/old.git)",
 	}
 	if got := targets(changes); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v\nwant %v", got, want)
@@ -335,6 +336,19 @@ func TestProvidersPlanSeparately(t *testing.T) {
 		if g, _, _ := strings.Cut(c.Target, " "); c.Group != g {
 			t.Errorf("%s: group %q, want %q so its failures don't stop the other provider", c, c.Group, g)
 		}
+	}
+}
+
+func TestCodexBrokenLocalMarketplace(t *testing.T) {
+	m, fake := newCodexModule(t, config.Agents{Prune: true})
+	gone := filepath.Join(t.TempDir(), "gone")
+	writeFile(t, m.codex().configPath(), "[marketplaces.gone]\nsource_type = \"local\"\nsource = \""+gone+"\"\n")
+	_, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "codex plugin marketplace remove gone") {
+		t.Errorf("err = %v", err)
+	}
+	if len(fake.Calls) != 0 {
+		t.Errorf("ran codex against a broken marketplace: %v", fake.Lines())
 	}
 }
 
