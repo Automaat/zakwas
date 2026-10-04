@@ -118,12 +118,11 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	commandHooks, hookFailed, hookErr := m.planCommandHooks()
 	errs = append(errs, hookErr)
 	var changes []engine.Change
+	var klaudiushChange *engine.Change
+	var klaudiushErr error
 	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush {
-		c, hookErr := m.planKlaudiush()
-		errs = append(errs, hookErr)
-		if c != nil {
-			changes = append(changes, *c)
-		}
+		klaudiushChange, klaudiushErr = m.planKlaudiush()
+		errs = append(errs, klaudiushErr)
 	}
 	backends := m.backends()
 	for _, p := range config.Providers {
@@ -160,6 +159,12 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	}
 	for _, p := range slices.Sorted(maps.Keys(instructions)) {
 		changes = append(changes, instructions[p]...)
+	}
+	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush && klaudiushChange == nil && len(changes) > 0 && klaudiushErr == nil {
+		klaudiushChange = m.klaudiushFinalizeChange()
+	}
+	if klaudiushChange != nil {
+		changes = append(changes, *klaudiushChange)
 	}
 	return changes, errors.Join(errs...)
 }

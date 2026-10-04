@@ -445,10 +445,12 @@ export default {
     };
   },
   async setup(ctx) {
-    if (commands.beforeTool) await ctx.tool.hook("execute.before", event => runAll("beforeTool", event));
-    if (commands.afterTool) await ctx.tool.hook("execute.after", event => runAll("afterTool", event));
+    const registrations = [];
+    if (commands.beforeTool) registrations.push(await ctx.tool.hook("execute.before", event => runAll("beforeTool", event)));
+    if (commands.afterTool) registrations.push(await ctx.tool.hook("execute.after", event => runAll("afterTool", event)));
+    let controller;
     if (commands.sessionStart || commands.stop) {
-      const controller = new AbortController();
+      controller = new AbortController();
       void (async () => {
         try {
           for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
@@ -461,8 +463,11 @@ export default {
           if (!controller.signal.aborted) console.error(error);
         }
       })();
-      return () => controller.abort();
     }
+    return () => {
+      controller?.abort();
+      for (const registration of registrations) registration.dispose();
+    };
   },
 };
 `), nil

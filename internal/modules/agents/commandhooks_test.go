@@ -234,6 +234,19 @@ await plugin.setup({ tool: { hook: async (name, callback) => { callbacks[name] =
 await callbacks["execute.before"]({ tool: "read" });
 const second = JSON.parse(await Bun.file(path).text());
 if (second.tool !== "read") throw new Error("V2 hook did not receive input");
+const active = new Set();
+const ctx = { tool: { hook: async (_, callback) => {
+  active.add(callback);
+  return { dispose: () => active.delete(callback) };
+} } };
+const firstCleanup = await plugin.setup(ctx);
+if (active.size !== 1) throw new Error("first setup missing registration");
+firstCleanup();
+if (active.size !== 0) throw new Error("first cleanup left a registration");
+const secondCleanup = await plugin.setup(ctx);
+if (active.size !== 1) throw new Error("reload duplicated registrations");
+secondCleanup();
+if (active.size !== 0) throw new Error("second cleanup left a registration");
 `
 	scriptPath := filepath.Join(dir, "check.mjs")
 	writeHookTestFile(t, scriptPath, script)

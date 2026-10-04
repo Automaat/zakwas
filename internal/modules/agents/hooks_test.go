@@ -87,6 +87,49 @@ func TestKlaudiushHooksConverge(t *testing.T) {
 	}
 }
 
+func TestKlaudiushFingerprintAfterSharedHookWrite(t *testing.T) {
+	for _, initialized := range []bool{false, true} {
+		name := "initial registration"
+		if initialized {
+			name = "current registration"
+		}
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			binary := filepath.Join(home, "bin", "klaudiush")
+			writeHookTestFile(t, binary, "klaudiush binary")
+			writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = true\n")
+			settings := filepath.Join(home, ".claude", "settings.json")
+			writeHookTestFile(t, settings, `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUseFailure"}]}]}}`)
+			m := &Module{
+				Agents: config.Agents{Providers: []string{"claude"}, Hooks: &config.AgentHooks{Klaudiush: true, Commands: []config.AgentCommandHook{{Event: "beforeTool", Command: "/bin/check"}}}},
+				Paths:  config.Paths{Home: home}, Runner: runnertest.New().OnOK("klaudiush init --install-hooks --global", ""), klaudiushPath: binary,
+			}
+			if initialized {
+				state, err := m.captureKlaudiushState()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := saveState(m.klaudiushStatePath(), state); err != nil {
+					t.Fatal(err)
+				}
+			}
+			changes, err := m.Plan(context.Background())
+			if err != nil || len(changes) != 2 || changes[1].Group != "klaudiush" {
+				t.Fatalf("initial plan = %v, %v", changes, err)
+			}
+			for _, change := range changes {
+				if err := change.Apply(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			changes, err = m.Plan(context.Background())
+			if err != nil || len(changes) != 0 {
+				t.Fatalf("second plan = %v, %v", changes, err)
+			}
+		})
+	}
+}
+
 func TestKlaudiushHooksMissingConfigPlansInstall(t *testing.T) {
 	home := t.TempDir()
 	m := &Module{Agents: config.Agents{Hooks: &config.AgentHooks{Klaudiush: true}}, Paths: config.Paths{Home: home}, Runner: runnertest.New()}

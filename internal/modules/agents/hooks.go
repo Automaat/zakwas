@@ -281,6 +281,19 @@ func (m *Module) klaudiushChange(detail string) *engine.Change {
 	}
 }
 
+func (m *Module) klaudiushFinalizeChange() *engine.Change {
+	return &engine.Change{
+		Action: engine.Update, Target: "klaudiush hooks", Detail: "refresh hook fingerprints after agent changes", Group: "klaudiush",
+		Apply: func(context.Context) error {
+			state, err := m.captureKlaudiushState()
+			if err != nil {
+				return err
+			}
+			return saveState(m.klaudiushStatePath(), state)
+		},
+	}
+}
+
 func hooksRegistered(path string, events []string, command func(string) string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
