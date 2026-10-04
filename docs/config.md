@@ -287,6 +287,7 @@ For opencode, which has no plugin system, zakwas links each skill of every decla
 agents:
   providers: [claude, codex]
   instructions: dotfiles/AGENTS.md
+  hooks: {klaudiush: true}
   upgrade: true
   prune: true
   marketplaces:
@@ -297,6 +298,8 @@ agents:
     - review@team
     - {id: lint@team, providers: [codex]}
 ```
+
+`agents.hooks.klaudiush: true` registers global klaudiush hooks for the providers enabled in `${XDG_CONFIG_HOME:-~/.config}/klaudiush/config.toml`. Install klaudiush and place its config with `files` or `templates` first. Zakwas checks hook targets during `plan` and runs `klaudiush init --install-hooks --global` during `apply` when registration is missing or the binary, config, or hook files changed. It records a registration fingerprint in `~/.local/state/zakwas/klaudiush.json`. Klaudiush keeps unrelated hooks. Codex's `hooks_config_path` and opencode's `plugin_path` come from the klaudiush config and can point outside default agent directories. Removing this option leaves existing registrations in place.
 
 ## system
 

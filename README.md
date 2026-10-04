@@ -134,6 +134,7 @@ mise:
 agents:
   providers: [claude, codex]      # add opencode to link the plugins' skills into it
   instructions: dotfiles/AGENTS.md  # linked to ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
+  # hooks: {klaudiush: true}         # register enabled klaudiush providers
   marketplaces:
     claude-plugins-official: anthropics/claude-plugins-official
   plugins:

@@ -25,6 +25,7 @@ type Module struct {
 	Runner          runner.Runner
 	ClaudeConfigDir string
 	CodexHome       string
+	klaudiushPath   string
 }
 
 func (m *Module) Name() string { return "agents" }
@@ -115,6 +116,13 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	instructions, failed, err := m.planInstructions()
 	errs := []error{err}
 	var changes []engine.Change
+	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush {
+		c, hookErr := m.planKlaudiush()
+		errs = append(errs, hookErr)
+		if c != nil {
+			changes = append(changes, *c)
+		}
+	}
 	backends := m.backends()
 	for _, p := range config.Providers {
 		if err := failed[p]; err != nil {

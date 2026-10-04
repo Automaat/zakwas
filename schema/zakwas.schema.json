@@ -491,6 +491,24 @@
             "null"
           ]
         },
+        "hooks": {
+          "properties": {
+            "klaudiush": {
+              "description": "Register klaudiush global hooks for its enabled providers. Zakwas checks registration without running klaudiush during plan and runs 'klaudiush init --install-hooks --global' during apply when needed. Default false.",
+              "default": false,
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "description": "Global agent hook integrations. Opt in to klaudiush to register hooks for providers enabled in its global config under XDG_CONFIG_HOME or ~/.config.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "opencode": {
           "properties": {
             "skillsDir": {

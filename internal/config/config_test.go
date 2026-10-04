@@ -209,6 +209,7 @@ agents:
   opencode: {skillsDir: ~/.agents/skills}`},
 		{"empty opencode settings", "agents: {providers: [opencode], opencode: {}}"},
 		{"instructions", "agents: {instructions: agents/AGENTS.md}"},
+		{"klaudiush hooks", "agents: {hooks: {klaudiush: true}}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
 	}
 	for _, tt := range tests {

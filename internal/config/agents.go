@@ -30,7 +30,13 @@ type Agents struct {
 	Marketplaces map[string]Marketplace `yaml:"marketplaces" jsonschema_description:"Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'."`
 	Plugins      []Plugin               `yaml:"plugins" jsonschema_description:"Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own."`
 	Instructions string                 `yaml:"instructions" jsonschema:"minLength=1" jsonschema_description:"Global instructions file in the config repo, relative to the directory holding zakwas.yaml (or absolute), linked to each managed provider's global instructions: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). A file already there is backed up; links zakwas made for providers no longer managed are removed."`
+	Hooks        *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hook integrations. Opt in to klaudiush to register hooks for providers enabled in its global config under XDG_CONFIG_HOME or ~/.config."`
 	Opencode     *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
+}
+
+// AgentHooks enables global hook integrations.
+type AgentHooks struct {
+	Klaudiush bool `yaml:"klaudiush" jsonschema:"default=false" jsonschema_description:"Register klaudiush global hooks for its enabled providers. Zakwas checks registration without running klaudiush during plan and runs 'klaudiush init --install-hooks --global' during apply when needed. Default false."`
 }
 
 // Opencode configures the opencode provider, which has no plugin system:
