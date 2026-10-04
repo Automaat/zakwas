@@ -21,8 +21,12 @@ mise:
   config: dotfiles/mise/config.toml
   prune: true
 
-# To manage global klaudiush hooks, install klaudiush, add its config under
-# files or templates, then enable: agents: {hooks: {klaudiush: true}}.
+# agents:
+#   providers: [claude, codex, opencode]
+#   hooks:
+#     commands:
+#       - {event: beforeTool, command: /path/to/check-tool}
+#     # klaudiush: true  # install klaudiush and its config first
 
 system:
   sudoTouchID: true

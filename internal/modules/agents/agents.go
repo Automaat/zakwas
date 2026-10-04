@@ -115,6 +115,8 @@ func (m *Module) desired(provider string) desired {
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	instructions, failed, err := m.planInstructions()
 	errs := []error{err}
+	commandHooks, hookFailed, hookErr := m.planCommandHooks()
+	errs = append(errs, hookErr)
 	var changes []engine.Change
 	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush {
 		c, hookErr := m.planKlaudiush()
@@ -130,8 +132,14 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			delete(instructions, p)
 			continue
 		}
+		if err := hookFailed[p]; err != nil {
+			errs = append(errs, err)
+			delete(instructions, p)
+			continue
+		}
 		changes = append(changes, instructions[p]...)
 		delete(instructions, p)
+		changes = append(changes, commandHooks[p]...)
 		b, ok := backends[p]
 		if !ok {
 			continue

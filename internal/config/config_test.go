@@ -162,6 +162,10 @@ defaults:
 		{"env var opencode skills dir", "agents: {opencode: {skillsDir: $HOME/skills}}", []string{"agents.opencode.skillsDir"}},
 		{"marketplace names differing in case", "agents: {marketplaces: {Foo: o/a, foo: o/b}}", []string{"agents.marketplaces.foo: differs from Foo only in case"}},
 		{"home-relative instructions", "agents: {instructions: ~/AGENTS.md}", []string{`agents.instructions: "~/AGENTS.md" must be relative to the directory holding zakwas.yaml, or absolute`}},
+		{"unknown command hook event", "agents: {hooks: {commands: [{event: install, command: check}]}}", []string{`agents.hooks.commands[0].event: unknown event "install"`}},
+		{"empty command hook", "agents: {hooks: {commands: [{event: beforeTool, command: ' '}]}}", []string{"agents.hooks.commands[0].command: command is required"}},
+		{"command hook outside providers", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check, providers: [codex]}]}}", []string{`agents.hooks.commands[0].providers: provider "codex" is not in agents.providers`}},
+		{"duplicate command hook", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check}, {event: stop, command: check}]}}", []string{"agents.hooks.commands[1]: duplicates agents.hooks.commands[0]"}},
 		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"field dir not found"}},
 		{"reports all errors", `
 links: [{src: a}]
@@ -210,6 +214,7 @@ agents:
 		{"empty opencode settings", "agents: {providers: [opencode], opencode: {}}"},
 		{"instructions", "agents: {instructions: agents/AGENTS.md}"},
 		{"klaudiush hooks", "agents: {hooks: {klaudiush: true}}"},
+		{"shared command hooks", "agents: {providers: [claude, codex, opencode], hooks: {commands: [{event: beforeTool, command: check}]}}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
 	}
 	for _, tt := range tests {
