@@ -118,8 +118,8 @@ func (m *Module) planKlaudiush() (*engine.Change, error) {
 		return nil, fmt.Errorf("klaudiush binary: %w", err)
 	}
 	var missing []string
-	check := func(provider, path string, events []string, command func(string) string) error {
-		ok, err := hooksRegistered(m.hookPath(path), events, command)
+	check := func(provider, path string, events []string, command func(string) string, optionalSuffix string) error {
+		ok, err := hooksRegistered(m.hookPath(path), events, command, optionalSuffix)
 		if err != nil {
 			return fmt.Errorf("klaudiush %s hooks: %w", provider, err)
 		}
@@ -130,7 +130,7 @@ func (m *Module) planKlaudiush() (*engine.Change, error) {
 	}
 	if cfg.Providers.Claude.enabled(true) {
 		path := filepath.Join(m.Paths.Home, ".claude", "settings.json")
-		if err := check("claude", path, []string{"PreToolUse", "PostToolUse", "PostToolUseFailure"}, func(event string) string { return binary + " --hook-type " + event }); err != nil {
+		if err := check("claude", path, []string{"PreToolUse", "PostToolUse", "PostToolUseFailure"}, func(event string) string { return binary + " --hook-type " + event }, " --trace"); err != nil {
 			return nil, err
 		}
 	}
@@ -148,7 +148,7 @@ func (m *Module) planKlaudiush() (*engine.Change, error) {
 		if cfg.Evidence.ToolPhase.Enabled && (cfg.Evidence.ToolPhase.FilterTools == nil || *cfg.Evidence.ToolPhase.FilterTools) {
 			events = append(events, "BeforeToolSelection")
 		}
-		if err := check("gemini", p.SettingsPath, events, func(event string) string { return binary + " --provider gemini --event " + event }); err != nil {
+		if err := check("gemini", p.SettingsPath, events, func(event string) string { return binary + " --provider gemini --event " + event }, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -294,7 +294,7 @@ func (m *Module) klaudiushFinalizeChange() *engine.Change {
 	}
 }
 
-func hooksRegistered(path string, events []string, command func(string) string) (bool, error) {
+func hooksRegistered(path string, events []string, command func(string) string, optionalSuffix string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -315,9 +315,10 @@ func hooksRegistered(path string, events []string, command func(string) string) 
 	}
 	for _, event := range events {
 		found := false
+		expected := command(event)
 		for _, group := range settings.Hooks[event] {
 			for _, hook := range group.Hooks {
-				if hook.Type == "command" && hook.Command == command(event) {
+				if hook.Type == "command" && (hook.Command == expected || (optionalSuffix != "" && hook.Command == expected+optionalSuffix)) {
 					found = true
 				}
 			}
@@ -331,7 +332,7 @@ func hooksRegistered(path string, events []string, command func(string) string) 
 
 func codexHooksRegistered(path, binary string) (bool, error) {
 	command := func(event string) string { return binary + " --provider codex --event " + event }
-	ok, err := hooksRegistered(path, []string{"SessionStart", "Stop"}, command)
+	ok, err := hooksRegistered(path, []string{"SessionStart", "Stop"}, command, "")
 	if err != nil || !ok {
 		return ok, err
 	}
