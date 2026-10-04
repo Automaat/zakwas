@@ -32,7 +32,7 @@ func TestKlaudiushHooksConverge(t *testing.T) {
 	codexPath := filepath.Join(home, "custom", "codex-hooks.json")
 	pluginPath := filepath.Join(home, "custom", "klaudiush.ts")
 	writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = true\n[providers.codex]\nenabled = true\nexperimental = true\nhooks_config_path = \""+codexPath+"\"\n[providers.opencode]\nenabled = true\nplugin_path = \""+pluginPath+"\"\n")
-	writeHookTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUseFailure"}]}]}}`)
+	writeHookTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse --trace"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUseFailure"}]}]}}`)
 	fullCodex := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event SessionStart"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event PreToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event Stop"}]}]}}`
 	writeHookTestFile(t, codexPath, fullCodex)
 	writeHookTestFile(t, pluginPath, `const BINARY = "`+binary+`"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`)
@@ -142,7 +142,7 @@ func TestKlaudiushHooksMissingConfigPlansInstall(t *testing.T) {
 func TestKlaudiushHooksMalformedSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	writeHookTestFile(t, path, `{broken`)
-	_, err := hooksRegistered(path, []string{"PreToolUse"}, func(string) string { return "klaudiush" })
+	_, err := hooksRegistered(path, []string{"PreToolUse"}, func(string) string { return "klaudiush" }, "")
 	if err == nil {
 		t.Fatal("malformed settings must fail planning")
 	}
@@ -153,7 +153,7 @@ func TestKlaudiushCodexLegacyHookDoesNotConverge(t *testing.T) {
 	writeHookTestFile(t, path, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event SessionStart"}]}],"AfterToolUse":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event AfterToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event Stop"}]}]}}`)
 	ok, err := hooksRegistered(path, []string{"SessionStart", "PreToolUse", "Stop"}, func(event string) string {
 		return "klaudiush --provider codex --event " + event
-	})
+	}, "")
 	if err != nil || ok {
 		t.Fatalf("legacy Codex hooks registered = %v, %v", ok, err)
 	}
