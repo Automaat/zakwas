@@ -121,7 +121,7 @@ func (m *Module) planKlaudiush() (*engine.Change, error) {
 		}
 	}
 	if p := cfg.Providers.Codex; p.enabled(false) && p.Experimental && p.HooksPath != "" {
-		if err := check("codex", p.HooksPath, []string{"SessionStart", "AfterToolUse", "Stop"}, func(event string) string { return binary + " --provider codex --event " + event }); err != nil {
+		if err := check("codex", p.HooksPath, []string{"SessionStart", "PreToolUse", "Stop"}, func(event string) string { return binary + " --provider codex --event " + event }); err != nil {
 			return nil, err
 		}
 	}
@@ -308,6 +308,8 @@ func opencodeHookRegistered(path, binary string) (bool, error) {
 	}
 	source := string(data)
 	return strings.Contains(source, string(literal)) &&
-		strings.Contains(source, `"tool.execute.before":`) &&
-		strings.Contains(source, `case "session.idle":`), nil
+		((strings.Contains(source, `"tool.execute.before":`) &&
+			strings.Contains(source, `case "session.idle":`)) ||
+			(strings.Contains(source, `ctx.tool.hook("execute.before",`) &&
+				strings.Contains(source, `case "session.execution.succeeded":`))), nil
 }

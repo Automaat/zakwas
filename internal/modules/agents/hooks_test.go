@@ -33,9 +33,9 @@ func TestKlaudiushHooksConverge(t *testing.T) {
 	pluginPath := filepath.Join(home, "custom", "klaudiush.ts")
 	writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = true\n[providers.codex]\nenabled = true\nexperimental = true\nhooks_config_path = \""+codexPath+"\"\n[providers.opencode]\nenabled = true\nplugin_path = \""+pluginPath+"\"\n")
 	writeHookTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}]}}`)
-	fullCodex := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event SessionStart"}]}],"AfterToolUse":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event AfterToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event Stop"}]}]}}`
+	fullCodex := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event SessionStart"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event PreToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event Stop"}]}]}}`
 	writeHookTestFile(t, codexPath, fullCodex)
-	writeHookTestFile(t, pluginPath, `const binary = "`+binary+`"; "tool.execute.before": async () => {}; case "session.idle":`)
+	writeHookTestFile(t, pluginPath, `const BINARY = "`+binary+`"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`)
 	installer := &installingHooksRunner{Fake: runnertest.New().OnOK("klaudiush init --install-hooks --global", ""), install: func() error { return nil }}
 	m := &Module{Agents: config.Agents{Hooks: &config.AgentHooks{Klaudiush: true}}, Paths: config.Paths{Home: home}, Runner: installer, klaudiushPath: binary}
 	changes, err := m.Plan(context.Background())
@@ -102,6 +102,42 @@ func TestKlaudiushHooksMalformedSettings(t *testing.T) {
 	_, err := hooksRegistered(path, []string{"PreToolUse"}, func(string) string { return "klaudiush" })
 	if err == nil {
 		t.Fatal("malformed settings must fail planning")
+	}
+}
+
+func TestKlaudiushCodexLegacyHookDoesNotConverge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	writeHookTestFile(t, path, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event SessionStart"}]}],"AfterToolUse":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event AfterToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event Stop"}]}]}}`)
+	ok, err := hooksRegistered(path, []string{"SessionStart", "PreToolUse", "Stop"}, func(event string) string {
+		return "klaudiush --provider codex --event " + event
+	})
+	if err != nil || ok {
+		t.Fatalf("legacy Codex hooks registered = %v, %v", ok, err)
+	}
+}
+
+func TestKlaudiushOpencodeHookVersions(t *testing.T) {
+	binary := "/usr/local/bin/klaudiush"
+	tests := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{"v1", `const BINARY = "` + binary + `"; "tool.execute.before": async () => {}; case "session.idle":`, true},
+		{"v2", `const BINARY = "` + binary + `"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`, true},
+		{"missing before", `const BINARY = "` + binary + `"; case "session.execution.succeeded":`, false},
+		{"missing idle", `const BINARY = "` + binary + `"; ctx.tool.hook("execute.before", () => {});`, false},
+		{"mixed versions", `const BINARY = "` + binary + `"; "tool.execute.before": async () => {}; case "session.execution.succeeded":`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "klaudiush.ts")
+			writeHookTestFile(t, path, tt.source)
+			got, err := opencodeHookRegistered(path, binary)
+			if err != nil || got != tt.want {
+				t.Fatalf("OpenCode hooks registered = %v, %v; want %v", got, err, tt.want)
+			}
+		})
 	}
 }
 
