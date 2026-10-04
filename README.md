@@ -10,7 +10,7 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: GUI apps and formulae from a `Brewfile` (`brew bundle`, optional zap cleanup)
 - **mise**: CLI tools pinned in a global mise config
-- **agents**: coding-agent plugins and marketplaces (Claude Code and Codex; skills for opencode), plus one global instructions file linked into each agent
+- **agents**: coding-agent plugins and marketplaces (Claude Code and Codex; skills for opencode), one global instructions file, and shared command hooks
 - **defaults**: macOS preferences (`defaults write`, restarts Dock/Finder when needed)
 - **system**: Touch ID for sudo, directories, SSH key
 - **commands**: guarded one-off steps (`run` only while `check` fails)
@@ -132,8 +132,12 @@ mise:
   prune: true                     # remove versions no mise config references
 
 agents:
-  providers: [claude, codex]      # add opencode to link the plugins' skills into it
-  instructions: dotfiles/AGENTS.md  # linked to ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md
+  providers: [claude, codex, opencode]
+  instructions: dotfiles/AGENTS.md
+  hooks:
+    commands:
+      - {event: beforeTool, command: /usr/local/bin/check-tool}
+    # klaudiush: true                # register enabled klaudiush providers
   marketplaces:
     claude-plugins-official: anthropics/claude-plugins-official
   plugins:

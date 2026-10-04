@@ -21,6 +21,13 @@ mise:
   config: dotfiles/mise/config.toml
   prune: true
 
+# agents:
+#   providers: [claude, codex, opencode]
+#   hooks:
+#     commands:
+#       - {event: beforeTool, command: /path/to/check-tool}
+#     # klaudiush: true  # install klaudiush and its config first
+
 system:
   sudoTouchID: true
   dirs:

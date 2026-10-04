@@ -25,6 +25,7 @@ type Module struct {
 	Runner          runner.Runner
 	ClaudeConfigDir string
 	CodexHome       string
+	klaudiushPath   string
 }
 
 func (m *Module) Name() string { return "agents" }
@@ -114,7 +115,15 @@ func (m *Module) desired(provider string) desired {
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	instructions, failed, err := m.planInstructions()
 	errs := []error{err}
+	commandHooks, hookFailed, hookErr := m.planCommandHooks()
+	errs = append(errs, hookErr)
 	var changes []engine.Change
+	var klaudiushChange *engine.Change
+	var klaudiushErr error
+	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush {
+		klaudiushChange, klaudiushErr = m.planKlaudiush()
+		errs = append(errs, klaudiushErr)
+	}
 	backends := m.backends()
 	for _, p := range config.Providers {
 		if err := failed[p]; err != nil {
@@ -122,8 +131,14 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			delete(instructions, p)
 			continue
 		}
+		if err := hookFailed[p]; err != nil {
+			errs = append(errs, err)
+			delete(instructions, p)
+			continue
+		}
 		changes = append(changes, instructions[p]...)
 		delete(instructions, p)
+		changes = append(changes, commandHooks[p]...)
 		b, ok := backends[p]
 		if !ok {
 			continue
@@ -144,6 +159,12 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	}
 	for _, p := range slices.Sorted(maps.Keys(instructions)) {
 		changes = append(changes, instructions[p]...)
+	}
+	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush && klaudiushChange == nil && len(changes) > 0 && klaudiushErr == nil {
+		klaudiushChange = m.klaudiushFinalizeChange()
+	}
+	if klaudiushChange != nil {
+		changes = append(changes, *klaudiushChange)
 	}
 	return changes, errors.Join(errs...)
 }

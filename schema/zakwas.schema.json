@@ -491,6 +491,73 @@
             "null"
           ]
         },
+        "hooks": {
+          "properties": {
+            "klaudiush": {
+              "description": "Register klaudiush global hooks for its enabled providers. Zakwas checks registration without running klaudiush during plan and runs 'klaudiush init --install-hooks --global' during apply when needed. Default false.",
+              "default": false,
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "commands": {
+              "items": {
+                "properties": {
+                  "event": {
+                    "type": "string",
+                    "enum": [
+                      "beforeTool",
+                      "afterTool",
+                      "sessionStart",
+                      "stop"
+                    ],
+                    "description": "Shared lifecycle event: beforeTool, afterTool, sessionStart, or stop. Zakwas maps it to each provider's native event."
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Shell command to run. Use an absolute executable path when the agent may have a different PATH; the command receives provider-specific event JSON on stdin."
+                  },
+                  "providers": {
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "claude",
+                        "codex",
+                        "opencode"
+                      ]
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "description": "Providers for this hook; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins.",
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "event",
+                  "command"
+                ]
+              },
+              "description": "Command hooks declared once for the managed agents. Each command receives provider-specific event JSON on stdin; outputs and blocking behavior remain provider-specific.",
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "description": "Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "opencode": {
           "properties": {
             "skillsDir": {

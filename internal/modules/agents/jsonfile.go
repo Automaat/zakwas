@@ -86,6 +86,16 @@ func (o *object) set(key string, v any) error {
 	return nil
 }
 
+func (o *object) delete(key string) {
+	delete(o.values, key)
+	for i, name := range o.keys {
+		if name == key {
+			o.keys = append(o.keys[:i], o.keys[i+1:]...)
+			return
+		}
+	}
+}
+
 // marshal skips json.Marshal's HTML escaping, which would rewrite "&&" in
 // untouched fields such as hook commands.
 func marshal(v any) ([]byte, error) {

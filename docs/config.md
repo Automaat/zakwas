@@ -260,6 +260,8 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `upgrade` | bool | no | `false` | Update installed plugins to the version their marketplace offers on `apply`. |
 | `prune` | bool | no | `false` | Remove undeclared user-scope plugins and marketplaces of the managed providers. |
 | `instructions` | string | no | | Global instructions file in the repo, relative to the directory holding `zakwas.yaml` (or absolute), linked to each managed provider's global instructions. See below. |
+| `hooks.commands` | list | no | | Shared command hooks, each with `event`, `command`, and optional `providers`. See below. |
+| `hooks.klaudiush` | bool | no | `false` | Register klaudiush's enabled providers. See below. |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 
 A marketplace `source` is a GitHub `owner/repo` or a git URL (either optionally with `#ref`), or a local path starting with `./`, `../`, `~/` or `/` (relative paths resolve from the directory holding `zakwas.yaml`). A marketplace targets `agents.providers` unless it lists its own `providers`; a plugin targets its marketplace's providers unless it lists its own, which must be a subset.
@@ -287,6 +289,11 @@ For opencode, which has no plugin system, zakwas links each skill of every decla
 agents:
   providers: [claude, codex]
   instructions: dotfiles/AGENTS.md
+  hooks:
+    commands:
+      - {event: beforeTool, command: /usr/local/bin/check-tool}
+      - {event: stop, command: /usr/local/bin/record-stop, providers: [claude, codex]}
+    klaudiush: true
   upgrade: true
   prune: true
   marketplaces:
@@ -297,6 +304,10 @@ agents:
     - review@team
     - {id: lint@team, providers: [codex]}
 ```
+
+`hooks.commands` declares each command once. `event` is `beforeTool`, `afterTool`, `sessionStart`, or `stop`; `providers` defaults to `agents.providers`, with Codex opt-in as for plugins. Zakwas registers the command in Claude Code's `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Codex's `${CODEX_HOME:-~/.codex}/hooks.json`, and a generated OpenCode plugin at `~/.config/opencode/plugins/zakwas-hooks.js` (OpenCode 1.18.29+ or 2.x). It maps the events to `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` for Claude and Codex. In OpenCode, tool events use `tool.execute.before` and `tool.execute.after` on 1.x or `execute.before` and `execute.after` on 2.x; `sessionStart` observes `session.created`, and `stop` observes `session.idle` on 1.x or `session.execution.succeeded` on 2.x. Zakwas preserves unrelated JSON settings and hook groups, records its registrations in `~/.local/state/zakwas/command-hooks.json`, and removes only those registrations when they leave the config. A generated OpenCode plugin edited by hand is left in place when removed from the config. Codex may ask you to trust newly registered hooks through `/hooks` before running them. Commands receive provider-specific event JSON on stdin; a shared script must handle the payload and output rules of each provider. OpenCode blocks a tool when a before-tool command exits nonzero or returns a JSON `decision: block` / `hookSpecificOutput.permissionDecision: deny`; its after-tool and session hooks do not use command output. Don't also manage these agent settings or the generated plugin with `files`, `links`, or `templates`.
+
+`agents.hooks.klaudiush: true` registers global klaudiush hooks for the providers enabled in `${XDG_CONFIG_HOME:-~/.config}/klaudiush/config.toml`. Install klaudiush and place its config with `files` or `templates` first. Zakwas checks hook targets during `plan` and runs `klaudiush init --install-hooks --global` during `apply` when registration is missing or the binary, config, or hook files changed. It records a registration fingerprint in `~/.local/state/zakwas/klaudiush.json`. Klaudiush keeps unrelated hooks. Codex's `hooks_config_path` and opencode's `plugin_path` come from the klaudiush config and can point outside default agent directories. Removing this option leaves existing registrations in place.
 
 ## system
 

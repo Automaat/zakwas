@@ -1,0 +1,267 @@
+package agents
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/runner/runnertest"
+)
+
+func TestCommandHooksConvergeAndRemove(t *testing.T) {
+	home := t.TempDir()
+	claudePath := filepath.Join(home, ".claude", "settings.json")
+	writeHookTestFile(t, claudePath, `{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"personal-hook"}]}]}}`)
+	m := &Module{
+		Agents: config.Agents{
+			Providers: []string{"claude", "codex", "opencode"},
+			Hooks: &config.AgentHooks{Commands: []config.AgentCommandHook{
+				{Event: "beforeTool", Command: "/bin/check-tool"},
+				{Event: "stop", Command: "/bin/record-stop"},
+			}},
+		},
+		Paths: config.Paths{Home: home}, Runner: runnertest.New(),
+	}
+	applyAgentChanges := func() {
+		t.Helper()
+		changes, err := m.Plan(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(changes) != 3 {
+			t.Fatalf("changes = %d, want 3: %v", len(changes), changes)
+		}
+		for _, change := range changes {
+			if err := change.Apply(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	applyAgentChanges()
+	for _, path := range []string{claudePath, filepath.Join(home, ".codex", "hooks.json")} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings struct {
+			Hooks map[string][]struct {
+				Hooks []struct{ Command string } `json:"hooks"`
+			} `json:"hooks"`
+		}
+		if err := json.Unmarshal(data, &settings); err != nil {
+			t.Fatal(err)
+		}
+		if len(settings.Hooks["PreToolUse"]) != 1 || settings.Hooks["PreToolUse"][0].Hooks[0].Command != "/bin/check-tool" {
+			t.Fatalf("before tool hooks in %s: %s", path, data)
+		}
+		if len(settings.Hooks["Stop"]) == 0 {
+			t.Fatalf("missing stop hook in %s", path)
+		}
+	}
+	pluginPath := m.opencodeCommandHooksPath()
+	plugin, err := os.ReadFile(pluginPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(plugin), `ctx.tool.hook("execute.before"`) ||
+		!strings.Contains(string(plugin), `"tool.execute.before"`) ||
+		!strings.Contains(string(plugin), `session.execution.succeeded`) ||
+		!strings.Contains(string(plugin), `session.idle`) {
+		t.Fatalf("OpenCode plugin missing registrations: %s", plugin)
+	}
+	changes, err := m.Plan(context.Background())
+	if err != nil || len(changes) != 0 {
+		t.Fatalf("second plan = %v, %v", changes, err)
+	}
+	m.Agents.Hooks = nil
+	applyAgentChanges()
+	changes, err = m.Plan(context.Background())
+	if err != nil || len(changes) != 0 {
+		t.Fatalf("removal plan = %v, %v", changes, err)
+	}
+	if _, err := os.Stat(pluginPath); !os.IsNotExist(err) {
+		t.Fatalf("OpenCode plugin still exists: %v", err)
+	}
+	if _, err := os.Stat(m.commandHooksStatePath()); !os.IsNotExist(err) {
+		t.Fatalf("command hooks state still exists: %v", err)
+	}
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `personal-hook`) || strings.Contains(string(data), `/bin/check-tool`) || !strings.Contains(string(data), `"theme": "dark"`) {
+		t.Fatalf("Claude unrelated settings changed: %s", data)
+	}
+}
+
+func TestCommandHooksLeaveManualRegistration(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	writeHookTestFile(t, path, `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"/bin/check-tool","timeout":30}]}]}}`)
+	m := &Module{
+		Agents: config.Agents{Providers: []string{"claude"}, Hooks: &config.AgentHooks{Commands: []config.AgentCommandHook{{Event: "beforeTool", Command: "/bin/check-tool"}}}},
+		Paths:  config.Paths{Home: home}, Runner: runnertest.New(),
+	}
+	changes, err := m.Plan(context.Background())
+	if err != nil || len(changes) != 0 {
+		t.Fatalf("manual hook plan = %v, %v", changes, err)
+	}
+	m.Agents.Hooks = nil
+	changes, err = m.Plan(context.Background())
+	if err != nil || len(changes) != 0 {
+		t.Fatalf("manual hook removal plan = %v, %v", changes, err)
+	}
+}
+
+func TestCommandHooksFollowSettingsSymlink(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "settings-target.json")
+	writeHookTestFile(t, target, `{"theme":"dark"}`)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, settings); err != nil {
+		t.Fatal(err)
+	}
+	m := &Module{Paths: config.Paths{Home: home}, Runner: runnertest.New()}
+	want := []commandHookRegistration{{Event: "beforeTool", Command: "/bin/check"}}
+	change, err := m.planJSONCommandHooks(config.ProviderClaude, want, nil)
+	if err != nil || change == nil {
+		t.Fatalf("plan = %v, %v", change, err)
+	}
+	if err := change.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(settings); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings symlink = %v, %v", info, err)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || !strings.Contains(string(content), "/bin/check") {
+		t.Fatalf("target content = %s, %v", content, err)
+	}
+}
+
+func TestOpencodeCommandHooksXDGPath(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	m := &Module{Paths: config.Paths{Home: os.Getenv("HOME")}}
+	want := filepath.Join(xdg, "opencode", "plugins", "zakwas-hooks.js")
+	if got := m.opencodeCommandHooksPath(); got != want {
+		t.Fatalf("OpenCode plugin path = %s, want %s", got, want)
+	}
+	m.Paths.Home = t.TempDir()
+	want = filepath.Join(m.Paths.Home, ".config", "opencode", "plugins", "zakwas-hooks.js")
+	if got := m.opencodeCommandHooksPath(); got != want {
+		t.Fatalf("isolated OpenCode plugin path = %s, want %s", got, want)
+	}
+}
+
+func TestOpencodeCommandHooksRecoverPendingWrite(t *testing.T) {
+	home := t.TempDir()
+	m := &Module{Paths: config.Paths{Home: home}, Runner: runnertest.New()}
+	want := []commandHookRegistration{{Event: "beforeTool", Command: "/bin/check"}}
+	path := m.opencodeCommandHooksPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	change, err := m.planOpencodeCommandHooks(want)
+	if err != nil || change == nil {
+		t.Fatalf("plan = %v, %v", change, err)
+	}
+	pluginDir := filepath.Dir(path)
+	if err := os.Chmod(pluginDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chmod(pluginDir, 0o755); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := change.Apply(context.Background()); err == nil {
+		t.Fatal("plugin write should fail")
+	}
+	st, err := m.loadCommandHooksState()
+	if err != nil || !slices.Equal(st.Pending, want) {
+		t.Fatalf("pending hooks = %v, %v", st.Pending, err)
+	}
+	if err := os.Chmod(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	change, err = m.planOpencodeCommandHooks(want)
+	if err != nil || change == nil {
+		t.Fatalf("retry plan = %v, %v", change, err)
+	}
+	if err := change.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, err = m.loadCommandHooksState()
+	if err != nil || len(st.Pending) != 0 || !slices.Equal(st.Providers[config.ProviderOpencode], want) {
+		t.Fatalf("recovered hooks = %v, %v", st, err)
+	}
+}
+
+func TestOpencodeCommandHookBridge(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Skip("bun is not installed")
+	}
+	if err := exec.Command(bun, "--version").Run(); err != nil {
+		t.Skip("bun is not configured")
+	}
+	dir := t.TempDir()
+	output := filepath.Join(dir, "event.json")
+	content, err := renderOpencodeCommandHooks([]commandHookRegistration{{Event: "beforeTool", Command: "/bin/cat > " + output}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plugin := filepath.Join(dir, "zakwas-hooks.mjs")
+	writeHookTestFile(t, plugin, string(content))
+	script := `import plugin from "./zakwas-hooks.mjs";
+const path = ` + string(mustJSON(t, output)) + `;
+const v1 = await plugin.server();
+await v1["tool.execute.before"]({ tool: "bash" }, { args: {} });
+const first = JSON.parse(await Bun.file(path).text());
+if (first.input.tool !== "bash") throw new Error("V1 hook did not receive input");
+const callbacks = {};
+await plugin.setup({ tool: { hook: async (name, callback) => { callbacks[name] = callback; } } });
+await callbacks["execute.before"]({ tool: "read" });
+const second = JSON.parse(await Bun.file(path).text());
+if (second.tool !== "read") throw new Error("V2 hook did not receive input");
+const active = new Set();
+const ctx = { tool: { hook: async (_, callback) => {
+  active.add(callback);
+  return { dispose: () => active.delete(callback) };
+} } };
+const firstCleanup = await plugin.setup(ctx);
+if (active.size !== 1) throw new Error("first setup missing registration");
+firstCleanup();
+if (active.size !== 0) throw new Error("first cleanup left a registration");
+const secondCleanup = await plugin.setup(ctx);
+if (active.size !== 1) throw new Error("reload duplicated registrations");
+secondCleanup();
+if (active.size !== 0) throw new Error("second cleanup left a registration");
+`
+	scriptPath := filepath.Join(dir, "check.mjs")
+	writeHookTestFile(t, scriptPath, script)
+	cmd := exec.Command(bun, "run", scriptPath)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated OpenCode plugin failed: %v\n%s", err, output)
+	}
+}
+
+func mustJSON(t *testing.T, value string) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
