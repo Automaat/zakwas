@@ -32,7 +32,7 @@ func TestKlaudiushHooksConverge(t *testing.T) {
 	codexPath := filepath.Join(home, "custom", "codex-hooks.json")
 	pluginPath := filepath.Join(home, "custom", "klaudiush.ts")
 	writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = true\n[providers.codex]\nenabled = true\nexperimental = true\nhooks_config_path = \""+codexPath+"\"\n[providers.opencode]\nenabled = true\nplugin_path = \""+pluginPath+"\"\n")
-	writeHookTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}]}}`)
+	writeHookTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUseFailure"}]}]}}`)
 	fullCodex := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event SessionStart"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event PreToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event Stop"}]}]}}`
 	writeHookTestFile(t, codexPath, fullCodex)
 	writeHookTestFile(t, pluginPath, `const BINARY = "`+binary+`"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`)
@@ -113,6 +113,76 @@ func TestKlaudiushCodexLegacyHookDoesNotConverge(t *testing.T) {
 	})
 	if err != nil || ok {
 		t.Fatalf("legacy Codex hooks registered = %v, %v", ok, err)
+	}
+}
+
+func TestKlaudiushCodexPreToolEnforcement(t *testing.T) {
+	for _, tt := range []struct {
+		name, matcher, async string
+		want                 bool
+	}{
+		{"all tools", "", "false", true},
+		{"wildcard", " * ", "false", true},
+		{"specific tool", "Bash", "false", false},
+		{"asynchronous", "", "true", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "hooks.json")
+			writeHookTestFile(t, path, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event SessionStart"}]}],"Stop":[{"hooks":[{"type":"command","command":"klaudiush --provider codex --event Stop"}]}],"PreToolUse":[{"matcher":"`+tt.matcher+`","hooks":[{"type":"command","command":"klaudiush --provider codex --event PreToolUse","async":`+tt.async+`}]}]}}`)
+			got, err := codexHooksRegistered(path, "klaudiush")
+			if err != nil || got != tt.want {
+				t.Fatalf("Codex hooks registered = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestKlaudiushLegacyConfigPath(t *testing.T) {
+	home := t.TempDir()
+	m := &Module{Paths: config.Paths{Home: home}}
+	legacy := filepath.Join(home, ".klaudiush", "config.toml")
+	current := filepath.Join(home, ".config", "klaudiush", "config.toml")
+	writeHookTestFile(t, legacy, "[providers.claude]\n")
+	if got := m.klaudiushConfigPath(); got != legacy {
+		t.Fatalf("config path = %s, want %s", got, legacy)
+	}
+	writeHookTestFile(t, current, "[providers.claude]\n")
+	if got := m.klaudiushConfigPath(); got != current {
+		t.Fatalf("config path = %s, want %s", got, current)
+	}
+}
+
+func TestKlaudiushGeminiEvidenceEvents(t *testing.T) {
+	for _, tt := range []struct {
+		name, filter string
+		want         bool
+	}{
+		{"default filter", "", true},
+		{"explicit filter", "filter_tools = true\n", true},
+		{"disabled filter", "filter_tools = false\n", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			binary := filepath.Join(home, "bin", "klaudiush")
+			settings := filepath.Join(home, "gemini.json")
+			writeHookTestFile(t, binary, "binary")
+			writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = false\n[providers.gemini]\nenabled = true\nsettings_path = \""+settings+"\"\n[evidence.tool_phase]\nenabled = true\n"+tt.filter)
+			events := []string{"BeforeTool", "AfterTool", "AfterAgent", "SessionStart", "SessionEnd", "Notification", "PreCompress"}
+			var groups []string
+			for _, event := range events {
+				groups = append(groups, `"`+event+`": [{"hooks":[{"type":"command","command":"`+binary+` --provider gemini --event `+event+`"}]}]`)
+			}
+			writeHookTestFile(t, settings, `{"hooks":{`+strings.Join(groups, ",")+`}}`)
+			m := &Module{Agents: config.Agents{Hooks: &config.AgentHooks{Klaudiush: true}}, Paths: config.Paths{Home: home}, Runner: runnertest.New(), klaudiushPath: binary}
+			change, err := m.planKlaudiush()
+			if err != nil {
+				t.Fatal(err)
+			}
+			missing := change != nil && strings.Contains(change.Detail, "gemini")
+			if missing != tt.want {
+				t.Fatalf("missing Gemini registration = %v, want %v; change = %v", missing, tt.want, change)
+			}
+		})
 	}
 }
 

@@ -24,6 +24,7 @@ type commandHookRegistration struct {
 
 type commandHooksState struct {
 	Providers map[string][]commandHookRegistration `json:"providers"`
+	Pending   []commandHookRegistration            `json:"opencodePending,omitempty"`
 }
 
 // CommandHooksStatePath is the ownership record for command hooks.
@@ -63,13 +64,49 @@ func (m *Module) updateCommandHooksState(provider string, owned []commandHookReg
 	} else {
 		st.Providers[provider] = owned
 	}
-	if len(st.Providers) == 0 {
+	if provider == config.ProviderOpencode {
+		st.Pending = nil
+	}
+	if len(st.Providers) == 0 && len(st.Pending) == 0 {
 		if err := os.Remove(m.commandHooksStatePath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		return nil
 	}
 	return saveState(m.commandHooksStatePath(), st)
+}
+
+func (m *Module) stageOpencodeCommandHooks(current, want []commandHookRegistration) error {
+	path := m.commandHooksStatePath()
+	if err := install.CheckParents(m.Paths, path); err != nil {
+		return err
+	}
+	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink", m.Paths.Pretty(path))
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	st, err := m.loadCommandHooksState()
+	if err != nil {
+		return err
+	}
+	if len(current) == 0 {
+		delete(st.Providers, config.ProviderOpencode)
+	} else {
+		st.Providers[config.ProviderOpencode] = current
+	}
+	st.Pending = want
+	return saveState(m.commandHooksStatePath(), st)
+}
+
+func combinedRegistrations(old, next []commandHookRegistration) []commandHookRegistration {
+	combined := slices.Clone(old)
+	for _, entry := range next {
+		if !slices.Contains(combined, entry) {
+			combined = append(combined, entry)
+		}
+	}
+	return combined
 }
 
 func (m *Module) desiredCommandHooks(provider string) []commandHookRegistration {
@@ -112,7 +149,8 @@ func (m *Module) planCommandHooks() (map[string][]engine.Change, map[string]erro
 	failed := map[string]error{}
 	for _, provider := range config.Providers {
 		want := m.desiredCommandHooks(provider)
-		if len(want) == 0 && len(st.Providers[provider]) == 0 {
+		if len(want) == 0 && len(st.Providers[provider]) == 0 &&
+			(provider != config.ProviderOpencode || len(st.Pending) == 0) {
 			continue
 		}
 		var c *engine.Change
@@ -272,7 +310,7 @@ func (m *Module) planJSONCommandHooks(provider string, want, owned []commandHook
 	if err := install.CheckParents(m.Paths, path); err != nil {
 		return nil, err
 	}
-	if info, err := os.Lstat(path); err == nil {
+	if info, err := os.Stat(path); err == nil {
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("%s is not a regular file", m.Paths.Pretty(path))
 		}
@@ -305,7 +343,7 @@ func (m *Module) planJSONCommandHooks(provider string, want, owned []commandHook
 			if err := install.CheckParents(m.Paths, path); err != nil {
 				return err
 			}
-			if info, err := os.Lstat(path); err == nil {
+			if info, err := os.Stat(path); err == nil {
 				if !info.Mode().IsRegular() || info.Mode().Perm()&0o200 == 0 {
 					return fmt.Errorf("%s is not a writable regular file", m.Paths.Pretty(path))
 				}
@@ -320,26 +358,36 @@ func (m *Module) planJSONCommandHooks(provider string, want, owned []commandHook
 			if err != nil {
 				return err
 			}
-			if err := m.updateCommandHooksState(provider, nextOwned); err != nil {
-				return err
-			}
 			if !changed {
-				return nil
+				return m.updateCommandHooksState(provider, nextOwned)
+			}
+			if err := m.updateCommandHooksState(provider, combinedRegistrations(st.Providers[provider], nextOwned)); err != nil {
+				return err
 			}
 			if !exists {
 				data, err := marshal(o)
 				if err != nil {
 					return err
 				}
-				return install.WriteAtomic(path, append(data, '\n'), 0o600)
+				if err := install.WriteAtomic(path, append(data, '\n'), 0o600); err != nil {
+					return err
+				}
+			} else if err := writeObject(path, o); err != nil {
+				return err
 			}
-			return writeObject(path, o)
+			return m.updateCommandHooksState(provider, nextOwned)
 		},
 	}, nil
 }
 
 func (m *Module) opencodeCommandHooksPath() string {
-	return filepath.Join(m.Paths.Home, ".config", "opencode", "plugins", "zakwas-hooks.js")
+	base := filepath.Join(m.Paths.Home, ".config")
+	if m.Paths.Home == os.Getenv("HOME") {
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
+			base = xdg
+		}
+	}
+	return filepath.Join(base, "opencode", "plugins", "zakwas-hooks.js")
 }
 
 func renderOpencodeCommandHooks(hooks []commandHookRegistration) ([]byte, error) {
@@ -430,6 +478,7 @@ func (m *Module) planOpencodeCommandHooks(want []commandHookRegistration) (*engi
 		return nil, err
 	}
 	owned := st.Providers[config.ProviderOpencode]
+	pending := st.Pending
 	if len(want) > 0 && !m.Runner.Installed(config.ProviderOpencode) {
 		if m.desired(config.ProviderOpencode).named {
 			return nil, errors.New("opencode is not installed")
@@ -454,12 +503,16 @@ func (m *Module) planOpencodeCommandHooks(want []commandHookRegistration) (*engi
 	if err != nil {
 		return nil, err
 	}
+	pendingContent, err := renderOpencodeCommandHooks(pending)
+	if err != nil {
+		return nil, err
+	}
 	if len(want) == 0 {
-		if len(owned) == 0 {
+		if len(owned) == 0 && len(pending) == 0 {
 			return nil, nil
 		}
 		detail := "remove shared command hooks"
-		remove := bytes.Equal(have, oldContent)
+		remove := have != nil && ((len(owned) > 0 && bytes.Equal(have, oldContent)) || (len(pending) > 0 && bytes.Equal(have, pendingContent)))
 		if !remove {
 			detail = "modified plugin, forget ownership"
 		}
@@ -477,7 +530,7 @@ func (m *Module) planOpencodeCommandHooks(want []commandHookRegistration) (*engi
 				if err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return err
 				}
-				if info != nil && info.Mode().IsRegular() && bytes.Equal(current, oldContent) {
+				if info != nil && info.Mode().IsRegular() && ((len(owned) > 0 && bytes.Equal(current, oldContent)) || (len(pending) > 0 && bytes.Equal(current, pendingContent))) {
 					if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 						return err
 					}
@@ -491,7 +544,7 @@ func (m *Module) planOpencodeCommandHooks(want []commandHookRegistration) (*engi
 		return nil, err
 	}
 	if bytes.Equal(have, content) {
-		if len(owned) > 0 && !slices.Equal(owned, want) {
+		if len(pending) > 0 || (len(owned) > 0 && !slices.Equal(owned, want)) {
 			return &engine.Change{
 				Action: engine.Update, Target: m.Paths.Pretty(path), Detail: "track shared command hooks",
 				Apply: func(context.Context) error { return m.updateCommandHooksState(config.ProviderOpencode, want) },
@@ -522,18 +575,26 @@ func (m *Module) planOpencodeCommandHooks(want []commandHookRegistration) (*engi
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
-			if exists && !bytes.Equal(current, oldContent) && !bytes.Equal(current, content) {
+			currentOwned := []commandHookRegistration(nil)
+			switch {
+			case exists && len(owned) > 0 && bytes.Equal(current, oldContent):
+				currentOwned = owned
+			case exists && len(pending) > 0 && bytes.Equal(current, pendingContent):
+				currentOwned = pending
+			case exists && !bytes.Equal(current, content):
 				if _, err := install.Backup(path); err != nil {
 					return err
 				}
 			}
-			if err := m.updateCommandHooksState(config.ProviderOpencode, want); err != nil {
+			if err := m.stageOpencodeCommandHooks(currentOwned, want); err != nil {
 				return err
 			}
-			if bytes.Equal(current, content) {
-				return nil
+			if !bytes.Equal(current, content) {
+				if err := install.WriteAtomic(path, content, 0o644); err != nil {
+					return err
+				}
 			}
-			return install.WriteAtomic(path, content, 0o644)
+			return m.updateCommandHooksState(config.ProviderOpencode, want)
 		},
 	}, nil
 }

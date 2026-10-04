@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -115,6 +116,94 @@ func TestCommandHooksLeaveManualRegistration(t *testing.T) {
 	changes, err = m.Plan(context.Background())
 	if err != nil || len(changes) != 0 {
 		t.Fatalf("manual hook removal plan = %v, %v", changes, err)
+	}
+}
+
+func TestCommandHooksFollowSettingsSymlink(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "settings-target.json")
+	writeHookTestFile(t, target, `{"theme":"dark"}`)
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, settings); err != nil {
+		t.Fatal(err)
+	}
+	m := &Module{Paths: config.Paths{Home: home}, Runner: runnertest.New()}
+	want := []commandHookRegistration{{Event: "beforeTool", Command: "/bin/check"}}
+	change, err := m.planJSONCommandHooks(config.ProviderClaude, want, nil)
+	if err != nil || change == nil {
+		t.Fatalf("plan = %v, %v", change, err)
+	}
+	if err := change.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(settings); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings symlink = %v, %v", info, err)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || !strings.Contains(string(content), "/bin/check") {
+		t.Fatalf("target content = %s, %v", content, err)
+	}
+}
+
+func TestOpencodeCommandHooksXDGPath(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	m := &Module{Paths: config.Paths{Home: os.Getenv("HOME")}}
+	want := filepath.Join(xdg, "opencode", "plugins", "zakwas-hooks.js")
+	if got := m.opencodeCommandHooksPath(); got != want {
+		t.Fatalf("OpenCode plugin path = %s, want %s", got, want)
+	}
+	m.Paths.Home = t.TempDir()
+	want = filepath.Join(m.Paths.Home, ".config", "opencode", "plugins", "zakwas-hooks.js")
+	if got := m.opencodeCommandHooksPath(); got != want {
+		t.Fatalf("isolated OpenCode plugin path = %s, want %s", got, want)
+	}
+}
+
+func TestOpencodeCommandHooksRecoverPendingWrite(t *testing.T) {
+	home := t.TempDir()
+	m := &Module{Paths: config.Paths{Home: home}, Runner: runnertest.New()}
+	want := []commandHookRegistration{{Event: "beforeTool", Command: "/bin/check"}}
+	path := m.opencodeCommandHooksPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	change, err := m.planOpencodeCommandHooks(want)
+	if err != nil || change == nil {
+		t.Fatalf("plan = %v, %v", change, err)
+	}
+	pluginDir := filepath.Dir(path)
+	if err := os.Chmod(pluginDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chmod(pluginDir, 0o755); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := change.Apply(context.Background()); err == nil {
+		t.Fatal("plugin write should fail")
+	}
+	st, err := m.loadCommandHooksState()
+	if err != nil || !slices.Equal(st.Pending, want) {
+		t.Fatalf("pending hooks = %v, %v", st.Pending, err)
+	}
+	if err := os.Chmod(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	change, err = m.planOpencodeCommandHooks(want)
+	if err != nil || change == nil {
+		t.Fatalf("retry plan = %v, %v", change, err)
+	}
+	if err := change.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, err = m.loadCommandHooksState()
+	if err != nil || len(st.Pending) != 0 || !slices.Equal(st.Providers[config.ProviderOpencode], want) {
+		t.Fatalf("recovered hooks = %v, %v", st, err)
 	}
 }
 

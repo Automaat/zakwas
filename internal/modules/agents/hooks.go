@@ -48,6 +48,12 @@ type klaudiushConfig struct {
 		Gemini   klaudiushProvider `toml:"gemini"`
 		Opencode klaudiushProvider `toml:"opencode"`
 	} `toml:"providers"`
+	Evidence struct {
+		ToolPhase struct {
+			Enabled     bool  `toml:"enabled"`
+			FilterTools *bool `toml:"filter_tools"`
+		} `toml:"tool_phase"`
+	} `toml:"evidence"`
 }
 
 func (m *Module) klaudiushConfigPath() string {
@@ -57,7 +63,15 @@ func (m *Module) klaudiushConfigPath() string {
 			base = xdg
 		}
 	}
-	return filepath.Join(base, "klaudiush", "config.toml")
+	xdgPath := filepath.Join(base, "klaudiush", "config.toml")
+	if _, err := os.Stat(xdgPath); err == nil {
+		return xdgPath
+	}
+	legacyPath := filepath.Join(m.Paths.Home, ".klaudiush", "config.toml")
+	if _, err := os.Stat(legacyPath); err == nil {
+		return legacyPath
+	}
+	return xdgPath
 }
 
 func (m *Module) klaudiushBinary() (string, error) {
@@ -116,17 +130,25 @@ func (m *Module) planKlaudiush() (*engine.Change, error) {
 	}
 	if cfg.Providers.Claude.enabled(true) {
 		path := filepath.Join(m.Paths.Home, ".claude", "settings.json")
-		if err := check("claude", path, []string{"PreToolUse", "PostToolUse"}, func(event string) string { return binary + " --hook-type " + event }); err != nil {
+		if err := check("claude", path, []string{"PreToolUse", "PostToolUse", "PostToolUseFailure"}, func(event string) string { return binary + " --hook-type " + event }); err != nil {
 			return nil, err
 		}
 	}
 	if p := cfg.Providers.Codex; p.enabled(false) && p.Experimental && p.HooksPath != "" {
-		if err := check("codex", p.HooksPath, []string{"SessionStart", "PreToolUse", "Stop"}, func(event string) string { return binary + " --provider codex --event " + event }); err != nil {
-			return nil, err
+		ok, err := codexHooksRegistered(m.hookPath(p.HooksPath), binary)
+		if err != nil {
+			return nil, fmt.Errorf("klaudiush codex hooks: %w", err)
+		}
+		if !ok {
+			missing = append(missing, "codex")
 		}
 	}
 	if p := cfg.Providers.Gemini; p.enabled(false) && p.SettingsPath != "" {
-		if err := check("gemini", p.SettingsPath, []string{"BeforeTool", "AfterTool", "SessionStart", "SessionEnd", "Notification", "PreCompress"}, func(event string) string { return binary + " --provider gemini --event " + event }); err != nil {
+		events := []string{"BeforeTool", "AfterTool", "AfterAgent", "SessionStart", "SessionEnd", "Notification", "PreCompress"}
+		if cfg.Evidence.ToolPhase.Enabled && (cfg.Evidence.ToolPhase.FilterTools == nil || *cfg.Evidence.ToolPhase.FilterTools) {
+			events = append(events, "BeforeToolSelection")
+		}
+		if err := check("gemini", p.SettingsPath, events, func(event string) string { return binary + " --provider gemini --event " + event }); err != nil {
 			return nil, err
 		}
 	}
@@ -292,6 +314,43 @@ func hooksRegistered(path string, events []string, command func(string) string) 
 		}
 	}
 	return true, nil
+}
+
+func codexHooksRegistered(path, binary string) (bool, error) {
+	command := func(event string) string { return binary + " --provider codex --event " + event }
+	ok, err := hooksRegistered(path, []string{"SessionStart", "Stop"}, command)
+	if err != nil || !ok {
+		return ok, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	var settings struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+				Async   bool   `json:"async"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return false, fmt.Errorf("%s: %w", path, err)
+	}
+	for _, group := range settings.Hooks["PreToolUse"] {
+		matcher := strings.TrimSpace(group.Matcher)
+		if matcher != "" && matcher != "*" {
+			continue
+		}
+		for _, hook := range group.Hooks {
+			if hook.Type == "command" && hook.Command == command("PreToolUse") && !hook.Async {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func opencodeHookRegistered(path, binary string) (bool, error) {
