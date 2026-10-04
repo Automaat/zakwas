@@ -24,7 +24,7 @@ jobs:
       - uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
         with:
           # renovate: datasource=github-releases depName=jdx/mise
-          version: 2026.10.0
+          version: 2026.10.1
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -91,7 +91,7 @@ jobs:
       - uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
         with:
           # renovate: datasource=github-releases depName=jdx/mise
-          version: 2026.10.0
+          version: 2026.10.1
 
       - name: build
         run: go build -o "$RUNNER_TEMP/zakwas" ./cmd/zakwas
