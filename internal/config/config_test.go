@@ -181,10 +181,11 @@ defaults:
 		{"permission provider not managed", "agents: {providers: [claude], permissions: {allow: [{command: ls, providers: [codex]}]}}", []string{`agents.permissions.allow[0].providers: provider "codex" is not in agents.providers`}},
 		{"empty permission providers", "agents: {permissions: {allow: [{command: ls, providers: []}]}}", []string{"agents.permissions.allow[0].providers: list at least one provider"}},
 		{"duplicate permission", "agents: {permissions: {allow: [git status, 'git  status']}}", []string{`agents.permissions.allow[1]: "git status" duplicates agents.permissions.allow[0] for claude`}},
-		{"permission in two lists", "agents: {permissions: {allow: [git push], deny: [{command: git push, providers: [codex]}]}}", []string{`agents.permissions.deny[0]: "git push" is also listed in agents.permissions.allow[0] for codex; give each command one decision per provider`}},
+		{"permission in two lists", "agents: {providers: [claude, codex], permissions: {allow: [git push], deny: [{command: git push, providers: [codex]}]}}", []string{`agents.permissions.deny[0]: "git push" is also listed in agents.permissions.allow[0] for codex; give each command one decision per provider`}},
 		{"unknown permission field", "agents: {permissions: {allow: [{command: ls, decision: allow}]}}", []string{"field decision not found"}},
 		{"unknown permission list", "agents: {permissions: {ask: [ls]}}", []string{"field ask not found"}},
 		{"multi-line justification", `agents: {permissions: {deny: [{command: rm, justification: "no\nway"}]}}`, []string{"agents.permissions.deny[0].justification: write it on one line"}},
+		{"blank justification", `agents: {providers: [codex], permissions: {deny: [{command: rm, justification: "  "}]}}`, []string{"agents.permissions.deny[0].justification: is blank"}},
 		{"reports all errors", `
 links: [{src: a}]
 commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
@@ -241,6 +242,7 @@ agents:
     review: [git push, {command: peekaboo see, providers: [claude]}]
     deny: [{command: git push --force, justification: 'use "git push --force-with-lease"'}, npm run lint:fix]`},
 		{"empty permissions", "agents: {permissions: {}}"},
+		{"codex decision differs while codex is not named", "agents: {permissions: {allow: [git push], deny: [{command: git push, providers: [codex]}]}}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
 	}
 	for _, tt := range tests {

@@ -110,19 +110,38 @@ func marshal(v any) ([]byte, error) {
 
 // readObject reads a JSON object file; a missing file is an empty object.
 func readObject(path string) (object, bool, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return object{}, false, nil
-	}
-	if err != nil {
+	data, err := readIfExists(path)
+	if err != nil || data == nil {
 		return object{}, false, err
 	}
+	o, err := parseObject(path, data)
+	return o, err == nil, err
+}
+
+// readIfExists reads path, following symlinks; a missing file is nil.
+func readIfExists(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return data, err
+}
+
+func parseObject(path string, data []byte) (object, error) {
 	var o object
 	if err := json.Unmarshal(data, &o); err != nil {
-		return object{}, false, fmt.Errorf("%s: %w", path, err)
+		return object{}, fmt.Errorf("%s: %w", path, err)
 	}
-	return o, true, nil
+	return o, nil
 }
+
+// errChanged reports that another program wrote the file while zakwas was
+// editing it.
+var errChanged = errors.New("changed while zakwas edited it")
+
+// beforeReplace runs just before zakwas checks a file it edits is
+// unchanged and replaces it; tests use it to write in between.
+var beforeReplace = func(string) {}
 
 // indentObject renders o as a settings file: two-space indent, final
 // newline.
@@ -142,6 +161,13 @@ func indentObject(o object) ([]byte, error) {
 // writeObject replaces path atomically, writing through a symlink (a
 // dotfiles link) rather than over it and keeping the file's mode.
 func writeObject(path string, o object) error {
+	return writeObjectIf(path, o, nil)
+}
+
+// writeObjectIf is writeObject that returns errChanged instead when the
+// file no longer holds read, the bytes o was parsed from, so a change the
+// agent made meanwhile isn't lost. A nil read skips the check.
+func writeObjectIf(path string, o object, read []byte) error {
 	out, err := indentObject(o)
 	if err != nil {
 		return err
@@ -172,5 +198,53 @@ func writeObject(path string, o object) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if read != nil {
+		beforeReplace(path)
+		current, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(current, read) {
+			return errChanged
+		}
+	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// createObject writes o to path only if nothing is there yet: the hard
+// link fails instead of replacing a file the agent created meanwhile, which
+// is reported as errChanged.
+func createObject(path string, o object, perm fs.FileMode) error {
+	out, err := indentObject(o)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".zakwas-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	beforeReplace(path)
+	err = os.Link(tmp.Name(), path)
+	if errors.Is(err, fs.ErrExist) {
+		if info, lerr := os.Lstat(path); lerr == nil && info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink to a missing file", path)
+		}
+		return errChanged
+	}
+	return err
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
 
@@ -340,15 +341,105 @@ prefix_rule(pattern=["café"], decision="forbidden", justification="use \"tea\" 
 	}
 }
 
-func TestRenderCodexRulesRefusesUnprintable(t *testing.T) {
+func TestRenderCodexRulesRefusesWhatCodexRejects(t *testing.T) {
 	for _, p := range []config.Permission{
 		{Decision: config.PermissionAllow, Words: []string{"git\x07"}},
 		{Decision: config.PermissionAllow, Words: []string{"ls"}, Justification: "two\nlines"},
 		{Decision: config.PermissionAllow, Words: []string{"\xff"}},
+		{Decision: config.PermissionDeny, Words: []string{"rm"}, Justification: " "},
 	} {
 		if _, err := renderCodexRules([]config.Permission{p}); err == nil {
 			t.Errorf("rendered %q", p)
 		}
+	}
+}
+
+func TestClaudePermissionsSymlinkedSettingsMove(t *testing.T) {
+	m := permissionsModule(t, []string{config.ProviderClaude}, &config.AgentPermissions{Deny: entries("git push --force")})
+	target := filepath.Join(m.Paths.Home, "dots", "claude", "settings.json")
+	writeFile(t, target, `{"model": "opus"}`)
+	if err := os.MkdirAll(filepath.Join(m.Paths.Home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(m.Paths.Home, ".claude", "settings.json")); err != nil {
+		t.Fatal(err)
+	}
+	apply(t, plan(t, m))
+
+	m.ClaudeConfigDir = filepath.Dir(target)
+	changes := plan(t, m)
+	if got, want := targets(changes), []string{"~ ~/dots/claude/settings.json (track permission rules)"}; !slices.Equal(got, want) {
+		t.Fatalf("plan after the move = %q, want %q", got, want)
+	}
+	apply(t, changes)
+	assertConverged(t, m)
+	if got := readFile(t, target); !strings.Contains(got, "Bash(git push --force:*)") {
+		t.Fatalf("rule lost in the move: %s", got)
+	}
+
+	m.Agents.Permissions = nil
+	apply(t, plan(t, m))
+	if got := readFile(t, target); got != "{\n  \"model\": \"opus\"\n}\n" {
+		t.Errorf("rule zakwas added not removed after the move: %s", got)
+	}
+}
+
+// writeBetween makes beforeReplace write contents, one per call, as if
+// Claude Code saved its settings while zakwas edits them.
+func writeBetween(t *testing.T, contents ...string) {
+	t.Helper()
+	calls := 0
+	beforeReplace = func(path string) {
+		if calls < len(contents) {
+			writeFile(t, path, contents[calls])
+		}
+		calls++
+	}
+	t.Cleanup(func() { beforeReplace = func(string) {} })
+}
+
+func TestClaudePermissionsKeepConcurrentChange(t *testing.T) {
+	m := permissionsModule(t, []string{config.ProviderClaude}, &config.AgentPermissions{Allow: entries("git status")})
+	settings := filepath.Join(m.Paths.Home, ".claude", "settings.json")
+	writeFile(t, settings, `{"model": "opus"}`)
+	changes := plan(t, m)
+	writeBetween(t, `{"model": "sonnet", "theme": "dark"}`)
+	apply(t, changes)
+	want := "{\n  \"model\": \"sonnet\",\n  \"theme\": \"dark\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(git status:*)\"\n    ]\n  }\n}\n"
+	if got := readFile(t, settings); got != want {
+		t.Errorf("settings = %s\nwant %s", got, want)
+	}
+	assertConverged(t, m)
+}
+
+func TestClaudePermissionsKeepConcurrentCreate(t *testing.T) {
+	m := permissionsModule(t, []string{config.ProviderClaude}, &config.AgentPermissions{Allow: entries("git status")})
+	settings := filepath.Join(m.Paths.Home, ".claude", "settings.json")
+	changes := plan(t, m)
+	writeBetween(t, `{"theme": "dark"}`)
+	apply(t, changes)
+	want := "{\n  \"theme\": \"dark\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(git status:*)\"\n    ]\n  }\n}\n"
+	if got := readFile(t, settings); got != want {
+		t.Errorf("settings = %s\nwant %s", got, want)
+	}
+	assertConverged(t, m)
+}
+
+func TestClaudePermissionsGiveUpOnBusySettings(t *testing.T) {
+	m := permissionsModule(t, []string{config.ProviderClaude}, &config.AgentPermissions{Allow: entries("git status")})
+	settings := filepath.Join(m.Paths.Home, ".claude", "settings.json")
+	writeFile(t, settings, `{}`)
+	changes := plan(t, m)
+	writeBetween(t, `{"n": 1}`, `{"n": 2}`, `{"n": 3}`)
+	err := enginetest.Apply(context.Background(), engine.Plan{{Module: "agents", Changes: changes}})
+	if err == nil || !strings.Contains(err.Error(), "kept changing while zakwas edited it") {
+		t.Fatalf("apply error = %v", err)
+	}
+	if got := readFile(t, settings); got != `{"n": 3}` {
+		t.Errorf("settings = %s, want the agent's last write", got)
+	}
+	if _, err := os.Stat(m.permissionsStatePath()); !os.IsNotExist(err) {
+		t.Errorf("rules never written are recorded as zakwas's: %v", err)
 	}
 }
 

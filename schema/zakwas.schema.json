@@ -587,6 +587,7 @@
                   },
                   "justification": {
                     "minLength": 1,
+                    "pattern": "\\S",
                     "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it.",
                     "type": [
                       "string",
@@ -637,6 +638,7 @@
                   },
                   "justification": {
                     "minLength": 1,
+                    "pattern": "\\S",
                     "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it.",
                     "type": [
                       "string",
@@ -687,6 +689,7 @@
                   },
                   "justification": {
                     "minLength": 1,
+                    "pattern": "\\S",
                     "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it.",
                     "type": [
                       "string",

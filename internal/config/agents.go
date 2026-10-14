@@ -62,7 +62,7 @@ type AgentPermissions struct {
 type AgentPermission struct {
 	Command       string   `yaml:"command" jsonschema:"required,minLength=1" jsonschema_description:"Command prefix: one or more words separated by spaces, matched on whole words, e.g. 'git status' matches 'git status --short' but not 'git statusx'. No shell operators, quotes, globs or variables."`
 	Providers     []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
-	Justification string   `yaml:"justification" jsonschema:"minLength=1" jsonschema_description:"One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it."`
+	Justification string   `yaml:"justification" jsonschema:"minLength=1,pattern=\\S" jsonschema_description:"One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it."`
 }
 
 // Permission decisions, the keys of agents.permissions.
@@ -115,19 +115,24 @@ func (a *Agents) PermissionsFor(provider string) []Permission {
 	var out []Permission
 	for _, list := range a.Permissions.lists() {
 		for _, e := range list.entries {
-			providers := e.Providers
-			if providers == nil {
-				providers = a.DefaultProviders()
-				if provider == ProviderCodex && !a.Names(provider) {
-					continue
-				}
-			}
-			if slices.Contains(providers, provider) {
+			if slices.Contains(a.permissionProviders(e), provider) {
 				out = append(out, Permission{Decision: list.decision, Words: strings.Fields(e.Command), Justification: e.Justification})
 			}
 		}
 	}
 	return out
+}
+
+// permissionProviders are the providers an entry targets: its own, or
+// agents.providers, where Codex counts only when zakwas.yaml names it.
+func (a *Agents) permissionProviders(e AgentPermission) []string {
+	if e.Providers != nil {
+		return e.Providers
+	}
+	if a.Names(ProviderCodex) {
+		return a.DefaultProviders()
+	}
+	return slices.DeleteFunc(slices.Clone(a.DefaultProviders()), func(p string) bool { return p == ProviderCodex })
 }
 
 // permissionMeta are the characters a shell or an agent's matcher would
@@ -397,16 +402,15 @@ func (a *Agents) validatePermissions(checkProviders func(what string, list, allo
 				errs = append(errs, fmt.Errorf("%s: %q contains %q; list a plain command prefix, without shell operators, quotes, globs or variables", what, p.Command, r))
 				continue
 			}
-			if strings.ContainsFunc(p.Justification, unicode.IsControl) {
+			switch {
+			case strings.ContainsFunc(p.Justification, unicode.IsControl):
 				errs = append(errs, fmt.Errorf("%s.justification: write it on one line, without control characters", what))
+			case p.Justification != "" && strings.TrimSpace(p.Justification) == "":
+				errs = append(errs, fmt.Errorf("%s.justification: is blank; write a reason or leave it out", what))
 			}
 			checkProviders(what+".providers", p.Providers, a.DefaultProviders(), "agents.providers")
-			providers := p.Providers
-			if providers == nil {
-				providers = a.DefaultProviders()
-			}
 			command := strings.Join(words, " ")
-			for _, provider := range providers {
+			for _, provider := range a.permissionProviders(p) {
 				key := provider + "\x00" + command
 				first, dup := seen[key]
 				switch {

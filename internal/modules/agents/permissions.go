@@ -185,57 +185,83 @@ func (m *Module) planPermissions() (map[string][]engine.Change, map[string]error
 	return changes, failed, nil
 }
 
+// sameFile keys a file by its real path, ignoring case like macOS's file
+// system, so a settings.json reached through a dotfiles symlink and the
+// link's target count as one file. A missing file falls back to samePath.
+func sameFile(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return strings.ToLower(real)
+	}
+	return samePath(path)
+}
+
 // stalePaths are the recorded files other than current, from an earlier
 // config dir, sorted and each file once however its path was spelled.
 func stalePaths(recorded []string, current string) []string {
-	seen := map[string]bool{samePath(current): true}
+	seen := map[string]bool{sameFile(current): true}
 	var out []string
 	for _, path := range slices.Sorted(slices.Values(recorded)) {
-		if !seen[samePath(path)] {
-			seen[samePath(path)] = true
+		if !seen[sameFile(path)] {
+			seen[sameFile(path)] = true
 			out = append(out, path)
 		}
 	}
 	return out
 }
 
-// ownedClaudeRules are the rules zakwas added to a settings file, found by
-// the same file as instructions do: ignoring case and resolving symlinked
-// parents.
+// ownedClaudeRules are the rules zakwas added to a settings file, by
+// whatever path it recorded for the same file.
 func ownedClaudeRules(st permissionsState, path string) claudeRules {
 	var owned claudeRules
 	for key, r := range st.Claude {
-		if samePath(key) == samePath(path) {
+		if sameFile(key) == sameFile(path) {
 			owned = owned.union(r)
 		}
 	}
 	return owned
 }
 
+// recordClaudeRules records r as zakwas's rules in the settings at path,
+// replacing what was recorded for the same file under any path.
+func recordClaudeRules(path string, r claudeRules) func(*permissionsState) {
+	return func(st *permissionsState) {
+		for key := range st.Claude {
+			if sameFile(key) == sameFile(path) {
+				delete(st.Claude, key)
+			}
+		}
+		if !r.empty() {
+			st.Claude[path] = r
+		}
+	}
+}
+
 // ownedCodexRules is the SHA-256 of the rules file zakwas wrote at path,
 // or empty.
 func ownedCodexRules(st permissionsState, path string) string {
 	for key, sum := range st.Codex {
-		if samePath(key) == samePath(path) {
+		if sameFile(key) == sameFile(path) {
 			return sum
 		}
 	}
 	return ""
 }
 
-// renderClaudePermissions edits the permissions lists of the settings at
-// path: removes the rules zakwas added that are no longer wanted and adds
-// the missing wanted ones. A wanted rule that is already there and not
-// zakwas's stays the user's. Other keys keep their order and values.
-func renderClaudePermissions(path string, want, owned claudeRules) (o object, exists bool, next claudeRules, diff []string, err error) {
-	o, exists, err = readObject(path)
-	if err != nil {
-		return o, exists, next, nil, err
+// renderClaudePermissions edits the permissions lists of settings data
+// read from path, nil for a missing file: removes the rules zakwas added
+// that are no longer wanted and adds the missing wanted ones. A wanted rule
+// that is already there and not zakwas's stays the user's. Other keys keep
+// their order and values.
+func renderClaudePermissions(path string, data []byte, want, owned claudeRules) (o object, next claudeRules, diff []string, err error) {
+	if data != nil {
+		if o, err = parseObject(path, data); err != nil {
+			return o, next, nil, err
+		}
 	}
 	var perms object
 	if raw, ok := o.get("permissions"); ok {
 		if err := json.Unmarshal(raw, &perms); err != nil {
-			return o, exists, next, nil, fmt.Errorf("%s permissions: %w", path, err)
+			return o, next, nil, fmt.Errorf("%s permissions: %w", path, err)
 		}
 	}
 	removedAny := false
@@ -251,7 +277,7 @@ func renderClaudePermissions(path string, want, owned claudeRules) (o object, ex
 		raw, present := perms.get(list.key)
 		if present {
 			if err := json.Unmarshal(raw, &have); err != nil {
-				return o, exists, next, nil, fmt.Errorf("%s permissions.%s: %w", path, list.key, err)
+				return o, next, nil, fmt.Errorf("%s permissions.%s: %w", path, list.key, err)
 			}
 		}
 		kept := make([]string, 0, len(have))
@@ -284,19 +310,19 @@ func renderClaudePermissions(path string, want, owned claudeRules) (o object, ex
 			removedAny = true
 		case len(removed) > 0 || added:
 			if err := perms.set(list.key, kept); err != nil {
-				return o, exists, next, nil, err
+				return o, next, nil, err
 			}
 		}
 	}
 	if len(diff) == 0 {
-		return o, exists, next, nil, nil
+		return o, next, nil, nil
 	}
 	if removedAny && len(perms.keys) == 0 {
 		o.delete("permissions")
 	} else if err := o.set("permissions", perms); err != nil {
-		return o, exists, next, nil, err
+		return o, next, nil, err
 	}
-	return o, exists, next, diff, nil
+	return o, next, diff, nil
 }
 
 // planClaudePermissions converges the rules zakwas owns in one Claude
@@ -317,24 +343,18 @@ func (m *Module) planClaudePermissions(path string, want claudeRules) (*engine.C
 		return nil, err
 	}
 	owned := ownedClaudeRules(st, path)
-	_, exists, next, diff, err := renderClaudePermissions(path, want, owned)
+	data, err := readIfExists(path)
 	if err != nil {
 		return nil, err
 	}
-	record := func(r claudeRules) func(*permissionsState) {
-		return func(st *permissionsState) {
-			for key := range st.Claude {
-				if samePath(key) == samePath(path) {
-					delete(st.Claude, key)
-				}
-			}
-			if !r.empty() {
-				st.Claude[path] = r
-			}
-		}
+	exists := data != nil
+	_, next, diff, err := renderClaudePermissions(path, data, want, owned)
+	if err != nil {
+		return nil, err
 	}
 	if len(diff) == 0 {
-		if next.equal(owned) {
+		_, keyed := st.Claude[path]
+		if next.equal(owned) && (keyed || next.empty()) {
 			return nil, nil
 		}
 		detail := "track permission rules"
@@ -343,7 +363,7 @@ func (m *Module) planClaudePermissions(path string, want claudeRules) (*engine.C
 		}
 		return &engine.Change{
 			Action: engine.Update, Target: m.Paths.Pretty(path), Detail: detail,
-			Apply: func(context.Context) error { return m.updatePermissionsState(record(next)) },
+			Apply: func(context.Context) error { return m.updatePermissionsState(recordClaudeRules(path, next)) },
 		}, nil
 	}
 	if exists {
@@ -363,44 +383,65 @@ func (m *Module) planClaudePermissions(path string, want claudeRules) (*engine.C
 		Action: action, Target: m.Paths.Pretty(path), Detail: permissionsDetail(diff),
 		Diff: strings.Join(diff, "\n") + "\n",
 		Apply: func(context.Context) error {
-			if err := install.CheckParents(m.Paths, path); err != nil {
-				return err
-			}
-			if info, err := os.Stat(path); err == nil {
-				if !info.Mode().IsRegular() || info.Mode().Perm()&0o200 == 0 {
-					return fmt.Errorf("%s is not a writable regular file", m.Paths.Pretty(path))
-				}
-			} else if !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			st, err := m.loadPermissionsState()
-			if err != nil {
-				return err
-			}
-			owned := ownedClaudeRules(st, path)
-			o, exists, next, diff, err := renderClaudePermissions(path, want, owned)
-			if err != nil {
-				return err
-			}
-			if len(diff) > 0 {
-				if err := m.updatePermissionsState(record(owned.union(next))); err != nil {
-					return err
-				}
-				if exists {
-					err = writeObject(path, o)
-				} else {
-					var data []byte
-					if data, err = indentObject(o); err == nil {
-						err = install.WriteAtomic(path, data, 0o600)
-					}
-				}
-				if err != nil {
+			for range claudeWriteAttempts {
+				if done, err := m.applyClaudePermissions(path, want); done || err != nil {
 					return err
 				}
 			}
-			return m.updatePermissionsState(record(next))
+			return fmt.Errorf("%s kept changing while zakwas edited it; run apply again", m.Paths.Pretty(path))
 		},
 	}, nil
+}
+
+// claudeWriteAttempts bounds the redos when Claude Code keeps writing its
+// settings while zakwas edits them.
+const claudeWriteAttempts = 3
+
+// applyClaudePermissions edits the settings at path once. done is false
+// when the file changed between the read and the write: nothing was
+// written and the edit must be redone from the new content.
+func (m *Module) applyClaudePermissions(path string, want claudeRules) (done bool, err error) {
+	if err := install.CheckParents(m.Paths, path); err != nil {
+		return false, err
+	}
+	if info, err := os.Stat(path); err == nil {
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o200 == 0 {
+			return false, fmt.Errorf("%s is not a writable regular file", m.Paths.Pretty(path))
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	st, err := m.loadPermissionsState()
+	if err != nil {
+		return false, err
+	}
+	owned := ownedClaudeRules(st, path)
+	data, err := readIfExists(path)
+	if err != nil {
+		return false, err
+	}
+	o, next, diff, err := renderClaudePermissions(path, data, want, owned)
+	if err != nil {
+		return false, err
+	}
+	if len(diff) == 0 {
+		return true, m.updatePermissionsState(recordClaudeRules(path, next))
+	}
+	if err := m.updatePermissionsState(recordClaudeRules(path, owned.union(next))); err != nil {
+		return false, err
+	}
+	if data != nil {
+		err = writeObjectIf(path, o, data)
+	} else {
+		err = createObject(path, o, 0o600)
+	}
+	if errors.Is(err, errChanged) {
+		return false, m.updatePermissionsState(recordClaudeRules(path, owned))
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, m.updatePermissionsState(recordClaudeRules(path, next))
 }
 
 // codexDecisions maps a decision to Codex's prefix_rule decision.
@@ -436,6 +477,9 @@ func renderCodexRules(perms []config.Permission) ([]byte, error) {
 		}
 		fmt.Fprintf(&b, "prefix_rule(pattern=[%s], decision=\"%s\"", strings.Join(words, ", "), codexDecisions[p.Decision])
 		if p.Justification != "" {
+			if strings.TrimSpace(p.Justification) == "" {
+				return nil, fmt.Errorf("%q: blank justification, which Codex rejects", p.Command())
+			}
 			q, err := starlarkString(p.Justification)
 			if err != nil {
 				return nil, err
@@ -519,13 +563,12 @@ func (m *Module) planCodexRules(path string, perms []config.Permission) (*engine
 	ownedSum := ownedCodexRules(st, path)
 	forget := func(st *permissionsState) {
 		for key := range st.Codex {
-			if samePath(key) == samePath(path) {
+			if sameFile(key) == sameFile(path) {
 				delete(st.Codex, key)
 			}
 		}
 	}
 	ours := func(data []byte, sum string) bool { return data != nil && sum != "" && install.Sum(data) == sum }
-	// current reads the file and its recorded hash again at apply time.
 	current := func() ([]byte, string, error) {
 		if err := install.CheckParents(m.Paths, path); err != nil {
 			return nil, "", err
@@ -576,7 +619,7 @@ func (m *Module) planCodexRules(path string, perms []config.Permission) (*engine
 		st.Codex[path] = sum
 	}
 	if bytes.Equal(have, content) {
-		if ownedSum == sum {
+		if _, keyed := st.Codex[path]; keyed && ownedSum == sum {
 			return nil, nil
 		}
 		return &engine.Change{
