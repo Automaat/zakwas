@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -31,6 +33,7 @@ type Agents struct {
 	Plugins      []Plugin               `yaml:"plugins" jsonschema_description:"Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own."`
 	Instructions string                 `yaml:"instructions" jsonschema:"minLength=1" jsonschema_description:"Global instructions file in the config repo, relative to the directory holding zakwas.yaml (or absolute), linked to each managed provider's global instructions: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). A file already there is backed up; links zakwas made for providers no longer managed are removed."`
 	Hooks        *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration."`
+	Permissions  *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
 	Opencode     *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
 }
 
@@ -46,6 +49,95 @@ type AgentCommandHook struct {
 	Command   string   `yaml:"command" jsonschema:"required,minLength=1" jsonschema_description:"Shell command to run. Use an absolute executable path when the agent may have a different PATH; the command receives provider-specific event JSON on stdin."`
 	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers for this hook; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
 }
+
+// AgentPermissions lists shell command prefixes by decision.
+type AgentPermissions struct {
+	Allow  []AgentPermission `yaml:"allow" jsonschema_description:"Commands the agents run without asking: Claude Code permissions.allow, Codex decision allow (runs outside the sandbox without approval), opencode allow."`
+	Review []AgentPermission `yaml:"review" jsonschema_description:"Commands that need a review before they run: Codex decision prompt, opencode ask. Not written for Claude Code, whose auto mode already reviews every command it doesn't allow."`
+	Deny   []AgentPermission `yaml:"deny" jsonschema_description:"Commands the agents must never run: Claude Code permissions.deny, Codex decision forbidden, opencode deny."`
+}
+
+// AgentPermission is one command prefix. In YAML it is either the command
+// string or a mapping.
+type AgentPermission struct {
+	Command       string   `yaml:"command" jsonschema:"required,minLength=1" jsonschema_description:"Command prefix: one or more words separated by spaces, matched on whole words, e.g. 'git status' matches 'git status --short' but not 'git statusx'. No shell operators, quotes, globs or variables."`
+	Providers     []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
+	Justification string   `yaml:"justification" jsonschema:"minLength=1,pattern=\\S" jsonschema_description:"One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it."`
+}
+
+// Permission decisions, the keys of agents.permissions.
+const (
+	PermissionAllow  = "allow"
+	PermissionReview = "review"
+	PermissionDeny   = "deny"
+)
+
+// Permission is one agents.permissions entry resolved for a provider.
+type Permission struct {
+	Decision      string
+	Words         []string
+	Justification string
+}
+
+// Command is the prefix with its words joined by single spaces.
+func (p Permission) Command() string { return strings.Join(p.Words, " ") }
+
+func (p *AgentPermission) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		return n.Decode(&p.Command)
+	}
+	if err := knownKeys(n, "command", "providers", "justification"); err != nil {
+		return err
+	}
+	type plain AgentPermission
+	return n.Decode((*plain)(p))
+}
+
+// lists returns the entries by decision, in the order providers apply them.
+func (p *AgentPermissions) lists() []struct {
+	decision string
+	entries  []AgentPermission
+} {
+	return []struct {
+		decision string
+		entries  []AgentPermission
+	}{{PermissionAllow, p.Allow}, {PermissionReview, p.Review}, {PermissionDeny, p.Deny}}
+}
+
+// PermissionsFor returns the agents.permissions entries targeting provider:
+// allow, then review, then deny, each in declared order. Like plugins, an
+// entry without its own providers reaches Codex only when zakwas.yaml names
+// codex.
+func (a *Agents) PermissionsFor(provider string) []Permission {
+	if a == nil || a.Permissions == nil {
+		return nil
+	}
+	var out []Permission
+	for _, list := range a.Permissions.lists() {
+		for _, e := range list.entries {
+			if slices.Contains(a.permissionProviders(e), provider) {
+				out = append(out, Permission{Decision: list.decision, Words: strings.Fields(e.Command), Justification: e.Justification})
+			}
+		}
+	}
+	return out
+}
+
+// permissionProviders are the providers an entry targets: its own, or
+// agents.providers, where Codex counts only when zakwas.yaml names it.
+func (a *Agents) permissionProviders(e AgentPermission) []string {
+	if e.Providers != nil {
+		return e.Providers
+	}
+	if a.Names(ProviderCodex) {
+		return a.DefaultProviders()
+	}
+	return slices.DeleteFunc(slices.Clone(a.DefaultProviders()), func(p string) bool { return p == ProviderCodex })
+}
+
+// permissionMeta are the characters a shell or an agent's matcher would
+// read as more than a plain word: operators, quoting, expansion, globs.
+const permissionMeta = "*?[]{}()|&;<>$`'\"\\"
 
 // Opencode configures the opencode provider, which has no plugin system:
 // zakwas links each plugin's skills into its skills directory.
@@ -154,6 +246,26 @@ func (a *Agents) PluginProviders(p Plugin) []string {
 	return a.MarketplaceProviders(mk)
 }
 
+// Names reports whether zakwas.yaml lists provider itself, in
+// agents.providers or a marketplace's or plugin's providers, rather than
+// getting it from the all-providers default.
+func (a *Agents) Names(provider string) bool {
+	if slices.Contains(a.Providers, provider) {
+		return true
+	}
+	for _, m := range a.Marketplaces {
+		if slices.Contains(m.Providers, provider) {
+			return true
+		}
+	}
+	for _, p := range a.Plugins {
+		if slices.Contains(p.Providers, provider) {
+			return true
+		}
+	}
+	return false
+}
+
 // NamesProvider reports whether a plugin targets provider because the
 // config lists it, in the plugin's, its marketplace's or agents.providers,
 // rather than by the all-providers default.
@@ -243,6 +355,7 @@ func (a *Agents) validate() []error {
 			}
 		}
 	}
+	errs = append(errs, a.validatePermissions(checkProviders)...)
 	seen := map[string]int{}
 	for i, p := range a.Plugins {
 		what := fmt.Sprintf("agents.plugins[%d]", i)
@@ -261,6 +374,55 @@ func (a *Agents) validate() []error {
 			continue
 		}
 		checkProviders(what+".providers", p.Providers, a.MarketplaceProviders(mk), "the providers of marketplace "+mk)
+	}
+	return errs
+}
+
+func (a *Agents) validatePermissions(checkProviders func(what string, list, allowed []string, allowedWhat string)) []error {
+	if a.Permissions == nil {
+		return nil
+	}
+	var errs []error
+	type entry struct {
+		what, decision string
+	}
+	seen := map[string]entry{}
+	for _, list := range a.Permissions.lists() {
+		for i, p := range list.entries {
+			what := fmt.Sprintf("agents.permissions.%s[%d]", list.decision, i)
+			words := strings.Fields(p.Command)
+			if len(words) == 0 {
+				errs = append(errs, fmt.Errorf("%s: command is required", what))
+				continue
+			}
+			if at := strings.IndexFunc(p.Command, func(r rune) bool {
+				return strings.ContainsRune(permissionMeta, r) || (unicode.IsControl(r) && !unicode.IsSpace(r))
+			}); at >= 0 {
+				r, _ := utf8.DecodeRuneInString(p.Command[at:])
+				errs = append(errs, fmt.Errorf("%s: %q contains %q; list a plain command prefix, without shell operators, quotes, globs or variables", what, p.Command, r))
+				continue
+			}
+			switch {
+			case strings.ContainsFunc(p.Justification, unicode.IsControl):
+				errs = append(errs, fmt.Errorf("%s.justification: write it on one line, without control characters", what))
+			case p.Justification != "" && strings.TrimSpace(p.Justification) == "":
+				errs = append(errs, fmt.Errorf("%s.justification: is blank; write a reason or leave it out", what))
+			}
+			checkProviders(what+".providers", p.Providers, a.DefaultProviders(), "agents.providers")
+			command := strings.Join(words, " ")
+			for _, provider := range a.permissionProviders(p) {
+				key := provider + "\x00" + command
+				first, dup := seen[key]
+				switch {
+				case !dup:
+					seen[key] = entry{what: what, decision: list.decision}
+				case first.decision == list.decision:
+					errs = append(errs, fmt.Errorf("%s: %q duplicates %s for %s", what, command, first.what, provider))
+				default:
+					errs = append(errs, fmt.Errorf("%s: %q is also listed in %s for %s; give each command one decision per provider", what, command, first.what, provider))
+				}
+			}
+		}
 	}
 	return errs
 }

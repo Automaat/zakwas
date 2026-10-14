@@ -90,20 +90,18 @@ func (m *Module) desired(provider string) desired {
 		explicit: map[string]bool{},
 		upgrade:  m.Agents.Upgrade,
 		prune:    m.Agents.Prune && m.Agents.Manages(provider),
-		named:    slices.Contains(m.Agents.Providers, provider),
+		named:    m.Agents.Names(provider),
 	}
 	for _, name := range m.Agents.MarketplaceNames() {
 		if slices.Contains(m.Agents.MarketplaceProviders(name), provider) {
 			d.sources[name] = m.source(m.Agents.Marketplaces[name].Source)
 		}
-		d.named = d.named || slices.Contains(m.Agents.Marketplaces[name].Providers, provider)
 	}
 	for _, p := range m.Agents.Plugins {
 		if slices.Contains(m.Agents.PluginProviders(p), provider) {
 			d.plugins = append(d.plugins, p.ID)
 			d.explicit[p.ID] = m.Agents.NamesProvider(p, provider)
 		}
-		d.named = d.named || slices.Contains(p.Providers, provider)
 	}
 	return d
 }
@@ -117,6 +115,8 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	errs := []error{err}
 	commandHooks, hookFailed, hookErr := m.planCommandHooks()
 	errs = append(errs, hookErr)
+	permissions, permFailed, permErr := m.planPermissions()
+	errs = append(errs, permErr)
 	var changes []engine.Change
 	var klaudiushChange *engine.Change
 	var klaudiushErr error
@@ -131,7 +131,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			delete(instructions, p)
 			continue
 		}
-		if err := hookFailed[p]; err != nil {
+		if err := errors.Join(hookFailed[p], permFailed[p]); err != nil {
 			errs = append(errs, err)
 			delete(instructions, p)
 			continue
@@ -139,6 +139,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		changes = append(changes, instructions[p]...)
 		delete(instructions, p)
 		changes = append(changes, commandHooks[p]...)
+		changes = append(changes, permissions[p]...)
 		b, ok := backends[p]
 		if !ok {
 			continue

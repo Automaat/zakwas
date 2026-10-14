@@ -138,6 +138,10 @@ agents:
     commands:
       - {event: beforeTool, command: /usr/local/bin/check-tool}
     # klaudiush: true                # register enabled klaudiush providers
+  permissions:
+    allow: [git status, git diff]
+    review: [git push]
+    deny: [git push --force]
   marketplaces:
     claude-plugins-official: anthropics/claude-plugins-official
   plugins:
@@ -162,6 +166,22 @@ defaults:                         # YAML type picks -bool/-int/-float/-string
 Modules run in this order: system → files → links → templates → brew → mise → agents → commands → defaults.
 
 Find a macOS preference key: `defaults read > a`, toggle it in System Settings, `defaults read > b`, `diff a b`.
+
+### Agent permissions
+
+`agents.permissions` declares shell command permissions once, and zakwas writes each agent's native form. Entries are plain command prefixes matched on whole words, or `{command, providers, justification}` to target some agents only:
+
+| Decision | Claude Code `settings.json` | Codex `rules/zakwas.rules` | opencode, via the `agentPermissions` template function |
+|---|---|---|---|
+| `allow` | `permissions.allow`: `Bash(<cmd>:*)` | `decision="allow"`: no approval, outside the sandbox | `"allow"` |
+| `review` | not written: auto mode reviews what isn't allowed | `decision="prompt"` | `"ask"` |
+| `deny` | `permissions.deny`: `Bash(<cmd>:*)` | `decision="forbidden"` | `"deny"` |
+
+- zakwas removes only the Claude rules it added; rules you added yourself stay.
+- zakwas owns the Codex rules file. When rules from several files match, Codex applies the strictest. Allow only read-only commands for Codex.
+- In an opencode template, write `"bash": {{ agentPermissions "opencode" "ask" }}`. It renders the catch-all first and deny entries last, because opencode applies the last matching pattern.
+
+See [docs/config.md](docs/config.md#permissions).
 
 ## Protected dotfiles
 

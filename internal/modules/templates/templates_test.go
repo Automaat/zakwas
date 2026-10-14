@@ -2,6 +2,8 @@ package templates
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,5 +127,121 @@ func TestUnknownVariableFails(t *testing.T) {
 	m, _ := setup(t, "{{.Vars.missing}}", 0)
 	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "missing") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+var permissions = &config.Agents{
+	Providers: []string{config.ProviderClaude, config.ProviderOpencode},
+	Permissions: &config.AgentPermissions{
+		Allow: []config.AgentPermission{
+			{Command: "git  status"},
+			{Command: "sed -n", Providers: []string{config.ProviderClaude}},
+			{Command: "peekaboo see", Providers: []string{config.ProviderOpencode}},
+		},
+		Review: []config.AgentPermission{{Command: "git push"}},
+		Deny:   []config.AgentPermission{{Command: "git push --force", Justification: "use --force-with-lease"}},
+	},
+}
+
+func TestAgentPermissions(t *testing.T) {
+	entries := `"git status": "allow", "git status *": "allow", "peekaboo see": "allow", "peekaboo see *": "allow", ` +
+		`"git push": "ask", "git push *": "ask", "git push --force": "deny", "git push --force *": "deny"`
+	tests := []struct {
+		name    string
+		agents  *config.Agents
+		args    []string
+		want    string
+		wantErr string
+	}{
+		{"catch-all first, deny last", permissions, []string{"opencode", "ask"}, `{"*": "ask", ` + entries + `}`, ""},
+		{"without catch-all", permissions, []string{"opencode"}, `{` + entries + `}`, ""},
+		{"no agents section", nil, []string{"opencode", "allow"}, `{"*": "allow"}`, ""},
+		{"nothing declared", &config.Agents{}, []string{"opencode"}, `{}`, ""},
+		{"other provider", permissions, []string{"claude"}, "", `provider "claude" is not supported, only opencode`},
+		{"unknown action", permissions, []string{"opencode", "prompt"}, "", `default action "prompt" is not one of allow, ask, deny`},
+		{"two actions", permissions, []string{"opencode", "allow", "deny"}, "", "want at most one default action, got 2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := agentPermissions(tt.agents, tt.args[0], tt.args[1:]...)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("got  %s\nwant %s", got, tt.want)
+			}
+			if !json.Valid([]byte(got)) {
+				t.Errorf("not JSON: %s", got)
+			}
+		})
+	}
+}
+
+// The loader rejects quotes and the like in commands; the JSON stays valid
+// even when one gets through.
+func TestAgentPermissionsEscape(t *testing.T) {
+	command := `say "hi" \ <b> & café`
+	a := &config.Agents{Permissions: &config.AgentPermissions{Deny: []config.AgentPermission{{Command: command}}}}
+	got, err := agentPermissions(a, config.ProviderOpencode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+		t.Fatalf("%s: %v", got, err)
+	}
+	if want := map[string]string{command: "deny", command + " *": "deny"}; !maps.Equal(decoded, want) {
+		t.Errorf("decoded %v, want %v", decoded, want)
+	}
+}
+
+func TestAgentPermissionsInTemplate(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	tmpl := `{
+  "permission": {"bash": {{ agentPermissions "opencode" "ask" }}},
+  "agent": {"build": {"permission": {"bash": {{ agentPermissions "opencode" "allow" }}}}}
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "opencode.json.tmpl"), []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &Module{
+		Templates: config.Templates{Files: []config.TemplateFile{{Src: "opencode.json.tmpl", Dst: "~/.config/opencode/opencode.json"}}},
+		Agents:    permissions,
+		Paths:     config.Paths{Home: home, Root: root},
+	}
+	m.Installer = &install.Installer{Paths: m.Paths, StatePath: install.StatePath(home)}
+	apply(t, plan(t, m))
+	data, err := os.ReadFile(filepath.Join(home, ".config", "opencode", "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Permission struct {
+			Bash map[string]string `json:"bash"`
+		} `json:"permission"`
+		Agent map[string]struct {
+			Permission struct {
+				Bash map[string]string `json:"bash"`
+			} `json:"permission"`
+		} `json:"agent"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("rendered opencode.json is not JSON: %v\n%s", err, data)
+	}
+	if got := cfg.Permission.Bash["*"]; got != "ask" {
+		t.Errorf("global catch-all = %q", got)
+	}
+	if got := cfg.Agent["build"].Permission.Bash["git push --force *"]; got != "deny" {
+		t.Errorf("build agent keeps deny = %q", got)
+	}
+	if again := plan(t, m); len(again) != 0 {
+		t.Errorf("not idempotent: %v", again)
 	}
 }

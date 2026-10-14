@@ -182,6 +182,8 @@ Each `files` entry:
 
 Templates see `{{ .Home }}` (your home directory) and `{{ .Vars.x }}`. Referencing a var that isn't defined is an error, not an empty string. Rendered files are protected and tracked exactly like `files`.
 
+Templates can also call `{{ agentPermissions "opencode" }}` or `{{ agentPermissions "opencode" "<default>" }}`, where the default is `allow`, `ask` or `deny`. It returns [`agents.permissions`](#permissions) as one line of JSON for opencode's `permission.bash`, holding only the entries that target opencode. The catch-all `"*": "<default>"` comes first when given, then `"<cmd>"` and `"<cmd> *"` for each `allow`, `review` (as `ask`) and `deny` entry, in that order. For example, `"bash": {{ agentPermissions "opencode" "ask" }}` renders as `"bash": {"*": "ask", "git status": "allow", "git status *": "allow", "git push --force": "deny", "git push --force *": "deny"}`. Without an `agents.permissions` section the output is only the catch-all, or `{}`. Any other provider fails the template.
+
 ```yaml
 templates:
   vars:
@@ -262,6 +264,7 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `instructions` | string | no | | Global instructions file in the repo, relative to the directory holding `zakwas.yaml` (or absolute), linked to each managed provider's global instructions. See below. |
 | `hooks.commands` | list | no | | Shared command hooks, each with `event`, `command`, and optional `providers`. See below. |
 | `hooks.klaudiush` | bool | no | `false` | Register klaudiush's enabled providers. See below. |
+| `permissions.allow`, `permissions.review`, `permissions.deny` | list | no | | Shell command prefixes the agents may run without asking, must have reviewed, or must never run. Each is a command string, or `{command, providers, justification}`. See [permissions](#permissions). |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 
 A marketplace `source` is a GitHub `owner/repo` or a git URL (either optionally with `#ref`), or a local path starting with `./`, `../`, `~/` or `/` (relative paths resolve from the directory holding `zakwas.yaml`). A marketplace targets `agents.providers` unless it lists its own `providers`; a plugin targets its marketplace's providers unless it lists its own, which must be a subset.
@@ -308,6 +311,65 @@ agents:
 `hooks.commands` declares each command once. `event` is `beforeTool`, `afterTool`, `sessionStart`, or `stop`; `providers` defaults to `agents.providers`, with Codex opt-in as for plugins. Zakwas registers the command in Claude Code's `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Codex's `${CODEX_HOME:-~/.codex}/hooks.json`, and a generated OpenCode plugin at `~/.config/opencode/plugins/zakwas-hooks.js` (OpenCode 1.18.29+ or 2.x). It maps the events to `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` for Claude and Codex. In OpenCode, tool events use `tool.execute.before` and `tool.execute.after` on 1.x or `execute.before` and `execute.after` on 2.x; `sessionStart` observes `session.created`, and `stop` observes `session.idle` on 1.x or `session.execution.succeeded` on 2.x. Zakwas preserves unrelated JSON settings and hook groups, records its registrations in `~/.local/state/zakwas/command-hooks.json`, and removes only those registrations when they leave the config. A generated OpenCode plugin edited by hand is left in place when removed from the config. Codex may ask you to trust newly registered hooks through `/hooks` before running them. Commands receive provider-specific event JSON on stdin; a shared script must handle the payload and output rules of each provider. OpenCode blocks a tool when a before-tool command exits nonzero or returns a JSON `decision: block` / `hookSpecificOutput.permissionDecision: deny`; its after-tool and session hooks do not use command output. Don't also manage these agent settings or the generated plugin with `files`, `links`, or `templates`.
 
 `agents.hooks.klaudiush: true` registers global klaudiush hooks for the providers enabled in `${XDG_CONFIG_HOME:-~/.config}/klaudiush/config.toml`. Install klaudiush and place its config with `files` or `templates` first. Zakwas checks hook targets during `plan` and runs `klaudiush init --install-hooks --global` during `apply` when registration is missing or the binary, config, or hook files changed. It records a registration fingerprint in `~/.local/state/zakwas/klaudiush.json`. Klaudiush keeps unrelated hooks. Codex's `hooks_config_path` and opencode's `plugin_path` come from the klaudiush config and can point outside default agent directories. Removing this option leaves existing registrations in place.
+
+### permissions
+
+`agents.permissions` is one list of shell command permissions for every agent. Each entry is a command prefix: one or more words, matched on whole words, so `git status` covers `git status --short` but not `git statusx`. Write it as a string, or as `{command, providers, justification}`:
+
+- `providers` defaults to `agents.providers`, with Codex opt-in as for plugins: an entry without its own `providers` reaches Codex only when `zakwas.yaml` names `codex`.
+- `justification` is a one-line reason Codex shows the agent when its rule prompts for or forbids a command. The other providers ignore it.
+
+Prefixes stay plain words. Shell operators, quotes, globs, variables, backslashes, brackets and control characters (`* ? [ ] { } ( ) | & ; < > $` backtick, quotes, `\`) fail validation. A command may sit in only one list per provider, and only once.
+
+| Decision | Claude Code | Codex | opencode |
+|---|---|---|---|
+| `allow` | `Bash(<cmd>:*)` in `permissions.allow` | `prefix_rule(…, decision="allow")`: runs **without approval and outside the sandbox** | `"allow"` |
+| `review` | not written | `decision="prompt"` | `"ask"` |
+| `deny` | `Bash(<cmd>:*)` in `permissions.deny` | `decision="forbidden"` | `"deny"` |
+
+```yaml
+agents:
+  providers: [claude, codex, opencode]
+  permissions:
+    allow:
+      - git status
+      - git diff
+      - sed -n
+      - {command: go test, providers: [claude, opencode]}
+    review:
+      - git push
+    deny:
+      - {command: git push --force, justification: use git push --force-with-lease}
+```
+
+**Claude Code.** zakwas adds the rules to `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` and leaves the rest of the file, including key order, as it is. It records the rules it added in `~/.local/state/zakwas/agent-permissions.json` and later removes only those. A rule that was already in the file stays yours: it is never claimed or removed. `review` entries are not written. Claude Code's auto mode already reviews every command that isn't allowed, while an `ask` rule would stop for a person even in auto mode. So on Claude an `allow` entry that is a prefix of a `review` entry wins: allowing `git` also runs `git push` without review. When zakwas needs to change a read-only `settings.json`, such as one installed with `files`, the Claude plan fails. If Claude Code saves `settings.json` while zakwas edits it, zakwas redoes its edit on the new content instead of overwriting it, and gives up after three tries.
+
+**Codex.** zakwas owns `${CODEX_HOME:-~/.codex}/rules/zakwas.rules`, a regular file holding one `prefix_rule` per entry. Codex loads every `*.rules` file in that directory and saves its own approvals to `default.rules`, which zakwas never touches. When several rules match a command, Codex applies the strictest decision from any file (`forbidden` over `prompt` over `allow`). A `review` or `deny` entry therefore overrides a broader `allow` Codex saved in `default.rules`, and a zakwas `allow` cannot loosen a stricter rule elsewhere.
+
+Codex runs an `allow` command without approval and outside its sandbox, with full disk write and network access. For Codex, allow only read-only commands that can't run other programs. Test and build runners such as `go test`, `cargo test`, `npm test` or `mise run` work fine inside the Codex sandbox, so scope them to `providers: [claude, opencode]`.
+
+If you edit `zakwas.rules` by hand, zakwas backs it up to `zakwas.rules.zakwas-bak` before rewriting it. The file is removed when no entry targets Codex anymore; a hand-edited file is left in place and only forgotten. One unparsable rules file makes Codex ignore every rule, `forbidden` ones included, so zakwas refuses to render anything but plain printable strings.
+
+**opencode.** zakwas doesn't edit `opencode.json`, which is usually managed as a [template](#templates). Render the rules into it with the `agentPermissions` template function instead:
+
+```json
+{
+  "permission": {
+    "bash": {{ agentPermissions "opencode" "ask" }}
+  },
+  "agent": {
+    "build": {
+      "permission": {
+        "bash": {{ agentPermissions "opencode" "allow" }}
+      }
+    }
+  }
+}
+```
+
+opencode applies the last pattern that matches. The function therefore writes the optional catch-all `"*"` first, then the `allow`, `review` (`ask`) and `deny` entries in that order, so a deny always wins. Each entry becomes two patterns, `"<cmd>"` and `"<cmd> *"`. opencode merges its built-in defaults, the global `permission`, then each agent's own `permission`. An agent block that declares its own `bash`, for example `{"*": "allow"}`, overrides the global rules for that agent, so call the function in every agent block that declares `bash` too.
+
+`zakwas plan` lists the added and removed rules per file (`--diff` shows them), and `zakwas check` reports drift when `settings.json`, `zakwas.rules` or the rendered `opencode.json` no longer match. Removing `permissions`, or the whole `agents` section, removes the Claude rules and the Codex file zakwas wrote. Don't also manage `zakwas.rules` with `files`, `links` or `templates`.
 
 ## system
 
