@@ -167,6 +167,24 @@ defaults:
 		{"command hook outside providers", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check, providers: [codex]}]}}", []string{`agents.hooks.commands[0].providers: provider "codex" is not in agents.providers`}},
 		{"duplicate command hook", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check}, {event: stop, command: check}]}}", []string{"agents.hooks.commands[1]: duplicates agents.hooks.commands[0]"}},
 		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"field dir not found"}},
+		{"empty permission", "agents: {permissions: {allow: ['  ']}}", []string{"agents.permissions.allow[0]: command is required"}},
+		{"null permission command", "agents: {permissions: {deny: [{providers: [claude]}]}}", []string{"agents.permissions.deny[0]: command is required"}},
+		{"permission with a glob", "agents: {permissions: {allow: ['git *']}}", []string{`agents.permissions.allow[0]: "git *" contains '*'`}},
+		{"permission with a pipe", "agents: {permissions: {allow: ['ls | sh']}}", []string{`contains '|'`}},
+		{"permission with a chain", "agents: {permissions: {allow: ['make && rm']}}", []string{`contains '&'`}},
+		{"permission with a variable", "agents: {permissions: {deny: ['rm $HOME']}}", []string{`contains '$'`}},
+		{"permission with quotes", `agents: {permissions: {review: ["git commit -m 'x'"]}}`, []string{`contains '\''`}},
+		{"permission with a substitution", "agents: {permissions: {allow: ['echo `id`']}}", []string{"contains '`'"}},
+		{"permission with a redirect", "agents: {permissions: {allow: ['cat > f']}}", []string{"contains '>'"}},
+		{"permission with a backslash", `agents: {permissions: {allow: ['git\ status']}}`, []string{`contains '\\'`}},
+		{"permission with a control character", "agents: {permissions: {allow: [\"git\\x07\"]}}", []string{`contains '\a'`}},
+		{"permission provider not managed", "agents: {providers: [claude], permissions: {allow: [{command: ls, providers: [codex]}]}}", []string{`agents.permissions.allow[0].providers: provider "codex" is not in agents.providers`}},
+		{"empty permission providers", "agents: {permissions: {allow: [{command: ls, providers: []}]}}", []string{"agents.permissions.allow[0].providers: list at least one provider"}},
+		{"duplicate permission", "agents: {permissions: {allow: [git status, 'git  status']}}", []string{`agents.permissions.allow[1]: "git status" duplicates agents.permissions.allow[0] for claude`}},
+		{"permission in two lists", "agents: {permissions: {allow: [git push], deny: [{command: git push, providers: [codex]}]}}", []string{`agents.permissions.deny[0]: "git push" is also listed in agents.permissions.allow[0] for codex; give each command one decision per provider`}},
+		{"unknown permission field", "agents: {permissions: {allow: [{command: ls, decision: allow}]}}", []string{"field decision not found"}},
+		{"unknown permission list", "agents: {permissions: {ask: [ls]}}", []string{"field ask not found"}},
+		{"multi-line justification", `agents: {permissions: {deny: [{command: rm, justification: "no\nway"}]}}`, []string{"agents.permissions.deny[0].justification: write it on one line"}},
 		{"reports all errors", `
 links: [{src: a}]
 commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
@@ -215,6 +233,14 @@ agents:
 		{"instructions", "agents: {instructions: agents/AGENTS.md}"},
 		{"klaudiush hooks", "agents: {hooks: {klaudiush: true}}"},
 		{"shared command hooks", "agents: {providers: [claude, codex, opencode], hooks: {commands: [{event: beforeTool, command: check}]}}"},
+		{"permissions", `
+agents:
+  providers: [claude, codex]
+  permissions:
+    allow: [git status, sed -n, {command: peekaboo see, providers: [codex]}, /usr/bin/env -i]
+    review: [git push, {command: peekaboo see, providers: [claude]}]
+    deny: [{command: git push --force, justification: 'use "git push --force-with-lease"'}, npm run lint:fix]`},
+		{"empty permissions", "agents: {permissions: {}}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
 	}
 	for _, tt := range tests {
@@ -310,5 +336,62 @@ func TestPaths(t *testing.T) {
 		if got := tt.fn(tt.in); got != tt.want {
 			t.Errorf("(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestPermissionsFor(t *testing.T) {
+	load := func(t *testing.T, body string) *Agents {
+		t.Helper()
+		c, err := Load(writeConfig(t, body), "/h")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.Agents
+	}
+	render := func(perms []Permission) []string {
+		var out []string
+		for _, p := range perms {
+			s := p.Decision + " " + p.Command()
+			if p.Justification != "" {
+				s += " (" + p.Justification + ")"
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	permissions := `
+  permissions:
+    deny: [git push --force]
+    review: [git push]
+    allow:
+      - git   status
+      - {command: peekaboo see, providers: [codex]}
+      - {command: sed -n, providers: [claude, opencode]}
+`
+	tests := []struct {
+		name, agents, provider string
+		want                   []string
+	}{
+		{"claude, in decision order", "agents:" + permissions, ProviderClaude, []string{"allow git status", "allow sed -n", "review git push", "deny git push --force"}},
+		{"opencode by default", "agents:" + permissions, ProviderOpencode, []string{"allow git status", "allow sed -n", "review git push", "deny git push --force"}},
+		{"codex only by name when not named", "agents:" + permissions, ProviderCodex, []string{"allow peekaboo see"}},
+		{"codex named", `
+agents:
+  providers: [claude, codex]
+  permissions:
+    allow: [git status, {command: peekaboo see, providers: [codex]}, {command: sed -n, providers: [claude]}]
+    deny: [{command: git push --force, justification: use --force-with-lease}]`, ProviderCodex, []string{"allow git status", "allow peekaboo see", "deny git push --force (use --force-with-lease)"}},
+		{"provider not managed", "agents:\n  providers: [claude]\n  permissions: {allow: [ls]}", ProviderOpencode, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := render(load(t, tt.agents).PermissionsFor(tt.provider)); !slices.Equal(got, tt.want) {
+				t.Errorf("PermissionsFor(%s) = %q, want %q", tt.provider, got, tt.want)
+			}
+		})
+	}
+	var none *Agents
+	if got := none.PermissionsFor(ProviderClaude); got != nil {
+		t.Errorf("nil agents = %v", got)
 	}
 }

@@ -460,7 +460,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		&system.Module{System: cfg.System, Paths: paths, Runner: env.Runner, PAMFile: env.PAMFile},
 		&files.Module{Files: cfg.Files, Keep: templateDsts(cfg, paths), Paths: paths, Installer: installer},
 		&links.Module{Links: cfg.Links, Paths: paths},
-		&templates.Module{Templates: cfg.Templates, Paths: paths, Installer: installer},
+		&templates.Module{Templates: cfg.Templates, Agents: cfg.Agents, Paths: paths, Installer: installer},
 	}
 	if cfg.Brew != nil {
 		mods = append(mods, &brew.Module{Brew: *cfg.Brew, Paths: paths, Runner: env.Runner})
@@ -474,6 +474,9 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		agentsCfg = &config.Agents{}
 	}
 	if _, err := os.Lstat(agents.CommandHooksStatePath(env.Home)); agentsCfg == nil && err == nil {
+		agentsCfg = &config.Agents{}
+	}
+	if _, err := os.Lstat(agents.PermissionsStatePath(env.Home)); agentsCfg == nil && err == nil {
 		agentsCfg = &config.Agents{}
 	}
 	if agentsCfg != nil {

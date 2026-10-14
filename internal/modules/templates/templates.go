@@ -5,9 +5,14 @@ package templates
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"text/template"
 
 	"github.com/Automaat/zakwas/internal/config"
@@ -23,8 +28,11 @@ type Data struct {
 	Vars map[string]string
 }
 
+// Module renders templates. Agents, which may be nil, feeds the
+// agentPermissions function.
 type Module struct {
 	Templates config.Templates
+	Agents    *config.Agents
 	Paths     config.Paths
 	Installer *install.Installer
 }
@@ -39,7 +47,7 @@ func (m *Module) Plan(_ context.Context) ([]engine.Change, error) {
 		if mode == 0 {
 			mode = defaultMode
 		}
-		want, err := Render(m.Paths.Src(f.Src), data)
+		want, err := Render(m.Paths.Src(f.Src), data, Funcs(m.Agents))
 		if err != nil {
 			return nil, err
 		}
@@ -55,12 +63,12 @@ func (m *Module) Plan(_ context.Context) ([]engine.Change, error) {
 }
 
 // Render executes the template at path, failing on unknown variables.
-func Render(path string, data Data) ([]byte, error) {
+func Render(path string, data Data, funcs template.FuncMap) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	t, err := template.New(filepath.Base(path)).Option("missingkey=error").Parse(string(raw))
+	t, err := template.New(filepath.Base(path)).Option("missingkey=error").Funcs(funcs).Parse(string(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -69,4 +77,68 @@ func Render(path string, data Data) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// Funcs are the functions templates can call; agents may be nil.
+func Funcs(agents *config.Agents) template.FuncMap {
+	return template.FuncMap{
+		"agentPermissions": func(provider string, catchAll ...string) (string, error) {
+			return agentPermissions(agents, provider, catchAll...)
+		},
+	}
+}
+
+// opencodeActions maps a decision to opencode's permission action.
+var opencodeActions = map[string]string{
+	config.PermissionAllow:  "allow",
+	config.PermissionReview: "ask",
+	config.PermissionDeny:   "deny",
+}
+
+// agentPermissions renders agents.permissions as opencode's permission.bash
+// object. opencode applies the last matching pattern, so the catch-all
+// comes first and deny entries last; each prefix gets a bare pattern and
+// one with " *" for its arguments.
+func agentPermissions(agents *config.Agents, provider string, catchAll ...string) (string, error) {
+	if provider != config.ProviderOpencode {
+		return "", fmt.Errorf("agentPermissions: provider %q is not supported, only %s", provider, config.ProviderOpencode)
+	}
+	if len(catchAll) > 1 {
+		return "", fmt.Errorf("agentPermissions: want at most one default action, got %d", len(catchAll))
+	}
+	var b strings.Builder
+	add := func(pattern, action string) error {
+		key, err := json.Marshal(pattern)
+		if err != nil {
+			return err
+		}
+		value, err := json.Marshal(action)
+		if err != nil {
+			return err
+		}
+		if b.Len() > 1 {
+			b.WriteString(", ")
+		}
+		b.Write(key)
+		b.WriteString(": ")
+		b.Write(value)
+		return nil
+	}
+	b.WriteByte('{')
+	if len(catchAll) == 1 {
+		if !slices.Contains([]string{"allow", "ask", "deny"}, catchAll[0]) {
+			return "", fmt.Errorf("agentPermissions: default action %q is not one of allow, ask, deny", catchAll[0])
+		}
+		if err := add("*", catchAll[0]); err != nil {
+			return "", err
+		}
+	}
+	for _, p := range agents.PermissionsFor(provider) {
+		action := opencodeActions[p.Decision]
+		if err := errors.Join(add(p.Command(), action), add(p.Command()+" *", action)); err != nil {
+			return "", err
+		}
+	}
+	b.WriteByte('}')
+	return b.String(), nil
 }

@@ -124,18 +124,28 @@ func readObject(path string) (object, bool, error) {
 	return o, true, nil
 }
 
-// writeObject replaces path atomically, writing through a symlink (a
-// dotfiles link) rather than over it and keeping the file's mode.
-func writeObject(path string, o object) error {
+// indentObject renders o as a settings file: two-space indent, final
+// newline.
+func indentObject(o object) ([]byte, error) {
 	compact, err := marshal(o)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var out bytes.Buffer
 	if err := json.Indent(&out, compact, "", "  "); err != nil {
-		return err
+		return nil, err
 	}
 	out.WriteByte('\n')
+	return out.Bytes(), nil
+}
+
+// writeObject replaces path atomically, writing through a symlink (a
+// dotfiles link) rather than over it and keeping the file's mode.
+func writeObject(path string, o object) error {
+	out, err := indentObject(o)
+	if err != nil {
+		return err
+	}
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		path = real
 	}
@@ -151,7 +161,7 @@ func writeObject(path string, o object) error {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(out.Bytes()); err != nil {
+	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
 		return err
 	}

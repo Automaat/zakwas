@@ -188,6 +188,9 @@ func TestLoaderAcceptedConfigs(t *testing.T) {
 		"agents: {providers: , upgrade: , prune: , marketplaces: , plugins: }\n",
 		"agents: {marketplaces: {sai: o/sai, l: {source: ./x, providers: }}, plugins: [a@sai, {id: b@sai, providers: }]}\n",
 		"agents: {providers: [claude], marketplaces: {sai: {source: o/sai, providers: [claude]}}, plugins: [{id: a@sai, providers: [claude]}]}\n",
+		"agents: {permissions: }\n",
+		"agents: {permissions: {allow: , review: , deny: }}\n",
+		"agents: {permissions: {allow: [git status, {command: sed -n, providers: , justification: }], deny: [{command: rm -rf, justification: use trash}]}}\n",
 	} {
 		t.Run(doc, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), config.FileName)
@@ -241,6 +244,11 @@ func TestInvalidConfigs(t *testing.T) {
 		{"empty marketplace source", "agents: {marketplaces: {sai: ''}}\n", "marketplaces"},
 		{"unknown plugin field", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, scope: user}]}\n", "scope"},
 		{"string mode", "templates:\n  files:\n    - {src: a, dst: ~/a, mode: '0644'}\n", "mode"},
+		{"permissions as a list", "agents: {permissions: [git status]}\n", "permissions"},
+		{"unknown permission list", "agents: {permissions: {ask: [ls]}}\n", "ask"},
+		{"empty permission command", "agents: {permissions: {allow: ['']}}\n", "allow"},
+		{"unknown permission field", "agents: {permissions: {deny: [{command: rm, decision: deny}]}}\n", "decision"},
+		{"permission provider", "agents: {permissions: {allow: [{command: ls, providers: [cursor]}]}}\n", "providers"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validate(t, s, []byte(tc.yaml))
