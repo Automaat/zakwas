@@ -14,6 +14,7 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 - **defaults**: macOS preferences (`defaults write`, restarts Dock/Finder when needed)
 - **system**: Touch ID for sudo, directories, SSH key
 - **commands**: guarded one-off steps (`run` only while `check` fails)
+- **launchd**: scheduled jobs as launchd user agents, loaded on apply and unloaded when removed from the config
 
 ![zakwas plan, apply, and a protected dotfile](docs/demo/demo.gif)
 
@@ -174,7 +175,7 @@ defaults:                         # YAML type picks -bool/-int/-float/-string
   - {domain: com.apple.HIToolbox, key: AppleFnUsageType, value: 0, currentHost: true}
 ```
 
-Modules run in this order: system → files → links → templates → brew → mise → agents → commands → defaults.
+Modules run in this order: system → files → links → templates → brew → mise → agents → commands → launchd → defaults.
 
 Find a macOS preference key: `defaults read > a`, toggle it in System Settings, `defaults read > b`, `diff a b`.
 

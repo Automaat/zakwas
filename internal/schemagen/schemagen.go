@@ -32,7 +32,7 @@ func Generate() ([]byte, error) {
 	}
 	root.ID = schema.ID
 	root.Title = "zakwas.yaml"
-	root.Description = "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands."
+	root.Description = "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands, launchd."
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return nil, err

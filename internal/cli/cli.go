@@ -25,6 +25,7 @@ import (
 	"github.com/Automaat/zakwas/internal/modules/commands"
 	"github.com/Automaat/zakwas/internal/modules/defaults"
 	"github.com/Automaat/zakwas/internal/modules/files"
+	"github.com/Automaat/zakwas/internal/modules/launchd"
 	"github.com/Automaat/zakwas/internal/modules/links"
 	"github.com/Automaat/zakwas/internal/modules/mise"
 	"github.com/Automaat/zakwas/internal/modules/system"
@@ -82,6 +83,7 @@ type Env struct {
 	Stderr  io.Writer
 	Home    string
 	Cwd     string
+	UID     int
 	Runner  runner.Runner
 	PAMFile string
 	Now     func() time.Time
@@ -547,7 +549,8 @@ func loadConfig(flagPath, cwd, home string) (*config.Config, error) {
 
 // Modules returns every configured module in apply order. Order matters:
 // files put the mise config in place, brew installs mise, agents need the
-// agent CLIs brew or mise install, and commands may need tools from any.
+// agent CLIs brew or mise install, commands may need tools from any, and
+// launchd jobs may run what commands set up.
 func Modules(cfg *config.Config, env Env) []engine.Module {
 	paths := config.Paths{Home: env.Home, Root: cfg.Root}
 	installer := &install.Installer{Paths: paths, StatePath: install.StatePath(env.Home), Immutable: cfg.Protect.Immutable}
@@ -596,8 +599,11 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 			GeminiHome: absFromCwd(env, env.GeminiHome),
 		})
 	}
+	mods = append(mods, &commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner})
+	if _, err := os.Lstat(launchd.StatePath(env.Home)); len(cfg.Launchd) > 0 || err == nil {
+		mods = append(mods, &launchd.Module{Jobs: cfg.Launchd, Paths: paths, Runner: env.Runner, UID: env.UID})
+	}
 	return append(mods,
-		&commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner},
 		&defaults.Module{Defaults: cfg.Defaults, Runner: env.Runner},
 	)
 }
