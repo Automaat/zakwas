@@ -177,6 +177,7 @@ defaults:
 		{"mcp http with env vars", "agents: {mcp: {a: {url: 'https://e.com', envVars: [X]}}}", []string{"agents.mcp.a: envVars only applies to a server with a command"}},
 		{"mcp url scheme", "agents: {mcp: {a: {url: 'ftp://e.com'}}}", []string{`agents.mcp.a: url "ftp://e.com" must be an http:// or https:// URL`}},
 		{"mcp url without host", "agents: {mcp: {a: {url: 'https://'}}}", []string{"must be an http:// or https:// URL"}},
+		{"mcp url with a password", "agents: {mcp: {a: {url: 'https://u:pw@e.com/mcp'}}}", []string{"agents.mcp.a: url holds a user name or password"}},
 		{"mcp env name", "agents: {mcp: {a: {command: x, env: {'A B': c}}}}", []string{`agents.mcp.a: env name "A B" is not a valid environment variable name`}},
 		{"mcp env var name", "agents: {mcp: {a: {command: x, envVars: ['1X']}}}", []string{`agents.mcp.a: envVars[0] "1X" is not a valid environment variable name`}},
 		{"mcp duplicate env var", "agents: {mcp: {a: {command: x, envVars: [X, X]}}}", []string{`agents.mcp.a: envVars lists "X" twice`}},

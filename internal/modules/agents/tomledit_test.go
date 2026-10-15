@@ -83,6 +83,36 @@ func TestEditServer(t *testing.T) {
 			removed:  "# end\n",
 		},
 		{
+			name:     "divider comment before the next table",
+			in:       "[mcp_servers.a]\ncommand = \"old\"\n\n# ---- profiles ----\n# keep me\n\n[b]\ny = 2\n",
+			replaced: "[mcp_servers.a]\ncommand = \"new\"\n\n# ---- profiles ----\n# keep me\n\n[b]\ny = 2\n",
+			removed:  "# ---- profiles ----\n# keep me\n\n[b]\ny = 2\n",
+		},
+		{
+			name:     "commented-out table after the server",
+			in:       "x = 1\n\n[mcp_servers.a]\ncommand = \"old\"\n\n# [mcp_servers.old]\n# command = \"x\"\n\n[b]\n",
+			replaced: "x = 1\n\n[mcp_servers.a]\ncommand = \"new\"\n\n# [mcp_servers.old]\n# command = \"x\"\n\n[b]\n",
+			removed:  "x = 1\n\n# [mcp_servers.old]\n# command = \"x\"\n\n[b]\n",
+		},
+		{
+			name:     "no final newline",
+			in:       "[mcp_servers.a]\ncommand = \"old\"\n\n[b]\ny = 2",
+			replaced: "[mcp_servers.a]\ncommand = \"new\"\n\n[b]\ny = 2",
+			removed:  "[b]\ny = 2",
+		},
+		{
+			name:     "no final newline in the replaced server",
+			in:       "x = 1\n\n[mcp_servers.a]\ncommand = \"old\"",
+			replaced: "x = 1\n\n[mcp_servers.a]\ncommand = \"new\"",
+			removed:  "x = 1",
+		},
+		{
+			name:     "CRLF",
+			in:       "x = 1\r\n\r\n[mcp_servers.a]\r\ncommand = \"old\"\r\n\r\n[b]\r\ny = 2\r\n",
+			replaced: "x = 1\r\n\r\n[mcp_servers.a]\r\ncommand = \"new\"\r\n\r\n[b]\r\ny = 2\r\n",
+			removed:  "x = 1\r\n\r\n[b]\r\ny = 2\r\n",
+		},
+		{
 			name:     "quoted name",
 			in:       "[mcp_servers.\"a\"]\ncommand = \"old\"\n",
 			replaced: "[mcp_servers.a]\ncommand = \"new\"\n",
@@ -115,6 +145,7 @@ func TestAppendServer(t *testing.T) {
 		"x = 1":     "x = 1\n\n[t]\n",
 		"x = 1\n":   "x = 1\n\n[t]\n",
 		"x = 1\n\n": "x = 1\n\n[t]\n",
+		"x = 1\r\n": "x = 1\r\n\r\n[t]\r\n",
 	} {
 		if got := string(appendServer([]byte(in), "[t]\n")); got != want {
 			t.Errorf("append to %q = %q, want %q", in, got, want)

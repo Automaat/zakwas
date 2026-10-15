@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 	"strings"
@@ -167,9 +168,8 @@ func unescapeTOML(s string) string {
 
 // serverRegions returns the line ranges [start, end) of the tables that
 // make up mcp_servers.<name>: its own and its subtables (env, ...). A range
-// runs from the header to its last line of content: the comment lines
-// directly above the next header and the blank lines before them are not
-// part of it.
+// runs from the header to its last line of content: every comment and
+// blank line after that stays, since it may belong to what follows.
 func serverRegions(lines []string, name string) [][2]int {
 	headers := tomlHeaders(lines)
 	var out [][2]int
@@ -181,10 +181,7 @@ func serverRegions(lines []string, name string) [][2]int {
 		if i+1 < len(headers) {
 			end = headers[i+1].line
 		}
-		for end-1 > h.line && isTOMLComment(lines[end-1]) {
-			end--
-		}
-		for end-1 > h.line && strings.TrimSpace(lines[end-1]) == "" {
+		for end-1 > h.line && (isTOMLComment(lines[end-1]) || strings.TrimSpace(lines[end-1]) == "") {
 			end--
 		}
 		out = append(out, [2]int{h.line, end})
@@ -195,7 +192,7 @@ func serverRegions(lines []string, name string) [][2]int {
 func isTOMLComment(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), "#") }
 
 // splitLines splits data into lines without their terminating newline; a
-// final newline yields no extra empty line.
+// carriage return of a CRLF file stays at the end of its line.
 func splitLines(data []byte) []string {
 	if len(data) == 0 {
 		return nil
@@ -203,16 +200,34 @@ func splitLines(data []byte) []string {
 	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
-func joinLines(lines []string) []byte {
+// joinLines is splitLines's inverse; finalNewline says whether the file
+// ended with a newline.
+func joinLines(lines []string, finalNewline bool) []byte {
 	if len(lines) == 0 {
 		return nil
+	}
+	if !finalNewline {
+		lines = slices.Clone(lines)
+		lines[len(lines)-1] = strings.TrimSuffix(lines[len(lines)-1], "\r")
+		return []byte(strings.Join(lines, "\n"))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
+func endsWithNewline(data []byte) bool { return len(data) == 0 || data[len(data)-1] == '\n' }
+
+// lineEnding is the file's dominant line ending, "\n" for an empty one.
+func lineEnding(data []byte) string {
+	if crlf := bytes.Count(data, []byte("\r\n")); crlf > 0 && crlf*2 > bytes.Count(data, []byte("\n")) {
+		return "\r\n"
+	}
+	return "\n"
+}
+
 // replaceServer puts text in place of the tables of mcp_servers.<name>: at
-// the first one, dropping the others and the blank lines before them. It reports false when the file has
-// no such table. Everything outside the replaced lines is kept as is.
+// the first one, dropping the others and the blank lines before them. It
+// reports false when the file has no such table. Everything outside the
+// replaced lines is kept as is.
 func replaceServer(data []byte, name, text string) ([]byte, bool) {
 	lines := splitLines(data)
 	regions := serverRegions(lines, name)
@@ -228,16 +243,19 @@ func replaceServer(data []byte, name, text string) ([]byte, bool) {
 			drop[j] = true
 		}
 	}
+	eol := lineEnding(data)
 	var out []string
 	for i, l := range lines {
 		if i == regions[0][0] {
-			out = append(out, strings.Split(strings.TrimSuffix(text, "\n"), "\n")...)
+			for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+				out = append(out, line+strings.TrimSuffix(eol, "\n"))
+			}
 		}
 		if !drop[i] {
 			out = append(out, l)
 		}
 	}
-	return joinLines(out), true
+	return joinLines(out, endsWithNewline(data)), true
 }
 
 // dropRegions marks the lines of regions, with the blank lines after each,
@@ -276,24 +294,25 @@ func removeServer(data []byte, name string) ([]byte, bool) {
 			out = append(out, l)
 		}
 	}
-	return joinLines(out), true
+	return joinLines(out, endsWithNewline(data)), true
 }
 
 // appendServer adds text after the existing content, separated by a blank
-// line.
+// line, with the file's line endings.
 func appendServer(data []byte, text string) []byte {
+	eol := lineEnding(data)
 	var b strings.Builder
 	b.Write(data)
 	if len(data) > 0 {
 		if !strings.HasSuffix(b.String(), "\n") {
-			b.WriteByte('\n')
+			b.WriteString(eol)
 		}
-		if !strings.HasSuffix(b.String(), "\n\n") {
-			b.WriteByte('\n')
+		if !strings.HasSuffix(b.String(), "\n\n") && !strings.HasSuffix(b.String(), "\n\r\n") {
+			b.WriteString(eol)
 		}
 	}
-	b.WriteString(strings.TrimSuffix(text, "\n"))
-	b.WriteByte('\n')
+	b.WriteString(strings.ReplaceAll(strings.TrimSuffix(text, "\n"), "\n", eol))
+	b.WriteString(eol)
 	return []byte(b.String())
 }
 

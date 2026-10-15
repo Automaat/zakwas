@@ -76,7 +76,7 @@ type MCPServer struct {
 	Args           []string          `yaml:"args" jsonschema_description:"Arguments of the command. Written to the agents' config as is, so keep secrets out of them."`
 	Env            map[string]string `yaml:"env" jsonschema_description:"Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead."`
 	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, opencode environment NAME={env:NAME}."`
-	URL            string            `yaml:"url" jsonschema:"minLength=1" jsonschema_description:"URL of an HTTP (streamable) server, http:// or https://. Set either 'command' or 'url'."`
+	URL            string            `yaml:"url" jsonschema:"minLength=1" jsonschema_description:"URL of an HTTP (streamable) server, http:// or https://, without a user name or password. Written as is, so keep keys out of the query. Set either 'command' or 'url'."`
 	Headers        map[string]string `yaml:"headers" jsonschema_description:"HTTP headers with their values. Written to the agents' config as is, so use 'headerEnv' or 'bearerTokenEnv' for secrets."`
 	HeaderEnv      map[string]string `yaml:"headerEnv" jsonschema_description:"HTTP headers whose value is read from an environment variable: header name to variable name."`
 	BearerTokenEnv string            `yaml:"bearerTokenEnv" jsonschema:"minLength=1" jsonschema_description:"Name of the environment variable holding a bearer token, sent as 'Authorization: Bearer <token>'."`
@@ -528,6 +528,8 @@ func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []st
 			}
 			if u, err := url.Parse(s.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				fail("url %q must be an http:// or https:// URL", s.URL)
+			} else if u.User != nil {
+				fail("url holds a user name or password; use bearerTokenEnv, headerEnv or headers instead")
 			}
 		}
 		for key := range s.Env {

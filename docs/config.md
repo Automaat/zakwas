@@ -390,7 +390,7 @@ opencode applies the last pattern that matches. The function therefore writes th
 | `oauth` | HTTP | The server signs in with OAuth; `plan` and `apply` show the login command. Not combined with `bearerTokenEnv` or an `Authorization` header. |
 | `providers` | both | Providers to register the server with; must be in `agents.providers`. |
 
-Secrets never go into the config zakwas writes: `envVars`, `headerEnv` and `bearerTokenEnv` name the environment variable and each agent reads it in its own way. `env`, `headers` and `args` are written as they are, so keep tokens out of them.
+Secrets never go into the config zakwas writes: `envVars`, `headerEnv` and `bearerTokenEnv` name the environment variable and each agent reads it in its own way. `env`, `headers`, `args` and the `url` are written as they are, so keep tokens out of them (a `url` can't hold a user name or password, and `plan` diffs hide query values).
 
 ```yaml
 agents:
@@ -417,7 +417,7 @@ agents:
 
 **Claude Code.** `claude mcp get` starts the server it reports on, so zakwas reads `.claude.json` instead and edits only the entry of the server it changes. The rest of the file keeps its key order and values. If Claude Code saves the file while zakwas edits it, zakwas redoes its edit on the new content, and gives up after three tries.
 
-**Codex.** `codex mcp add` rewrites every `[mcp_servers.*]` table and drops their comments, and it opens a browser for OAuth servers. zakwas edits the server's own tables in `config.toml` as text instead: a changed or removed server rewrites only the lines from its `[mcp_servers.<name>]` header to its last key, subtables included. Everything else, comments included, stays byte-identical, and a new server is appended at the end of the file. Comments directly above a server's header are not part of it and stay. A server written as an inline table (`[mcp_servers]` with `name = { … }`) can't be edited in place: if it differs from `zakwas.yaml`, or has to change or go, the plan fails and says to do it by hand.
+**Codex.** `codex mcp add` rewrites every `[mcp_servers.*]` table and drops their comments, and it opens a browser for OAuth servers. zakwas edits the server's own tables in `config.toml` as text instead: a changed or removed server rewrites only the lines from its `[mcp_servers.<name>]` header to its last key, subtables included. Everything else, comments included, stays byte-identical, and a new server is appended at the end of the file. Comments and blank lines after a server's last key stay, as does everything above its header, and the file's line endings and final newline are kept. A server written as an inline table (`[mcp_servers]` with `name = { … }`) can't be edited in place: if it differs from `zakwas.yaml`, or has to change or go, the plan fails and says to do it by hand.
 
 **opencode.** zakwas doesn't edit `opencode.json`, which is usually a [template](#templates). Render the servers into its `mcp` key with `agentMCP`:
 
@@ -432,7 +432,7 @@ A server targets opencode through its `providers` or, without them, `agents.prov
 **Ownership.** zakwas records the servers it registered, with a hash of each entry, in `~/.local/state/zakwas/agent-mcp.json`:
 
 - A server of the same name that zakwas did not add is adopted, without rewriting its file, when it is identical to the declaration. When it differs, the provider's plan fails and names the differing keys, never their values; remove the server or make `zakwas.yaml` match.
-- Changing a declared server changes only that server. Removing it, removing `mcp`, or removing the whole `agents` section removes only servers zakwas registered, shown as destructive in the plan. A server edited since zakwas wrote it is left in place and only forgotten.
+- Changing a declared server changes only that server. Removing it, removing `mcp`, or removing the whole `agents` section removes only servers zakwas registered, shown as destructive in the plan. A server edited since zakwas wrote it is left in place and only forgotten when it goes; when it is still declared and differs from `zakwas.yaml`, the plan fails instead of resetting your edit, naming the differing keys.
 - When the config dir moves (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the servers zakwas registered in the old file are removed there.
 
 `plan` and `check` only read the two files: they start no MCP server and open no browser. A server with `oauth: true` shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.

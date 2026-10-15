@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -224,6 +225,28 @@ func mcpEqual(a, b any) bool {
 	return bytes.Equal(x, y)
 }
 
+var urlInText = regexp.MustCompile(`https?://[^\s"'\\]+`)
+
+// redactURLs hides the user info and query values of the URLs in a diff,
+// which are where servers put keys; the summary line hides them too.
+func redactURLs(text string) string {
+	return urlInText.ReplaceAllStringFunc(text, func(raw string) string {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return raw
+		}
+		u.User = nil
+		if u.RawQuery != "" {
+			query := u.Query()
+			for key := range query {
+				query.Set(key, "REDACTED")
+			}
+			u.RawQuery = query.Encode()
+		}
+		return u.String()
+	})
+}
+
 func mcpSummary(s config.MCPServer) string {
 	if !s.IsHTTP() {
 		return "stdio " + s.Command
@@ -360,6 +383,9 @@ func (m *Module) planMCPFile(store mcpStore, path string, want map[string]config
 		case present && !isOwned:
 			errs = append(errs, fmt.Errorf("server %q is already in %s and differs from zakwas.yaml in %s; remove it with `%s` or make zakwas.yaml match, then apply again",
 				name, pretty, strings.Join(differingKeys(cur.value, next.value), ", "), store.removeHint(name)))
+		case present && install.Sum([]byte(cur.canon)) != hash:
+			errs = append(errs, fmt.Errorf("server %q in %s was changed since zakwas added it and differs from zakwas.yaml in %s; restore it, or remove it with `%s` and apply again",
+				name, pretty, strings.Join(differingKeys(cur.value, next.value), ", "), store.removeHint(name)))
 		case present && cur.inline:
 			errs = append(errs, fmt.Errorf("%q is defined inline in %s, which zakwas can't edit; change it by hand", name, pretty))
 		default:
@@ -374,7 +400,7 @@ func (m *Module) planMCPFile(store mcpStore, path string, want map[string]config
 			}
 			changes = append(changes, engine.Change{
 				Action: action, Target: target + name, Detail: detail,
-				Diff: udiff.Unified(pretty, "zakwas.yaml", from, next.text),
+				Diff: udiff.Unified(pretty, "zakwas.yaml", redactURLs(from), redactURLs(next.text)),
 				Apply: func(context.Context) error {
 					if err := m.checkMCPFree(store, path, name, next.canon, isOwned); err != nil {
 						return err
@@ -402,7 +428,7 @@ func (m *Module) removeMCPChange(store mcpStore, path, name, hash string, cur mc
 	provider := store.provider()
 	return engine.Change{
 		Action: engine.Remove, Target: provider + " mcp " + name, Detail: "no longer in zakwas.yaml", Destructive: true,
-		Diff: udiff.Unified(m.Paths.Pretty(path), "/dev/null", cur.text, ""),
+		Diff: udiff.Unified(m.Paths.Pretty(path), "/dev/null", redactURLs(cur.text), ""),
 		Apply: func(context.Context) error {
 			have, err := store.load(path)
 			if err != nil {

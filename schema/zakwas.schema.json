@@ -770,7 +770,7 @@
               },
               "url": {
                 "minLength": 1,
-                "description": "URL of an HTTP (streamable) server, http:// or https://. Set either 'command' or 'url'.",
+                "description": "URL of an HTTP (streamable) server, http:// or https://, without a user name or password. Written as is, so keep keys out of the query. Set either 'command' or 'url'.",
                 "type": [
                   "string",
                   "null"

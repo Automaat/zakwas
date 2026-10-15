@@ -517,3 +517,63 @@ func TestMCPSymlinkedConfigIsEditedThrough(t *testing.T) {
 		t.Errorf("target = %q", got)
 	}
 }
+
+func TestCodexMCPKeepsHandEditsOfOwnedServer(t *testing.T) {
+	m := mcpModule(t, []string{config.ProviderCodex}, map[string]config.MCPServer{"foo": stdioServer("foo")})
+	cfg := filepath.Join(m.CodexHome, "config.toml")
+	apply(t, plan(t, m))
+	edited := readFile(t, cfg) + "tool_timeout_sec = 90\n\n[mcp_servers.foo.tools.search]\napproval_mode = \"approve\"\n"
+	writeFile(t, cfg, edited)
+
+	_, err := planErr(t, m)
+	if err == nil || !strings.Contains(err.Error(), `server "foo" in ~/codex/config.toml was changed since zakwas added it and differs from zakwas.yaml in tool_timeout_sec, tools`) {
+		t.Fatalf("plan error = %v", err)
+	}
+	if readFile(t, cfg) != edited {
+		t.Error("config.toml changed")
+	}
+}
+
+func TestMCPKeepsCommentsAfterServer(t *testing.T) {
+	m := mcpModule(t, []string{config.ProviderCodex}, map[string]config.MCPServer{"foo": stdioServer("foo")})
+	cfg := filepath.Join(m.CodexHome, "config.toml")
+	before := "[mcp_servers.foo]\ncommand = \"foo\"\n\n# ---- profiles ----\n# keep me\n\n[profiles.x]\nmodel = \"y\"\n"
+	writeFile(t, cfg, before)
+	apply(t, plan(t, m))
+	m.Agents.MCP["foo"] = stdioServer("foo", "--v2")
+	apply(t, plan(t, m))
+	want := "[mcp_servers.foo]\ncommand = \"foo\"\nargs = [\"--v2\"]\n\n# ---- profiles ----\n# keep me\n\n[profiles.x]\nmodel = \"y\"\n"
+	if got := readFile(t, cfg); got != want {
+		t.Errorf("config.toml after update = %q, want %q", got, want)
+	}
+	m.Agents.MCP = nil
+	apply(t, plan(t, m))
+	if got, want := readFile(t, cfg), "# ---- profiles ----\n# keep me\n\n[profiles.x]\nmodel = \"y\"\n"; got != want {
+		t.Errorf("config.toml after removal = %q, want %q", got, want)
+	}
+}
+
+func TestMCPDiffHidesURLSecrets(t *testing.T) {
+	m := mcpModule(t, []string{config.ProviderClaude, config.ProviderCodex}, map[string]config.MCPServer{
+		"web": {URL: "https://example.com/mcp?key=SECRET&team=acme"},
+	})
+	changes := plan(t, m)
+	if len(changes) != 2 {
+		t.Fatalf("changes = %v", targets(changes))
+	}
+	for _, c := range changes {
+		if strings.Contains(c.Diff, "SECRET") || strings.Contains(c.Summary(), "SECRET") || !strings.Contains(c.Diff, "REDACTED") {
+			t.Errorf("%s diff = %q", c, c.Diff)
+		}
+	}
+	apply(t, changes)
+	if !strings.Contains(readFile(t, filepath.Join(m.Paths.Home, ".claude.json")), "key=SECRET") {
+		t.Error("the URL was not written as declared")
+	}
+	m.Agents.MCP = nil
+	for _, c := range plan(t, m) {
+		if strings.Contains(c.Diff, "SECRET") {
+			t.Errorf("%s removal diff = %q", c, c.Diff)
+		}
+	}
+}
