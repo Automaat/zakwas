@@ -536,6 +536,9 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if _, err := os.Lstat(agents.PermissionsStatePath(env.Home)); agentsCfg == nil && err == nil {
 		agentsCfg = &config.Agents{}
 	}
+	if _, err := os.Lstat(agents.MCPStatePath(env.Home)); agentsCfg == nil && err == nil {
+		agentsCfg = &config.Agents{}
+	}
 	if agentsCfg != nil {
 		mods = append(mods, &agents.Module{
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,

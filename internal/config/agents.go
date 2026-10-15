@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"maps"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -34,6 +36,7 @@ type Agents struct {
 	Instructions string                 `yaml:"instructions" jsonschema:"minLength=1" jsonschema_description:"Global instructions file in the config repo, relative to the directory holding zakwas.yaml (or absolute), linked to each managed provider's global instructions: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). A file already there is backed up; links zakwas made for providers no longer managed are removed."`
 	Hooks        *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration."`
 	Permissions  *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
+	MCP          map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
 	Opencode     *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
 	Guard        *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
 }
@@ -64,6 +67,48 @@ type AgentPermission struct {
 	Command       string   `yaml:"command" jsonschema:"required,minLength=1" jsonschema_description:"Command prefix: one or more words separated by spaces, matched on whole words, e.g. 'git status' matches 'git status --short' but not 'git statusx'. No shell operators, quotes, globs or variables."`
 	Providers     []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
 	Justification string   `yaml:"justification" jsonschema:"minLength=1,pattern=\\S" jsonschema_description:"One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it."`
+}
+
+// MCPServer is one MCP server: a stdio server when it has a command, an
+// HTTP server when it has a url. Secrets are referenced by the name of an
+// environment variable, which each agent resolves its own way.
+type MCPServer struct {
+	Command        string            `yaml:"command" jsonschema:"minLength=1" jsonschema_description:"Command that starts a stdio server. Set either 'command' or 'url'."`
+	Args           []string          `yaml:"args" jsonschema_description:"Arguments of the command. Written to the agents' config as is, so keep secrets out of them."`
+	Env            map[string]string `yaml:"env" jsonschema_description:"Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead."`
+	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, opencode environment NAME={env:NAME}."`
+	URL            string            `yaml:"url" jsonschema:"minLength=1" jsonschema_description:"URL of an HTTP (streamable) server, http:// or https://, without a user name or password. Written as is, so keep keys out of the query. Set either 'command' or 'url'."`
+	Headers        map[string]string `yaml:"headers" jsonschema_description:"HTTP headers with their values. Written to the agents' config as is, so use 'headerEnv' or 'bearerTokenEnv' for secrets."`
+	HeaderEnv      map[string]string `yaml:"headerEnv" jsonschema_description:"HTTP headers whose value is read from an environment variable: header name to variable name."`
+	BearerTokenEnv string            `yaml:"bearerTokenEnv" jsonschema:"minLength=1" jsonschema_description:"Name of the environment variable holding a bearer token, sent as 'Authorization: Bearer <token>'."`
+	OAuth          bool              `yaml:"oauth" jsonschema:"default=false" jsonschema_description:"The server signs in with OAuth. Nothing is registered differently; plan and apply show how to log in, because zakwas never opens a browser. Not combined with bearerTokenEnv or an Authorization header. Default false."`
+	Providers      []string          `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to register this server with; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
+}
+
+// IsHTTP reports whether the server is reached by URL rather than started.
+func (s MCPServer) IsHTTP() bool { return s.URL != "" }
+
+// NamedMCPServer is one agents.mcp entry resolved for a provider.
+type NamedMCPServer struct {
+	Name string
+	MCPServer
+}
+
+// MCPFor returns the agents.mcp servers targeting provider, sorted by name.
+// Like plugins, a server without its own providers reaches Codex only when
+// zakwas.yaml names codex.
+func (a *Agents) MCPFor(provider string) []NamedMCPServer {
+	if a == nil {
+		return nil
+	}
+	var out []NamedMCPServer
+	for _, name := range slices.Sorted(maps.Keys(a.MCP)) {
+		s := a.MCP[name]
+		if slices.Contains(a.targets(s.Providers), provider) {
+			out = append(out, NamedMCPServer{Name: name, MCPServer: s})
+		}
+	}
+	return out
 }
 
 // Permission decisions, the keys of agents.permissions.
@@ -127,8 +172,14 @@ func (a *Agents) PermissionsFor(provider string) []Permission {
 // permissionProviders are the providers an entry targets: its own, or
 // agents.providers, where Codex counts only when zakwas.yaml names it.
 func (a *Agents) permissionProviders(e AgentPermission) []string {
-	if e.Providers != nil {
-		return e.Providers
+	return a.targets(e.Providers)
+}
+
+// targets are the providers an entry targets: its own, or agents.providers,
+// where Codex counts only when zakwas.yaml names it.
+func (a *Agents) targets(own []string) []string {
+	if own != nil {
+		return own
 	}
 	if a.Names(ProviderCodex) {
 		return a.DefaultProviders()
@@ -390,6 +441,7 @@ func (a *Agents) validate() []error {
 		}
 	}
 	errs = append(errs, a.validatePermissions(checkProviders)...)
+	errs = append(errs, a.validateMCP(checkProviders)...)
 	seen := map[string]int{}
 	for i, p := range a.Plugins {
 		what := fmt.Sprintf("agents.plugins[%d]", i)
@@ -455,6 +507,113 @@ func (a *Agents) validatePermissions(checkProviders func(what string, list, allo
 				default:
 					errs = append(errs, fmt.Errorf("%s: %q is also listed in %s for %s; give each command one decision per provider", what, command, first.what, provider))
 				}
+			}
+		}
+	}
+	return errs
+}
+
+var (
+	mcpName     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+	envVarName  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	headerToken = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^_`|~-]+$")
+)
+
+func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []string, allowedWhat string)) []error {
+	var errs []error
+	folded := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(a.MCP)) {
+		s := a.MCP[name]
+		what := "agents.mcp." + name
+		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		if !mcpName.MatchString(name) {
+			fail("name may only contain letters, digits, '_' and '-', and must start with a letter or digit")
+		}
+		if other, dup := folded[strings.ToLower(name)]; dup {
+			fail("differs from %s only in case; use distinct names", other)
+		}
+		folded[strings.ToLower(name)] = name
+		checkProviders(what+".providers", s.Providers, a.DefaultProviders(), "agents.providers")
+		switch {
+		case s.Command != "" && s.URL != "":
+			fail("set either command or url, not both")
+		case s.Command == "" && s.URL == "":
+			fail("set command for a stdio server or url for an HTTP server")
+		}
+		if strings.TrimSpace(s.Command) != s.Command {
+			fail("command %q has leading or trailing whitespace", s.Command)
+		}
+		type field struct {
+			name string
+			set  bool
+		}
+		if s.Command != "" {
+			for _, f := range []field{{"headers", len(s.Headers) > 0}, {"headerEnv", len(s.HeaderEnv) > 0}, {"bearerTokenEnv", s.BearerTokenEnv != ""}, {"oauth", s.OAuth}} {
+				if f.set {
+					fail("%s only applies to a server with a url", f.name)
+				}
+			}
+		}
+		if s.URL != "" {
+			for _, f := range []field{{"args", len(s.Args) > 0}, {"env", len(s.Env) > 0}, {"envVars", len(s.EnvVars) > 0}} {
+				if f.set {
+					fail("%s only applies to a server with a command", f.name)
+				}
+			}
+			if u, err := url.Parse(s.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				fail("url %q must be an http:// or https:// URL", s.URL)
+			} else if u.User != nil {
+				fail("url holds a user name or password; use bearerTokenEnv, headerEnv or headers instead")
+			}
+		}
+		for key := range s.Env {
+			if !envVarName.MatchString(key) {
+				fail("env name %q is not a valid environment variable name", key)
+			}
+		}
+		for i, v := range s.EnvVars {
+			switch {
+			case !envVarName.MatchString(v):
+				fail("envVars[%d] %q is not a valid environment variable name", i, v)
+			case slices.Contains(s.EnvVars[:i], v):
+				fail("envVars lists %q twice", v)
+			}
+			if _, set := s.Env[v]; set {
+				fail("%q is in both env and envVars", v)
+			}
+		}
+		if s.BearerTokenEnv != "" && !envVarName.MatchString(s.BearerTokenEnv) {
+			fail("bearerTokenEnv %q is not a valid environment variable name", s.BearerTokenEnv)
+		}
+		headers := map[string]string{}
+		addHeader := func(field, header string) {
+			if !headerToken.MatchString(header) {
+				fail("%s name %q is not a valid HTTP header name", field, header)
+			}
+			if other, dup := headers[strings.ToLower(header)]; dup {
+				fail("header %q is set in both %s and %s", header, other, field)
+			}
+			headers[strings.ToLower(header)] = field
+		}
+		for _, h := range slices.Sorted(maps.Keys(s.Headers)) {
+			addHeader("headers", h)
+		}
+		for _, h := range slices.Sorted(maps.Keys(s.HeaderEnv)) {
+			addHeader("headerEnv", h)
+			if !envVarName.MatchString(s.HeaderEnv[h]) {
+				fail("headerEnv %q: %q is not a valid environment variable name", h, s.HeaderEnv[h])
+			}
+		}
+		if s.BearerTokenEnv != "" {
+			addHeader("bearerTokenEnv", "Authorization")
+		}
+		if s.OAuth && headers["authorization"] != "" {
+			fail("oauth can't be combined with an Authorization header (%s)", headers["authorization"])
+		}
+		for _, text := range append(append(slices.Collect(maps.Values(s.Env)), slices.Collect(maps.Values(s.Headers))...), append([]string{s.Command}, s.Args...)...) {
+			if strings.ContainsFunc(text, func(r rune) bool { return unicode.IsControl(r) && r != '\t' }) || !utf8.ValidString(text) {
+				fail("values may not hold control characters or invalid UTF-8")
+				break
 			}
 		}
 	}

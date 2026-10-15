@@ -27,6 +27,9 @@ mise:
 #     commands:
 #       - {event: beforeTool, command: /path/to/check-tool}
 #     # klaudiush: true  # install klaudiush and its config first
+#   mcp:
+#     docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
+#     search: {url: "https://mcp.example.com/mcp", bearerTokenEnv: SEARCH_TOKEN}
 
 system:
   sudoTouchID: true

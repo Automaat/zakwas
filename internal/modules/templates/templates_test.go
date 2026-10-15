@@ -263,3 +263,57 @@ func TestAgentPermissionsInTemplate(t *testing.T) {
 		t.Errorf("not idempotent: %v", again)
 	}
 }
+
+func TestAgentMCP(t *testing.T) {
+	agents := &config.Agents{MCP: map[string]config.MCPServer{
+		"zeta":  {Command: "npx", Args: []string{"-y", "pkg"}, Env: map[string]string{"LANG": "C"}, EnvVars: []string{"TOKEN"}},
+		"alpha": {URL: "https://e.com/mcp?a=1&b=2", BearerTokenEnv: "API_TOKEN", Headers: map[string]string{"X-Org": "acme"}, HeaderEnv: map[string]string{"X-Key": "KEY"}},
+		"oauth": {URL: "https://o.com/mcp", OAuth: true},
+		"other": {Command: "other", Providers: []string{config.ProviderClaude}},
+	}}
+	got, err := agentMCP(agents, config.ProviderOpencode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"alpha": {"type":"remote","url":"https://e.com/mcp?a=1&b=2","headers":{"Authorization":"Bearer {env:API_TOKEN}","X-Key":"{env:KEY}","X-Org":"acme"},"oauth":false,"enabled":true}, ` +
+		`"oauth": {"type":"remote","url":"https://o.com/mcp","enabled":true}, ` +
+		`"zeta": {"type":"local","command":["npx","-y","pkg"],"environment":{"LANG":"C","TOKEN":"{env:TOKEN}"},"enabled":true}}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	if !json.Valid([]byte(got)) {
+		t.Errorf("not JSON: %s", got)
+	}
+}
+
+func TestAgentMCPEdgeCases(t *testing.T) {
+	if got, err := agentMCP(nil, config.ProviderOpencode); err != nil || got != "{}" {
+		t.Errorf("no agents = %q, %v", got, err)
+	}
+	if _, err := agentMCP(nil, config.ProviderClaude); err == nil || !strings.Contains(err.Error(), `agentMCP: provider "claude" is not supported, only opencode`) {
+		t.Errorf("claude: %v", err)
+	}
+}
+
+func TestAgentMCPInTemplate(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	tmpl := `{"mcp": {{ agentMCP "opencode" }}}
+`
+	if err := os.WriteFile(filepath.Join(root, "opencode.json.tmpl"), []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &Module{
+		Templates: config.Templates{Files: []config.TemplateFile{{Src: "opencode.json.tmpl", Dst: "~/.config/opencode/opencode.json"}}},
+		Agents:    &config.Agents{MCP: map[string]config.MCPServer{"docs": {Command: "npx"}}},
+		Paths:     config.Paths{Home: home, Root: root},
+	}
+	m.Installer = &install.Installer{Paths: m.Paths, StatePath: install.StatePath(home)}
+	apply(t, plan(t, m))
+	data, err := os.ReadFile(filepath.Join(home, ".config", "opencode", "opencode.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"mcp": {"docs": {"type":"local","command":["npx"],"enabled":true}}}` + "\n"; string(data) != want {
+		t.Errorf("rendered = %q, want %q", data, want)
+	}
+}

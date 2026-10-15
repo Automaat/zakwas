@@ -1,0 +1,180 @@
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+
+zakwas plan --only templates,agents
+cmpenv stdout plan.golden
+
+zakwas apply -y --only templates,agents
+stdout 'Applied 7 of 7 steps'
+cmp codex/config.toml codex.golden
+cmp home/.config/opencode/opencode.json opencode.golden
+exists home/.local/state/zakwas/agent-mcp.json
+grep -count=1 '"Authorization": "Bearer \$\{SEARCH_TOKEN\}"' claude/.claude.json
+grep -count=1 '"DOCS_TOKEN": "\$\{DOCS_TOKEN\}"' claude/.claude.json
+grep '"numStartups": 3' claude/.claude.json
+
+zakwas check --only templates,agents
+stdout 'up to date: templates, agents'
+
+cp zakwas-update.yaml zakwas.yaml
+zakwas plan --only agents
+cmpenv stdout plan-update.golden
+zakwas apply -y --only templates,agents
+cmp codex/config.toml codex-update.golden
+zakwas check --only templates,agents
+
+cp zakwas-none.yaml zakwas.yaml
+zakwas plan --only templates,agents
+cmpenv stdout plan-none.golden
+zakwas apply -y --only templates,agents
+cmp codex/config.toml codex-user.golden
+grep '"mine"' claude/.claude.json
+! grep 'docs|search|linear' claude/.claude.json
+! exists home/.local/state/zakwas/agent-mcp.json
+grep '"mcp": \{\}' home/.config/opencode/opencode.json
+zakwas check
+stdout 'No changes'
+
+cp zakwas-conflict.yaml zakwas.yaml
+cp claude-conflict.json claude/.claude.json
+! zakwas plan --only agents
+stdout 'claude: mcp: server "docs" is already in .*/claude/.claude.json and differs from zakwas.yaml in command, env'
+! stdout hunter2
+! stderr hunter2
+
+-- zakwas.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+  mcp:
+    docs:
+      command: npx
+      args: [-y, docs-mcp]
+      envVars: [DOCS_TOKEN]
+    search:
+      url: https://mcp.example.com/mcp
+      bearerTokenEnv: SEARCH_TOKEN
+    linear:
+      url: https://mcp.linear.app/mcp
+      oauth: true
+      providers: [claude, codex]
+-- zakwas-update.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+  mcp:
+    docs:
+      command: npx
+      args: [-y, docs-mcp@2]
+      envVars: [DOCS_TOKEN]
+    linear:
+      url: https://mcp.linear.app/mcp
+      oauth: true
+      providers: [claude, codex]
+-- zakwas-none.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+-- zakwas-conflict.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    docs: {command: npx}
+-- opencode.json.tmpl --
+{
+  "mcp": {{ agentMCP "opencode" }}
+}
+-- claude/.claude.json --
+{
+  "numStartups": 3,
+  "mcpServers": {
+    "mine": {"type": "stdio", "command": "mine"}
+  }
+}
+-- claude-conflict.json --
+{"mcpServers": {"docs": {"type": "stdio", "command": "other", "env": {"TOKEN": "hunter2"}}}}
+-- codex/config.toml --
+model = "gpt-5"
+
+[mcp_servers.mine]
+command = "mine"
+-- codex.golden --
+model = "gpt-5"
+
+[mcp_servers.mine]
+command = "mine"
+
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "docs-mcp"]
+env_vars = ["DOCS_TOKEN"]
+
+[mcp_servers.linear]
+url = "https://mcp.linear.app/mcp"
+
+[mcp_servers.search]
+url = "https://mcp.example.com/mcp"
+bearer_token_env_var = "SEARCH_TOKEN"
+-- codex-update.golden --
+model = "gpt-5"
+
+[mcp_servers.mine]
+command = "mine"
+
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "docs-mcp@2"]
+env_vars = ["DOCS_TOKEN"]
+
+[mcp_servers.linear]
+url = "https://mcp.linear.app/mcp"
+-- codex-user.golden --
+model = "gpt-5"
+
+[mcp_servers.mine]
+command = "mine"
+-- opencode.golden --
+{
+  "mcp": {"docs": {"type":"local","command":["npx","-y","docs-mcp"],"environment":{"DOCS_TOKEN":"{env:DOCS_TOKEN}"},"enabled":true}, "search": {"type":"remote","url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer {env:SEARCH_TOKEN}"},"oauth":false,"enabled":true}}
+}
+-- plan.golden --
+templates
+  + ~/.config/opencode/opencode.json
+agents
+  + claude mcp docs    stdio npx
+  + claude mcp linear  http https://mcp.linear.app/mcp, then sign in with /mcp in Claude Code
+  + claude mcp search  http https://mcp.example.com/mcp
+  + codex mcp docs     stdio npx
+  + codex mcp linear   http https://mcp.linear.app/mcp, then sign in with `codex mcp login linear`
+  + codex mcp search   http https://mcp.example.com/mcp
+
+Plan: 7 to add, 0 to change, 0 to remove, 0 to run.
+-- plan-update.golden --
+agents
+  ~ claude mcp docs    stdio npx
+  - claude mcp search  no longer in zakwas.yaml
+  ~ codex mcp docs     stdio npx
+  - codex mcp search   no longer in zakwas.yaml
+
+⚠ destructive: claude mcp search, codex mcp search
+
+Plan: 0 to add, 2 to change, 2 to remove, 0 to run.
+-- plan-none.golden --
+templates
+  ~ ~/.config/opencode/opencode.json  content
+agents
+  - claude mcp docs    no longer in zakwas.yaml
+  - claude mcp linear  no longer in zakwas.yaml
+  - codex mcp docs     no longer in zakwas.yaml
+  - codex mcp linear   no longer in zakwas.yaml
+
+⚠ destructive: claude mcp docs, claude mcp linear, codex mcp docs, codex mcp linear
+
+Plan: 0 to add, 1 to change, 4 to remove, 0 to run.

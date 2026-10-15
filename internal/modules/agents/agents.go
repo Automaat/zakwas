@@ -123,6 +123,8 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	errs = append(errs, hookErr)
 	permissions, permFailed, permErr := m.planPermissions()
 	errs = append(errs, permErr)
+	mcp, mcpFailed, mcpErr := m.planMCP()
+	errs = append(errs, mcpErr)
 	var changes []engine.Change
 	var klaudiushChange *engine.Change
 	var klaudiushErr error
@@ -137,7 +139,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			delete(instructions, p)
 			continue
 		}
-		if err := errors.Join(hookFailed[p], permFailed[p]); err != nil {
+		if err := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p]); err != nil {
 			errs = append(errs, err)
 			delete(instructions, p)
 			continue
@@ -146,6 +148,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		delete(instructions, p)
 		changes = append(changes, commandHooks[p]...)
 		changes = append(changes, permissions[p]...)
+		changes = append(changes, mcp[p]...)
 		b, ok := backends[p]
 		if !ok {
 			continue
