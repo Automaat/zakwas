@@ -1,0 +1,13 @@
+{
+  "name": "zakwas",
+  "version": "0.9.0",
+  "description": "Teaches coding agents to change the machine setup through zakwas proposals instead of editing agent config or zakwas.yaml",
+  "author": {
+    "name": "Automaat",
+    "url": "https://github.com/Automaat"
+  },
+  "homepage": "https://github.com/Automaat/zakwas",
+  "repository": "https://github.com/Automaat/zakwas",
+  "license": "MIT",
+  "keywords": ["zakwas", "macos", "setup", "proposals"]
+}

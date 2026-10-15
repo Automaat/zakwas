@@ -34,6 +34,7 @@ These four read `zakwas.yaml` and share one set of flags.
 | `--diff` | all four | show file content diffs and command scripts |
 | `--json` | all four | machine-readable output: one plan document (`plan`, `check`) or JSON lines events (`apply`, `upgrade`) |
 | `--no-color` | all four | disable colors (also `NO_COLOR`, or stdout not a terminal) |
+| `--offline` | `check` | compare only the files zakwas owns with its recorded state, start no command; see [`check`](#check) |
 | `-y` | `apply`, `upgrade` | apply without asking for confirmation |
 | `--no-wait` | `apply`, `upgrade` | exit 1 at once when another zakwas run holds the lock, instead of waiting for it |
 | `-out FILE` | `plan` | also save the plan to FILE, for `apply -plan` |
@@ -76,6 +77,38 @@ zakwas check || notify "machine drifted"
 zakwas check --json
 ```
 
+`--offline` is a fast variant that starts no command: it runs only the `files`, `links` and `templates` modules, which compare the files zakwas owns with the content, links and hashes it recorded in `~/.local/state/zakwas/files.json`. It takes about 30 ms on a config with 55 managed files, so it fits in an agent's session start. The exit codes are those of `check` (0 clean, 2 drift, 1 error) and the output ends with the modules it did not check: `system`, `brew`, `mise`, `agents`, `commands` and `defaults`. Drift in those, such as a missing brew package or an agent plugin, shows only in a full `check`. With `--json` the plan document carries `"offline": true` and the skipped modules in `skipped`, and has no `commit`. With `--only`, the offline modules left out are named too, and `--only` accepts only `files`, `links` and `templates` with `--offline`.
+
+The `agents` module is not part of it, so files it owns (instruction links, profile files, skills, hook registrations, permission and MCP entries in agent settings) are checked only by a full `check`.
+
+#### Report drift when an agent session starts
+
+A `sessionStart` hook can tell the agent that its setup is stale before the first prompt. Claude Code and Codex add a `SessionStart` hook's stdout to the session context when it exits 0; OpenCode ignores the output of session hooks, so this recipe does not reach it. A nonzero exit counts as a hook failure and `check` exits 2 on drift, so a small script turns that exit into text and always exits 0:
+
+```sh
+#!/bin/sh
+out=$(zakwas check --offline -c "$HOME/dotfiles/zakwas.yaml" 2>&1)
+case $? in
+  0|127) ;;
+  2) printf 'zakwas: this Mac drifted from its config. Pending changes:\n%s\n' "$out" ;;
+  *) printf 'zakwas: could not check drift: %s\n' "$out" ;;
+esac
+exit 0
+```
+
+Keep it in the config repo, executable, and let zakwas install it and register the hook:
+
+```yaml
+files:
+  - {src: scripts/zakwas-drift, dst: ~/.local/bin/zakwas-drift}
+agents:
+  hooks:
+    commands:
+      - {event: sessionStart, command: $HOME/.local/bin/zakwas-drift, providers: [claude, codex]}
+```
+
+The script names the config with `-c` (change the path to where your config repo lives) because an agent starts in the project directory, where zakwas can't find `zakwas.yaml` by searching upward, and `$ZAKWAS_CONFIG` is only a fallback when that search fails. Nothing is printed when the machine matches the config or when zakwas isn't on `PATH` (exit 127), so a healthy session starts with no extra context. Any other failure, such as an unreadable config, prints `zakwas: could not check drift:` and zakwas's error, so a broken hook doesn't look like a clean machine. The hook runs `check`, never `apply`: [`agents.guard`](config.md#guard) keeps agents from applying the config. Install `zakwas` where the agent's shell finds it (`~/.local/bin` by default).
+
 ## propose, proposals, approve
 
 Changing the setup without finding the right YAML section by hand, and without letting an agent edit `zakwas.yaml` freely: `propose` takes a typed operation and saves the edit, `approve` applies it from a terminal.
@@ -100,7 +133,7 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 | `pin-mise TOOL VERSION` | the `[tools]` table of the mise config (`mise.config`) | |
 | `add-mcp NAME` | `agents.mcp` | `--command CMD` with `--arg A` and `--env-var NAME`, or `--url URL` with `--bearer-token-env NAME`; `--providers LIST` |
 
-`--providers`, `--arg` and `--env-var` take a comma list or repeat. A command that starts with a dash goes after `--`: `zakwas propose add-permission allow -- ls -la`. Also `-c PATH` and `-json`, which prints the proposal as JSON.
+`--providers`, `--arg` and `--env-var` take a comma list or repeat. Also `-c PATH` and `-json`, which prints the proposal as JSON. Flags go before `--`; any command word that starts with a dash goes after it: `zakwas propose -json add-permission allow -- ls -la`.
 
 Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared (one declared by an earlier operation of the same proposal counts), a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
 
@@ -111,7 +144,7 @@ Edits splice the original bytes: every line outside the added or removed entries
 | low | add a plugin from a declared marketplace; add a `deny` or `review` rule; remove an `allow` rule; add a core Homebrew formula (not a cask, not from a tap); pin a mise tool (without a backend prefix such as `npm:` or `github:`) |
 | high | everything else: an `allow` rule, removing a `deny` or `review` rule, a cask or tap formula, a tool from a mise backend, an MCP server, a marketplace |
 
-Whatever the operations, a proposal is high when the plan it will run touches agent config (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`), shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, …), `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The plan is the whole plan of those modules, including drift that was already there, since that is what `approve` runs.
+Whatever the operations, a proposal is high when the plan it will run touches agent config (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `~/.gemini`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$GEMINI_CLI_HOME`), shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, …), `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The plan is the whole plan of those modules, including drift that was already there, since that is what `approve` runs.
 
 ### proposals
 
@@ -216,6 +249,20 @@ After a yes it does what [`approve`](#approve) does: the same checks, files writ
 **Always asked.** `zakwas_apply` carries `_meta["anthropic/requiresUserInteraction"]`, so Claude Code prompts on every call, even in bypass mode. For a server registered through `agents.mcp` as `zakwas mcp --enable-apply`, zakwas also writes `approval_mode = "prompt"` for the tool in Codex's `config.toml`. opencode has no place zakwas can edit for this: the plan names the `permission` entry to add to your `opencode.json` template. The form comes on top of those prompts.
 
 Only people should start this server with `--enable-apply`: the [guard](config.md#guard) denies the managed agents `zakwas mcp`, since an agent that ran it in a shell would be the client that answers the form.
+
+### Teach agents the flow
+
+The `zakwas` plugin in this repo's marketplace holds one skill. It tells an agent that zakwas manages agent config, `zakwas.yaml`, the Brewfile and the mise config, so it proposes changes (`zakwas_propose`, or `zakwas propose -json` without the MCP server) instead of editing them or running `apply`, and gives the user `zakwas approve ID` for a high-risk proposal. It works with or without the MCP server. Install it through `agents`:
+
+```yaml
+agents:
+  marketplaces:
+    zakwas: Automaat/zakwas
+  plugins:
+    - zakwas@zakwas
+```
+
+Claude Code and Codex install the plugin; opencode gets the skill linked. The plugin version is the zakwas release it was published with: the release workflow stops when `plugins/zakwas/.claude-plugin/plugin.json` differs from the tag. Pin the marketplace with `Automaat/zakwas#vX.Y.Z` to follow one release; the default branch can be ahead of the binary you run.
 
 ## init
 

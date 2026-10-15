@@ -10,7 +10,7 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: GUI apps and formulae from a `Brewfile` (`brew bundle`, optional zap cleanup)
 - **mise**: CLI tools pinned in a global mise config
-- **agents**: coding-agent plugins and marketplaces (Claude Code and Codex; skills for opencode), global instructions rendered per provider from one or more files, shared command hooks, and selected global Codex settings
+- **agents**: coding-agent plugins and marketplaces (Claude Code and Codex; skills for opencode), MCP servers, skills, permissions and profiles for Claude Code, Codex, opencode and, opt-in, Gemini CLI, global instructions rendered per provider from one or more files, shared command hooks, and selected global Codex settings
 - **defaults**: macOS preferences (`defaults write`, restarts Dock/Finder when needed)
 - **system**: Touch ID for sudo, directories, SSH key
 - **commands**: guarded one-off steps (`run` only while `check` fails)
@@ -61,6 +61,7 @@ zakwas plan            # what would change (--diff shows file contents)
 zakwas apply           # show plan, confirm, apply (-y skips the prompt)
 zakwas upgrade         # brew update + refresh agent marketplaces, then apply
 zakwas check           # exit 2 when the machine drifted (cron/launchd friendly)
+zakwas check --offline # same for the files zakwas owns only, in ~30 ms, no commands (agent session start)
 zakwas plan --only brew,defaults
 zakwas capture                         # list what agents have that zakwas.yaml doesn't declare (--write saves it as a proposal)
 zakwas propose add-plugin foo@market   # save a config edit without applying it
@@ -74,6 +75,8 @@ zakwas mcp --enable-apply              # serve plan/propose (and confirmed low-r
 `capture` lists the plugins, marketplaces, MCP servers, Claude allow rules and Codex approvals that agents got outside zakwas, and with `--write` saves them as one proposal. See [docs/commands.md](docs/commands.md#capture).
 
 `zakwas mcp` serves the same to coding agents over MCP: read-only config, plan, check and capture tools, plus propose and discard. With `--enable-apply` it also applies a low-risk proposal after you confirm a diff and plan zakwas renders in the agent; high-risk proposals and clients that can't show the confirmation get the `zakwas approve ID` command. Register it with `agents.mcp: {zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, ~/dotfiles/zakwas.yaml]}}`. See [docs/commands.md](docs/commands.md#mcp).
+
+The repo is also an agent plugin marketplace. Its `zakwas` plugin ships a skill that tells agents to propose changes instead of editing agent config or `zakwas.yaml`, and to hand high-risk proposals to you as `zakwas approve ID`. Install it with zakwas itself: `agents.marketplaces: {zakwas: Automaat/zakwas}` and `agents.plugins: [zakwas@zakwas]` (Claude Code, Codex and opencode). See [docs/commands.md](docs/commands.md#teach-agents-the-flow).
 
 ```
 $ zakwas plan
@@ -143,7 +146,7 @@ mise:
   prune: true                     # remove versions no mise config references
 
 agents:
-  providers: [claude, codex, opencode]
+  providers: [claude, codex, opencode]   # add gemini to converge Gemini CLI too
   instructions: dotfiles/AGENTS.md
   hooks:
     commands:
@@ -216,7 +219,7 @@ See [docs/config.md](docs/config.md#mcp).
 
 ### Agent profiles
 
-`agents.profiles` declares a profile such as "read-only review" once, and zakwas renders it for each agent: a Claude Code subagent file (`claude --agent review`), a Codex profile file (`codex --profile review`) and an opencode agent file (`opencode --agent review`).
+`agents.profiles` declares a profile such as "read-only review" once, and zakwas renders it for each agent: a Claude Code subagent file (`claude --agent review`), a Codex profile file (`codex --profile review`), an opencode agent file (`opencode --agent review`) and, once `gemini` is named, a Gemini CLI subagent (`@review`). Gemini CLI is opt-in: zakwas renders one linked extension and one policy file for it, and never writes its `settings.json` or `~/.gemini/GEMINI.md`.
 
 ```yaml
 agents:
@@ -308,7 +311,7 @@ mise run test:integration   # adds real `defaults` and mise round-trips
 mise run lint
 ```
 
-Releases: push a `vX.Y.Z` tag; GoReleaser publishes darwin arm64/amd64 binaries. See [CLAUDE.md](CLAUDE.md) for layout and conventions.
+Releases: set `version` in `plugins/zakwas/.claude-plugin/plugin.json` to `X.Y.Z` in a PR, merge it, then push the `vX.Y.Z` tag on that commit; the release workflow refuses a tag that differs from the plugin version, and GoReleaser publishes darwin arm64/amd64 binaries. See [CLAUDE.md](CLAUDE.md) for layout and conventions.
 
 ## License
 

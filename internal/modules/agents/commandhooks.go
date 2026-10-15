@@ -120,7 +120,7 @@ func (m *Module) desiredCommandHooks(provider string) []commandHookRegistration 
 			providers = m.Agents.DefaultProviders()
 		}
 		if !slices.Contains(providers, provider) ||
-			(provider == config.ProviderCodex && !m.desired(provider).named && hook.Providers == nil) {
+			(config.OptIn(provider) && !m.desired(provider).named && hook.Providers == nil) {
 			continue
 		}
 		result = append(result, commandHookRegistration{Event: hook.Event, Command: hook.Command})
@@ -148,6 +148,9 @@ func (m *Module) planCommandHooks() (map[string][]engine.Change, map[string]erro
 	changes := map[string][]engine.Change{}
 	failed := map[string]error{}
 	for _, provider := range config.Providers {
+		if provider == config.ProviderGemini {
+			continue
+		}
 		want := m.desiredCommandHooks(provider)
 		if len(want) == 0 && len(st.Providers[provider]) == 0 &&
 			(provider != config.ProviderOpencode || len(st.Pending) == 0) {

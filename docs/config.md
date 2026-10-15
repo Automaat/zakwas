@@ -254,11 +254,11 @@ mise:
 
 Coding-agent plugins and the marketplaces they come from, declared once for every provider they target. Omit the section to leave agent plugins alone.
 
-The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converged. Each managed provider plans on its own: when one fails (its CLI is missing, a source conflicts), the plan reports the error and the other providers' changes still apply. Codex is opt-in: zakwas converges it only when `zakwas.yaml` names `codex` in `agents.providers` or in an entry's `providers`. Configs that rely on the default providers leave Codex alone, as they did before Codex support; once `codex` is named, entries without their own `providers` target it too.
+The `claude` (Claude Code), `codex` (Codex), `opencode` and `gemini` (Gemini CLI) providers are converged. Each managed provider plans on its own: when one fails (its CLI is missing, a source conflicts), the plan reports the error and the other providers' changes still apply. Codex and Gemini are opt-in: zakwas converges them only when `zakwas.yaml` names `codex` or `gemini` in `agents.providers` or in an entry's `providers`. Configs that rely on the default providers leave them alone, as they did before; once one is named, entries without their own `providers` target it too. Gemini has no plugin marketplaces, so `marketplaces` and `plugins` never target it: it gets instructions, MCP servers, skills, command hooks, permissions and profiles, see [Gemini CLI](#gemini-cli).
 
 | Key | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `providers` | list of `claude` \| `codex` \| `opencode` | no | all three | Providers zakwas manages. Marketplaces target these unless they set their own; `prune` only touches these. |
+| `providers` | list of `claude` \| `codex` \| `opencode` \| `gemini` | no | `claude`, `codex`, `opencode`, with `codex` and `gemini` opt-in | Providers zakwas manages. Marketplaces target these unless they set their own; `prune` only touches these. |
 | `marketplaces` | map | no | | Marketplace name → source string, or `{source, providers}`. The name must match the `name` in the marketplace's own manifest. |
 | `plugins` | list | no | | `name@marketplace` strings, or `{id, providers}`. The marketplace must be declared under `marketplaces`. |
 | `upgrade` | bool | no | `false` | Update installed plugins to the version their marketplace offers on `apply`. |
@@ -270,7 +270,7 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `permissions.allow`, `permissions.review`, `permissions.deny` | list | no | | Shell command prefixes the agents may run without asking, must have reviewed, or must never run. Each is a command string, or `{command, providers, justification}`. See [permissions](#permissions). |
 | `mcp` | map | no | | MCP server name → `{command, args, env, envVars}` for a stdio server or `{url, headers, headerEnv, bearerTokenEnv, oauth}` for an HTTP one, each with optional `providers`. See [mcp](#mcp). |
 | `codex.settings` | map | no | | Selected global Codex config.toml values, edited in place independently of profiles. See [global Codex settings](#global-codex-settings). |
-| `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex and opencode: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode` blocks. See [profiles](#profiles). |
+| `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex, opencode and Gemini CLI: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode`, `gemini` blocks. See [profiles](#profiles). |
 | `skills` | list | no | | Standalone skills linked into every managed agent: a path, or `{path, git, ref, providers}`. See [skills](#skills). |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 | `guard` | bool | no | `true` | Keep the managed agents from applying this config. See [guard](#guard). |
@@ -316,7 +316,7 @@ agents:
     - {id: lint@team, providers: [codex]}
 ```
 
-`hooks.commands` declares each command once. `event` is `beforeTool`, `afterTool`, `sessionStart`, or `stop`; `providers` defaults to `agents.providers`, with Codex opt-in as for plugins. Zakwas registers the command in Claude Code's `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Codex's `${CODEX_HOME:-~/.codex}/hooks.json`, and a generated OpenCode plugin at `~/.config/opencode/plugins/zakwas-hooks.js` (OpenCode 1.18.29+ or 2.x). It maps the events to `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` for Claude and Codex. In OpenCode, tool events use `tool.execute.before` and `tool.execute.after` on 1.x or `execute.before` and `execute.after` on 2.x; `sessionStart` observes `session.created`, and `stop` observes `session.idle` on 1.x or `session.execution.succeeded` on 2.x. Zakwas preserves unrelated JSON settings and hook groups, records its registrations in `~/.local/state/zakwas/command-hooks.json`, and removes only those registrations when they leave the config. A generated OpenCode plugin edited by hand is left in place when removed from the config. Codex may ask you to trust newly registered hooks through `/hooks` before running them. Commands receive provider-specific event JSON on stdin; a shared script must handle the payload and output rules of each provider. OpenCode blocks a tool when a before-tool command exits nonzero or returns a JSON `decision: block` / `hookSpecificOutput.permissionDecision: deny`; its after-tool and session hooks do not use command output. Don't also manage these agent settings or the generated plugin with `files`, `links`, or `templates`.
+`hooks.commands` declares each command once. `event` is `beforeTool`, `afterTool`, `sessionStart`, or `stop`; `providers` defaults to `agents.providers`, with Codex and Gemini opt-in as for plugins. Zakwas registers the command in Claude Code's `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Codex's `${CODEX_HOME:-~/.codex}/hooks.json`, the `hooks/hooks.json` of the [Gemini extension](#gemini-cli), and a generated OpenCode plugin at `~/.config/opencode/plugins/zakwas-hooks.js` (OpenCode 1.18.29+ or 2.x). It maps the events to `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` for Claude and Codex, and to `BeforeTool`, `AfterTool`, `SessionStart` and `AfterAgent` for Gemini; `AfterAgent` fires once per turn, after the final response, so `stop` runs when a Gemini turn ends. In OpenCode, tool events use `tool.execute.before` and `tool.execute.after` on 1.x or `execute.before` and `execute.after` on 2.x; `sessionStart` observes `session.created`, and `stop` observes `session.idle` on 1.x or `session.execution.succeeded` on 2.x. Zakwas preserves unrelated JSON settings and hook groups, records its registrations in `~/.local/state/zakwas/command-hooks.json`, and removes only those registrations when they leave the config. A generated OpenCode plugin edited by hand is left in place when removed from the config. Codex may ask you to trust newly registered hooks through `/hooks` before running them. Commands receive provider-specific event JSON on stdin; a shared script must handle the payload and output rules of each provider. OpenCode blocks a tool when a before-tool command exits nonzero or returns a JSON `decision: block` / `hookSpecificOutput.permissionDecision: deny`; its after-tool and session hooks do not use command output. Don't also manage these agent settings or the generated plugin with `files`, `links`, or `templates`.
 
 `agents.hooks.klaudiush: true` registers global klaudiush hooks for the providers enabled in `${XDG_CONFIG_HOME:-~/.config}/klaudiush/config.toml`. Install klaudiush and place its config with `files` or `templates` first. Zakwas checks hook targets during `plan` and runs `klaudiush init --install-hooks --global` during `apply` when registration is missing or the binary, config, or hook files changed. It records a registration fingerprint in `~/.local/state/zakwas/klaudiush.json`. Klaudiush keeps unrelated hooks. Codex's `hooks_config_path` and opencode's `plugin_path` come from the klaudiush config and can point outside default agent directories. Removing this option leaves existing registrations in place.
 
@@ -329,6 +329,7 @@ agents:
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` |
 | Codex | `${CODEX_HOME:-~/.codex}/AGENTS.md` |
 | opencode | `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` is ignored, as for skills, and `opencode.skillsDir` doesn't move it) |
+| Gemini CLI | `${GEMINI_CLI_HOME:-~}/.gemini/zakwas/GEMINI.md`, the context file of the [zakwas extension](#gemini-cli); `~/.gemini/GEMINI.md`, which Gemini's memory tool writes to, is never touched |
 | shared | `~/.agents/AGENTS.md`, only with `sharedInstructions: true`; read by Warp, Cline and Factory Droid, not by Claude Code, Codex or opencode |
 
 ```yaml
@@ -339,27 +340,27 @@ agents:
 ```
 
 - Files are joined in order, separated by a blank line; a file that renders empty is left out. `instructions: dotfiles/AGENTS.md`, a single file, keeps working and is copied as rendered.
-- Every file is a Go template, like [`templates`](#templates), sharing `templates.vars`: `{{ .Provider }}` is `claude`, `codex`, `opencode` or `shared`, `{{ .Home }}` is your home directory, `{{ .Vars.name }}` a template variable. Branch on the provider to keep text for agents that can use it: `{{ if eq .Provider "claude" }}Use the Skill tool.{{ end }}`. A file with a literal `{{` needs `{{ "{{" }}`; an unknown variable or a syntax error fails the plan.
-- `@path` imports: Claude Code resolves them itself, up to four files deep, so its copy keeps them (a path relative to the instructions file becomes absolute, since the copy lives elsewhere). Codex, opencode and the shared copy don't resolve imports, so zakwas inlines the imported file, as it is: it is not rendered as a template. A path counts as an import when it starts a line or follows whitespace, begins with `@` and contains a `/` or ends in `.md` (`@docs/git.md`, `@~/notes/me.md`, `@/abs/rules.md`); `@claude` or a path in a code block or code span is left alone. A missing import, an import cycle or one nested more than four files deep fails the plan.
+- Every file is a Go template, like [`templates`](#templates), sharing `templates.vars`: `{{ .Provider }}` is `claude`, `codex`, `opencode`, `gemini` or `shared`, `{{ .Home }}` is your home directory, `{{ .Vars.name }}` a template variable. Branch on the provider to keep text for agents that can use it: `{{ if eq .Provider "claude" }}Use the Skill tool.{{ end }}`. A file with a literal `{{` needs `{{ "{{" }}`; an unknown variable or a syntax error fails the plan.
+- `@path` imports: Claude Code resolves them itself, up to four files deep, so its copy keeps them (a path relative to the instructions file becomes absolute, since the copy lives elsewhere). Codex, opencode, Gemini and the shared copy get imports inlined, so zakwas inlines the imported file, as it is: it is not rendered as a template. A path counts as an import when it starts a line or follows whitespace, begins with `@` and contains a `/` or ends in `.md` (`@docs/git.md`, `@~/notes/me.md`, `@/abs/rules.md`); `@claude` or a path in a code block or code span is left alone. A missing import, an import cycle or one nested more than four files deep fails the plan.
 - Size limits: Codex reads at most 32768 bytes of `AGENTS.md`, so a Codex copy over that, after inlining, fails the plan naming the provider and the size.
 - A file already at a path is backed up to `<file>.zakwas-bak` first, one you edited later too; a symlink there, such as the link an earlier zakwas made, is replaced without a backup; a directory fails the plan, as does a missing source or a symlinked parent.
-- The instructions follow the plugin rules: Codex gets them only when `zakwas.yaml` names `codex`, and Claude Code and every named provider are strict, failing their own plan when the copy can't be rendered or written (the other providers still apply); opencode by the all-providers default is best effort, written only once `opencode` is on `PATH` and skipped when something blocks the write. The shared copy is strict. None of them needs the agent's CLI otherwise.
+- The instructions follow the plugin rules: Codex and Gemini get them only when `zakwas.yaml` names them, and Claude Code and every named provider are strict, failing their own plan when the copy can't be rendered or written (the other providers still apply); opencode by the all-providers default is best effort, written only once `opencode` is on `PATH` and skipped when something blocks the write. The shared copy is strict. None of them needs the agent's CLI otherwise.
 - zakwas records the hash of each copy in `~/.local/state/zakwas/instruction-files.json`. When a provider leaves `agents.providers`, its config dir moves, `sharedInstructions` is turned off or `instructions` is removed, the copy zakwas wrote is removed (a destructive change in the plan; one edited since is backed up first). Removing the whole `agents` section removes them too. Links an earlier zakwas recorded in `instructions.json` are replaced by the copy on the next `apply`, or removed when no provider wants them. Don't also list these paths under `files`, `links` or `templates`.
 
 ### permissions
 
 `agents.permissions` is one list of shell command permissions for every agent. Each entry is a command prefix: one or more words, matched on whole words, so `git status` covers `git status --short` but not `git statusx`. Write it as a string, or as `{command, providers, justification}`:
 
-- `providers` defaults to `agents.providers`, with Codex opt-in as for plugins: an entry without its own `providers` reaches Codex only when `zakwas.yaml` names `codex`.
-- `justification` is a one-line reason Codex shows the agent when its rule prompts for or forbids a command. The other providers ignore it.
+- `providers` defaults to `agents.providers`, with Codex and Gemini opt-in as for plugins: an entry without its own `providers` reaches them only when `zakwas.yaml` names them.
+- `justification` is a one-line reason Codex shows the agent when its rule prompts for or forbids a command, and Gemini CLI when a `deny` rule blocks one. The other providers ignore it.
 
 Prefixes stay plain words. Shell operators, quotes, globs, variables, backslashes, brackets and control characters (`* ? [ ] { } ( ) | & ; < > $` backtick, quotes, `\`) fail validation. A command may sit in only one list per provider, and only once.
 
-| Decision | Claude Code | Codex | opencode |
-|---|---|---|---|
-| `allow` | `Bash(<cmd>:*)` in `permissions.allow` | `prefix_rule(…, decision="allow")`: runs **without approval and outside the sandbox** | `"allow"` |
-| `review` | not written | `decision="prompt"` | `"ask"` |
-| `deny` | `Bash(<cmd>:*)` in `permissions.deny` | `decision="forbidden"` | `"deny"` |
+| Decision | Claude Code | Codex | opencode | Gemini CLI |
+|---|---|---|---|---|
+| `allow` | `Bash(<cmd>:*)` in `permissions.allow` | `prefix_rule(…, decision="allow")`: runs **without approval and outside the sandbox** | `"allow"` | `decision = "allow"` |
+| `review` | not written | `decision="prompt"` | `"ask"` | `decision = "ask_user"` |
+| `deny` | `Bash(<cmd>:*)` in `permissions.deny` | `decision="forbidden"` | `"deny"` | `decision = "deny"` |
 
 ```yaml
 agents:
@@ -384,6 +385,8 @@ Codex runs an `allow` command without approval and outside its sandbox, with ful
 
 If you edit `zakwas.rules` by hand, zakwas backs it up to `zakwas.rules.zakwas-bak` before rewriting it. The file is removed when no entry targets Codex anymore; a hand-edited file is left in place and only forgotten. One unparsable rules file makes Codex ignore every rule, `forbidden` ones included, so zakwas refuses to render anything but plain printable strings.
 
+**Gemini CLI.** zakwas owns `${GEMINI_CLI_HOME:-~}/.gemini/policies/zakwas.toml`, one `[[rule]]` per entry on `run_shell_command` with a `commandPrefix`, which Gemini matches on whole words like zakwas does. Gemini ignores `allow` rules from extensions and ranks extension rules below user ones, so every rule lives in this user-tier file, where the priorities (`deny` 900, `review` 700, `allow` 500) keep deny over ask over allow. Gemini's own approvals go to `settings.json` or other policy files, never to this one. Edit it by hand and zakwas backs it up to `zakwas.toml.zakwas-bak` before rewriting it; it is removed when nothing targets Gemini anymore.
+
 **opencode.** zakwas doesn't edit `opencode.json`, which is usually managed as a [template](#templates). Render the rules into it with the `agentPermissions` template function instead:
 
 ```json
@@ -407,7 +410,7 @@ opencode applies the last pattern that matches. The function therefore writes th
 
 ### mcp
 
-`agents.mcp` declares each MCP server once, under a name (letters, digits, `_` and `-`), and zakwas registers it at user scope in Claude Code and Codex. A server has either a `command` (stdio) or a `url` (HTTP); `providers` defaults to `agents.providers`, with Codex opt-in as for plugins.
+`agents.mcp` declares each MCP server once, under a name (letters, digits, `_` and `-`), and zakwas registers it at user scope in Claude Code and Codex and in the [Gemini extension](#gemini-cli). A server has either a `command` (stdio) or a `url` (HTTP); `providers` defaults to `agents.providers`, with Codex and Gemini opt-in as for plugins.
 
 | Key | For | Description |
 |---|---|---|
@@ -444,11 +447,14 @@ agents:
 |---|---|---|
 | Claude Code | `mcpServers` in `.claude.json`: `${CLAUDE_CONFIG_DIR}/.claude.json`, or `~/.claude.json` | `${X}` in `env` or `headers` |
 | Codex | `[mcp_servers.<name>]` in `${CODEX_HOME:-~/.codex}/config.toml` | `env_vars`, `bearer_token_env_var`, `env_http_headers` |
+| Gemini CLI | `mcpServers` in `gemini-extension.json` of the zakwas extension, `httpUrl` for an HTTP server | `$X` in `env` or `headers` |
 | opencode | the `agentMCP` template function (below) | `{env:X}` in `environment` or `headers` |
 
 **Claude Code.** `claude mcp get` starts the server it reports on, so zakwas reads `.claude.json` instead and edits only the entry of the server it changes. The rest of the file keeps its key order and values. If Claude Code saves the file while zakwas edits it, zakwas redoes its edit on the new content, and gives up after three tries.
 
 **Codex.** `codex mcp add` rewrites every `[mcp_servers.*]` table and drops their comments, and it opens a browser for OAuth servers. zakwas edits the server's own tables in `config.toml` as text instead: a changed or removed server rewrites only the lines from its `[mcp_servers.<name>]` header to its last key, subtables included. Everything else, comments included, stays byte-identical, and a new server is appended at the end of the file. Comments and blank lines after a server's last key stay, as does everything above its header, and the file's line endings and final newline are kept. A server written as an inline table (`[mcp_servers]` with `name = { … }`) can't be edited in place: if it differs from `zakwas.yaml`, or has to change or go, the plan fails and says to do it by hand.
+
+**Gemini CLI.** The servers are part of the extension's manifest, a file zakwas owns, so there is no per-server ownership: removing a server removes it from the manifest. Gemini expands `$X` and `${X}` anywhere in `gemini-extension.json` when it loads the extension, from its own environment, so `envVars`, `headerEnv` and `bearerTokenEnv` work as they do for the other agents. A literal `$` in a server's `command`, `args`, `url`, `env` or `headers` would be replaced the same way, so zakwas leaves such a server out of Gemini and the plan says so; so it does for a server whose name has an underscore, which Gemini's policy rules misread. Scope those servers to the other providers. A server with `oauth: true` is registered as is; sign in with `/mcp auth <name>` in Gemini CLI.
 
 **opencode.** zakwas doesn't edit `opencode.json`, which is usually a [template](#templates). Render the servers into its `mcp` key with `agentMCP`:
 
@@ -468,7 +474,7 @@ A server targets opencode through its `providers` or, without them, `agents.prov
 - Changing a declared server changes only that server. Removing it, removing `mcp`, or removing the whole `agents` section removes only servers zakwas registered, shown as destructive in the plan. A server edited since zakwas wrote it is left in place and only forgotten when it goes; when it is still declared and differs from `zakwas.yaml`, the plan fails instead of resetting your edit, naming the differing keys.
 - When the config dir moves (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the servers zakwas registered in the old file are removed there.
 
-`plan` and `check` only read the two files: they start no MCP server and open no browser. A server with `oauth: true` shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
+`plan` and `check` only read the config files: they start no MCP server and open no browser. A server with `oauth: true` shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
 
 ### Global Codex settings
 
@@ -497,6 +503,7 @@ Only declared leaves are updated. Removing a value or the settings block leaves 
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md` (a subagent file; Claude Code scans the directory recursively) | `claude --agent <name>` |
 | Codex | `${CODEX_HOME:-~/.codex}/<name>.config.toml` (layered over `config.toml`) | `codex --profile <name>` |
 | opencode | `~/.config/opencode/agents/<name>.md` | `opencode --agent <name>` |
+| Gemini CLI | `${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md` (a subagent of the [zakwas extension](#gemini-cli)) | `@<name>` at the start of a prompt, or let Gemini delegate |
 
 ```yaml
 agents:
@@ -525,32 +532,33 @@ agents:
 | Field | Description |
 |---|---|
 | `description` | Required, one line. Codex profiles carry none. |
-| `prompt` | A file relative to the directory holding `zakwas.yaml`, rendered as a template that sees `{{ .Provider }}`, `{{ .Home }}` and `{{ .Vars }}`. It is the body of the Claude Code and opencode files (Claude Code replaces its default system prompt with it) and Codex's `developer_instructions`. |
+| `prompt` | A file relative to the directory holding `zakwas.yaml`, rendered as a template that sees `{{ .Provider }}`, `{{ .Home }}` and `{{ .Vars }}`. It is the body of the Claude Code, opencode and Gemini files (Claude Code replaces its default system prompt with it) and Codex's `developer_instructions`. |
 | `tools` | Any of `read`, `search`, `edit`, `shell`, `web`. Omit for all. |
 | `edit`, `shell` | `allow`, `ask` or `deny`. A profile that sets `edit` or `shell` to `allow` or `ask` can't leave that tool out of `tools`. |
 | `sandbox` | `read-only`, `workspace-write` or `danger-full-access`: Codex's sandbox mode. Without it, Codex gets `read-only` for `edit: deny` and `workspace-write` for `edit: allow`. |
 | `network` | `true` or `false`. |
 | `reviewer` | `user`, or `auto` for an automatic reviewer. |
 | `mcp` | Server name → `allow`, `ask` or `deny`. Every server must be declared under [`mcp`](#mcp); one the profile doesn't list is denied. Servers added outside zakwas (`claude mcp add`, a plugin, a hand-edited config) are not affected. |
-| `providers` | Providers to render for; default `agents.providers`, with Codex opt-in as for plugins. |
-| `claude`, `codex`, `opencode` | `model` in the provider's own spelling, and `overrides`: extra top-level keys written as is. A key zakwas sets from the profile's own fields (`tools`, `permission`, `sandbox_mode`, …) is rejected; opencode's `mode` (`primary`) can be overridden. Values are re-typed by YAML, so quote ones that must stay strings: `2024-01-01` becomes a timestamp. |
+| `providers` | Providers to render for; default `agents.providers`, with Codex and Gemini opt-in as for plugins. |
+| `claude`, `codex`, `opencode`, `gemini` | `model` in the provider's own spelling, and `overrides`: extra top-level keys written as is. A key zakwas sets from the profile's own fields (`tools`, `permission`, `sandbox_mode`, …) is rejected; opencode's `mode` (`primary`) can be overridden, and Gemini takes `temperature`, `max_turns` and `timeout_mins` here. Values are re-typed by YAML, so quote ones that must stay strings: `2024-01-01` becomes a timestamp. |
 
 How each field maps:
 
-| Field | Claude Code | Codex | opencode |
-|---|---|---|---|
-| `tools` | `tools` allowlist | not expressible | other tools `deny` in `permission` |
-| `edit` | `deny` removes the edit tools; `allow` is `permissionMode: acceptEdits`; `ask` is `default` | `deny` is sandbox `read-only`, `allow` is `workspace-write`; `ask` is not expressible | `permission.edit` |
-| `shell` | `deny` removes `Bash`; `ask` is `default` (with `edit: allow` it is not honored: `acceptEdits` also approves filesystem commands); `allow` is not expressible | `ask` is `approval_policy = "on-request"`, `allow` is `"never"`; `deny` is not expressible | `permission.bash`: `deny`, or the [`agents.permissions`](#permissions) rules with `allow` or `ask` as the catch-all, the guard's deny rules last |
-| `sandbox` | not expressible | `sandbox_mode` | not expressible |
-| `network` | `false` removes `WebFetch` and `WebSearch`; shell commands stay unrestricted | `sandbox_workspace_write.network_access` | `false` denies `webfetch` and `websearch`; shell commands stay unrestricted |
-| `reviewer` | `auto` is `permissionMode: auto`, `user` is `default` | `approvals_reviewer`: `user` or `auto_review` | `auto` is not expressible |
-| `mcp` | `mcp__<server>` in `tools` or `disallowedTools`; `allow` is not expressible, the server's tools still ask | `enabled` and `default_tools_approval_mode` (`approve` for `allow`, `prompt` for `ask`) | `<server>_*` in `permission` |
+| Field | Claude Code | Codex | opencode | Gemini CLI |
+|---|---|---|---|---|
+| `tools` | `tools` allowlist | not expressible | other tools `deny` in `permission` | `tools` list of Gemini's tool names, the declared servers it keeps as `mcp_<server>_*` |
+| `edit` | `deny` removes the edit tools; `allow` is `permissionMode: acceptEdits`; `ask` is `default` | `deny` is sandbox `read-only`, `allow` is `workspace-write`; `ask` is not expressible | `permission.edit` | `deny` denies `write_file` and `replace`; `allow` and `ask` are policy rules for the subagent |
+| `shell` | `deny` removes `Bash`; `ask` is `default` (with `edit: allow` it is not honored: `acceptEdits` also approves filesystem commands); `allow` is not expressible | `ask` is `approval_policy = "on-request"`, `allow` is `"never"`; `deny` is not expressible | `permission.bash`: `deny`, or the [`agents.permissions`](#permissions) rules with `allow` or `ask` as the catch-all, the guard's deny rules last | `deny` denies `run_shell_command`; `allow` and `ask` are policy rules for the subagent, below the `agents.permissions` rules, so their `allow` entries still run without asking |
+| `sandbox` | not expressible | `sandbox_mode` | not expressible | not expressible |
+| `network` | `false` removes `WebFetch` and `WebSearch`; shell commands stay unrestricted | `sandbox_workspace_write.network_access` | `false` denies `webfetch` and `websearch`; shell commands stay unrestricted | `false` denies `web_fetch` and `google_web_search`; shell commands stay unrestricted |
+| `reviewer` | `auto` is `permissionMode: auto`, `user` is `default` | `approvals_reviewer`: `user` or `auto_review` | `auto` is not expressible | `auto` is not expressible |
+| `mcp` | `mcp__<server>` in `tools` or `disallowedTools`; `allow` is not expressible, the server's tools still ask | `enabled` and `default_tools_approval_mode` (`approve` for `allow`, `prompt` for `ask`) | `<server>_*` in `permission` | `allow` and `ask` are policy rules on the server for the subagent, `deny` a deny rule (or leaving it out of `tools`) |
 
 - The plan lists, per provider and profile, every field the provider cannot express (`claude profile review can't express: …`), the same way as the guard's warnings: it is not a change, so `check` stays clean.
 - A profile name an opencode template defines under `agent` (a template that renders to the `opencode.json`) fails the opencode plan: the two would define one agent twice.
 - The files are protected copies, like [`instructions`](#instructions): a file already there is backed up first. zakwas records their hashes in `~/.local/state/zakwas/agent-profiles.json`. Removing a profile, a provider, or the whole `agents` section removes only the files zakwas rendered (destructive in the plan; one edited since is backed up instead).
-- Claude Code and every named provider are strict, failing their own plan when a profile can't be rendered; Codex gets profiles only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, written only once `opencode` is on `PATH`.
+- Claude Code and every named provider are strict, failing their own plan when a profile can't be rendered; Codex gets profiles only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, written only once `opencode` is on `PATH`. Gemini, like Codex, gets profiles only when `zakwas.yaml` names it.
+- Gemini has no profile to start a session with: a profile is a subagent the main agent delegates to, or that you name with `@<name>`. A profile that lists `tools` gets exactly those tools; one that doesn't inherits all of them, and what it takes away is a deny rule scoped to the subagent in `zakwas.toml`.
 
 ### skills
 
@@ -559,7 +567,8 @@ How each field maps:
 | Provider | Link |
 |---|---|
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/<name>` |
-| Codex, opencode | `~/.agents/skills/<name>`, one link for both (Gemini CLI and Copilot CLI read it too) |
+| Codex, opencode | `~/.agents/skills/<name>`, one link for both (Copilot CLI reads it too) |
+| Gemini CLI | `~/.agents/skills/<name>`, the same link, or `${GEMINI_CLI_HOME}/.agents/skills/<name>` when `GEMINI_CLI_HOME` is set |
 
 ```yaml
 agents:
@@ -575,7 +584,7 @@ agents:
 | `path` | Required. The skill directory, holding `SKILL.md`: relative to the directory holding `zakwas.yaml`, absolute or `~/…`. With `git`, a path inside the repository. The last element is the skill's name. |
 | `git` | A GitHub `owner/repo` or a clone URL: the skill is `path` inside that repository. |
 | `ref` | A branch or tag to clone, only with `git`. Default: the repository's default branch. |
-| `providers` | Providers to link for; default `agents.providers`, with Codex opt-in as for plugins. |
+| `providers` | Providers to link for; default `agents.providers`, with Codex and Gemini opt-in as for plugins. |
 
 A skill written as a plain string is its `path`.
 
@@ -584,18 +593,34 @@ A skill written as a plain string is its `path`.
 - `plan` never fetches. `apply` clones missing git sources with `git clone --depth 1` into `~/.local/share/zakwas/skills/<source>` (shared by every skill of one repository and `ref`), checks every skill of the clone and then links them, in one `<provider> skills` step of the plan. `zakwas upgrade` pulls the clones; the links point into them, so a newer skill needs no relink. A skill that resolves outside its repository through a symlink fails.
 - Removing a skill, a provider, or the whole `agents` section removes only the links zakwas made (destructive in the plan; a link changed since is only forgotten), then the clones no skill uses anymore (a clone a tracked link still points into is kept until that link has moved).
 - zakwas won't write through a symlinked parent under `$HOME`, so when `~/.claude` or `~/.agents` is a link into your repo the plan fails; point `CLAUDE_CONFIG_DIR` elsewhere or unlink it. opencode's `opencode.skillsDir`, which holds plugin skills, is not used for these.
-- Claude Code and every named provider are strict, failing their own plan when a skill can't be linked; Codex gets skills only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, linked only once `opencode` is on `PATH`.
+- Claude Code and every named provider are strict, failing their own plan when a skill can't be linked; Codex and Gemini get skills only when `zakwas.yaml` names them; opencode by the all-providers default is best effort, linked only once `opencode` is on `PATH`.
 
 ### guard
 
 An agent that can run `zakwas apply`, or edit the config repo or zakwas state, can widen its own permissions, add hooks or install marketplaces, because `apply` writes agent config files the agent may not edit itself. One prompt injection in a README is enough. So with an `agents` section, zakwas keeps the managed agents from applying the config unless you set `guard: false`:
 
-- **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade`, `zakwas self-update`, `zakwas approve` and `zakwas mcp`, also with a flag before the command (`zakwas -c zakwas.yaml apply`) and, for Claude Code and opencode, when run by path (`~/.local/bin/zakwas apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
+- **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade`, `zakwas self-update`, `zakwas approve` and `zakwas mcp`, also with a flag before the command (`zakwas -c zakwas.yaml apply`) and, for Claude Code, Gemini CLI and opencode, when run by path (`~/.local/bin/zakwas apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). Gemini CLI gets `deny` rules in `zakwas.toml` that also match an unquoted flag before the command and an unquoted path, at a priority above `permissions`; a quoted flag value or binary path is not matched. opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
 - **Edits.** Claude Code is also denied edits (`Edit(…)` rules, which cover its file tools) to the config repo's main checkout, and to the checkout zakwas runs from when that is a linked worktree of it, and to `~/.local/state/zakwas`. Worktrees agents create outside that checkout stay editable, so an agent can still propose a change as a branch; one created inside it is covered by the rule. A repo that holds your home directory can't be denied, and the plan says so. These rules don't stop a shell command that writes a file; the command rules above are what stop `apply`. They match the command as the agent writes it, so a wrapper (`sh -c`, a script, a PTY) is outside what they stop.
 - **Refusal.** `zakwas apply`, `zakwas upgrade` and `zakwas approve` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and, with `zakwas propose`, save a change for you to [approve](commands.md#approve) in a terminal.
 - **Providers that can't be protected.** The plan lists a managed provider the guard can't cover, under `agents`: opencode when no template renders `agentPermissions "opencode"` into its `opencode.json`. Such a warning doesn't count as a change, so `check` stays clean.
 
-Codex is guarded only when `zakwas.yaml` names `codex`, like its other settings. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
+Codex and Gemini are guarded only when `zakwas.yaml` names them, like their other settings. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
+
+### Gemini CLI
+
+Gemini rewrites `~/.gemini/settings.json` itself, and its memory tool writes the first `context.fileName` file, so zakwas owns neither. It renders one extension instead and links it with `gemini extensions link --consent`, and writes one policy file:
+
+| What | Where |
+|---|---|
+| Extension | `${GEMINI_CLI_HOME:-~}/.gemini/zakwas/`: `gemini-extension.json` (name, `contextFileName`, `mcpServers`), `GEMINI.md`, `hooks/hooks.json` and `agents/<name>.md` |
+| Policy rules | `${GEMINI_CLI_HOME:-~}/.gemini/policies/zakwas.toml`: [`permissions`](#permissions), the [guard](#guard) and what a [profile](#profiles) allows or asks |
+| Skills | `~/.agents/skills/<name>`, see [skills](#skills) |
+
+- Naming `gemini` in `agents.providers` converges all of it, except that skills and permissions need no extension: a config with only those writes none, and removes one it wrote; a config that doesn't name it, or an entry that doesn't list it, leaves Gemini alone. `GEMINI_CLI_HOME` moves `.gemini` and `.agents` under it, and zakwas follows it (a relative one resolves from the directory zakwas runs in).
+- The plan fails, for Gemini only, when `gemini` is not on `PATH`, when an extension named `zakwas` is installed from another place than the directory above (remove it with `gemini extensions uninstall zakwas`), or when a file can't be rendered. The link is the last step, after the files it needs; zakwas reads gemini's record of the link instead of running it, so `plan` and `check` change nothing.
+- The files are protected copies, like [`instructions`](#instructions): a file already there is backed up first, and zakwas records their hashes in `~/.local/state/zakwas/gemini-files.json` (the context file and the subagents in `instruction-files.json` and `agent-profiles.json`). When `gemini` leaves the config, zakwas runs `gemini extensions uninstall zakwas` first, since gemini needs the manifest for it, then removes the files it wrote. Empty directories stay.
+- Commands in `hooks.commands` receive Gemini's event JSON on stdin and answer in its format: a hook must print nothing but JSON on stdout. Gemini asks you to approve the extension's hooks when it loads them, as for any extension.
+- Gemini keeps no plugin marketplaces here: `marketplaces` and `plugins` can't name it, and `prune` and `upgrade` leave it alone.
 
 ## system
 
