@@ -249,46 +249,6 @@ func TestGeminiPolicyRanksDenyOverAskOverAllow(t *testing.T) {
 	}
 }
 
-func TestGeminiGuardRegexMatchesWhatTheGuardDenies(t *testing.T) {
-	regex := geminiGuardRegex([]string{"zakwas", "apply"})
-	re := regexp.MustCompile(`"command":"` + regex)
-	for command, want := range map[string]bool{
-		"zakwas apply":                      true,
-		"zakwas apply -y":                   true,
-		"zakwas -c zakwas.yaml apply":       true,
-		"~/.local/bin/zakwas apply":         true,
-		"/opt/homebrew/bin/zakwas -y apply": true,
-		`zakwas -c "x.yaml" apply`:          true,
-		`zakwas -c "my dir/x.yaml" apply`:   true,
-		`"/usr/local/bin/zakwas" apply`:     true,
-		`"zakwas" apply`:                    true,
-		`"zakwas" -c "x y" apply`:           true,
-		`/usr/local/bin/"zakwas" apply`:     true,
-		`"zakwas" plan`:                     false,
-		`x"zakwas" apply`:                   false,
-		`"notzakwas" apply`:                 false,
-		`"/Users/me/my dir/zakwas" apply`:   true,
-		`'/usr/local/bin/zakwas' apply`:     true,
-		`zakwas -c "a b" -w "c d" apply -y`: true,
-		`zakwas "apply"`:                    true,
-		"zakwas plan":                       false,
-		`zakwas -c "x.yaml" plan`:           false,
-		`"/usr/local/bin/zakwas" plan`:      false,
-		`zakwas -c "my dir/x.yaml" check`:   false,
-		"zakwas applyx":                     false,
-		"notzakwas apply":                   false,
-		"echo zakwas apply":                 false,
-	} {
-		encoded, _ := json.Marshal(map[string]string{"command": command})
-		if got := re.Match(encoded); got != want {
-			t.Errorf("%q matches = %v, want %v", command, got, want)
-		}
-	}
-	if regexp.MustCompile(`\([^)]*[*+?{].*\)[*+?{]`).MatchString(regex) {
-		t.Error("the guard regex has a quantified group, which Gemini rejects as unsafe")
-	}
-}
-
 func TestGeminiPolicyDeniesQuotedGuardedCommands(t *testing.T) {
 	m, _ := newGemini(t, geminiConfig(t))
 	m.Guard = true
@@ -311,17 +271,28 @@ func TestGeminiPolicyDeniesQuotedGuardedCommands(t *testing.T) {
 		return false
 	}
 	for command, want := range map[string]bool{
-		`zakwas apply`:                        true,
-		`zakwas -c "x.yaml" apply`:            true,
-		`zakwas -c "my dir/x.yaml" apply`:     true,
-		`"/usr/local/bin/zakwas" apply`:       true,
-		`zakwas -c "my dir/x.yaml" upgrade`:   true,
-		`"/usr/local/bin/zakwas" self-update`: true,
-		`zakwas -c "my dir/x.yaml" approve 1`: true,
-		`zakwas plan`:                         false,
-		`zakwas -c "my dir/x.yaml" plan`:      false,
-		`"/usr/local/bin/zakwas" check`:       false,
-		`echo "zakwas" plan`:                  false,
+		`zakwas apply`:                             true,
+		`zakwas -c "x.yaml" apply`:                 true,
+		`zakwas -c "my dir/x.yaml" apply`:          true,
+		`"/usr/local/bin/zakwas" apply`:            true,
+		`zakwas -c "my dir/x.yaml" upgrade`:        true,
+		`"/usr/local/bin/zakwas" self-update`:      true,
+		`zakwas -c "my dir/x.yaml" approve 1`:      true,
+		`'zakwas' apply`:                           true,
+		`zakwas 'apply'`:                           true,
+		"zakwas\tapply":                            true,
+		`ZAKWAS apply`:                             true,
+		`zakwas -c "a" -c "b" -c "c" -c "d" apply`: true,
+		`zakwas -c "a \"b\" c" apply`:              true,
+		`zakwas plan`:                              false,
+		`zakwas -c "my dir/x.yaml" plan`:           false,
+		`"/usr/local/bin/zakwas" check`:            false,
+		`echo "zakwas" plan`:                       false,
+		`zakwas -c "apply notes/x.yaml" plan`:      false,
+		`zakwas -m "apply" plan`:                   false,
+		`zakwas plan "x" apply`:                    false,
+		`"zakwas" plan apply`:                      false,
+		`zakwas propose "apply"`:                   false,
 	} {
 		if got := denied(command); got != want {
 			t.Errorf("%q denied = %v, want %v", command, got, want)
