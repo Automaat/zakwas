@@ -258,7 +258,23 @@ func TestGeminiGuardRegexMatchesWhatTheGuardDenies(t *testing.T) {
 		"zakwas -c zakwas.yaml apply":       true,
 		"~/.local/bin/zakwas apply":         true,
 		"/opt/homebrew/bin/zakwas -y apply": true,
+		`zakwas -c "x.yaml" apply`:          true,
+		`zakwas -c "my dir/x.yaml" apply`:   true,
+		`"/usr/local/bin/zakwas" apply`:     true,
+		`"zakwas" apply`:                    true,
+		`"zakwas" -c "x y" apply`:           true,
+		`/usr/local/bin/"zakwas" apply`:     true,
+		`"zakwas" plan`:                     false,
+		`x"zakwas" apply`:                   false,
+		`"notzakwas" apply`:                 false,
+		`"/Users/me/my dir/zakwas" apply`:   true,
+		`'/usr/local/bin/zakwas' apply`:     true,
+		`zakwas -c "a b" -w "c d" apply -y`: true,
+		`zakwas "apply"`:                    true,
 		"zakwas plan":                       false,
+		`zakwas -c "x.yaml" plan`:           false,
+		`"/usr/local/bin/zakwas" plan`:      false,
+		`zakwas -c "my dir/x.yaml" check`:   false,
 		"zakwas applyx":                     false,
 		"notzakwas apply":                   false,
 		"echo zakwas apply":                 false,
@@ -271,6 +287,47 @@ func TestGeminiGuardRegexMatchesWhatTheGuardDenies(t *testing.T) {
 	if regexp.MustCompile(`\([^)]*[*+?{].*\)[*+?{]`).MatchString(regex) {
 		t.Error("the guard regex has a quantified group, which Gemini rejects as unsafe")
 	}
+}
+
+func TestGeminiPolicyDeniesQuotedGuardedCommands(t *testing.T) {
+	m, _ := newGemini(t, geminiConfig(t))
+	m.Guard = true
+	prepareGemini(t, m)
+	apply(t, plan(t, m))
+
+	var regexes []*regexp.Regexp
+	for _, r := range geminiRules(t, m) {
+		if r.CommandRegex != "" {
+			regexes = append(regexes, regexp.MustCompile(`"command":"`+r.CommandRegex))
+		}
+	}
+	denied := func(command string) bool {
+		encoded, _ := json.Marshal(map[string]string{"command": command})
+		for _, re := range regexes {
+			if re.Match(encoded) {
+				return true
+			}
+		}
+		return false
+	}
+	for command, want := range map[string]bool{
+		`zakwas apply`:                        true,
+		`zakwas -c "x.yaml" apply`:            true,
+		`zakwas -c "my dir/x.yaml" apply`:     true,
+		`"/usr/local/bin/zakwas" apply`:       true,
+		`zakwas -c "my dir/x.yaml" upgrade`:   true,
+		`"/usr/local/bin/zakwas" self-update`: true,
+		`zakwas -c "my dir/x.yaml" approve 1`: true,
+		`zakwas plan`:                         false,
+		`zakwas -c "my dir/x.yaml" plan`:      false,
+		`"/usr/local/bin/zakwas" check`:       false,
+		`echo "zakwas" plan`:                  false,
+	} {
+		if got := denied(command); got != want {
+			t.Errorf("%q denied = %v, want %v", command, got, want)
+		}
+	}
+	assertConverged(t, m)
 }
 
 func TestGeminiGuardOffWritesNoGuardRules(t *testing.T) {
