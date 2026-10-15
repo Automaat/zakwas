@@ -17,7 +17,7 @@ zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent set
 ## Propose a change
 
 1. Read the current state: `zakwas_config` and `zakwas_plan`, or `zakwas plan` in a shell. Skip an operation the config already covers.
-2. Save the proposal. Prefer the MCP tool `zakwas_propose`; without the zakwas MCP server, run `zakwas propose OPERATION ... -json` in a shell. Proposing changes nothing on disk except the saved proposal.
+2. Save the proposal. Prefer the MCP tool `zakwas_propose`; without the zakwas MCP server, run `zakwas propose -json OPERATION ...` in a shell. Proposing changes nothing on disk except the saved proposal.
 3. Report the proposal's `id`, `tier`, `summary` and `reasons` to the user, then follow the tier below.
 4. Remove a proposal the user no longer wants with `zakwas_discard`, or `zakwas proposals` to list them.
 5. Say "proposed", not "installed", until the user has applied it. Confirm afterwards with `zakwas_check`.
@@ -31,7 +31,7 @@ zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent set
 | pin a mise tool | `pin-mise`, `name`, `version` | `zakwas propose pin-mise TOOL VERSION` |
 | add an MCP server | `add-mcp`, `name`, `server` | `zakwas propose add-mcp NAME --command CMD [--arg A] \| --url URL` |
 
-`providers` limits an entry to some of `claude`, `codex` and `opencode`; leave it out unless the user names one. A command that starts with a dash goes after `--` in the shell form.
+`providers` limits an entry to some of `claude`, `codex` and `opencode`; leave it out unless the user names one. In the shell form, put every flag of zakwas (`-json`, `-c PATH`, `--providers`) before `--`, and every dash-prefixed word of a command after it: `zakwas propose -json add-permission review -- git log --oneline`.
 
 ## Tiers
 

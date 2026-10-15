@@ -98,7 +98,7 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 | `pin-mise TOOL VERSION` | the `[tools]` table of the mise config (`mise.config`) | |
 | `add-mcp NAME` | `agents.mcp` | `--command CMD` with `--arg A` and `--env-var NAME`, or `--url URL` with `--bearer-token-env NAME`; `--providers LIST` |
 
-`--providers`, `--arg` and `--env-var` take a comma list or repeat. A command that starts with a dash goes after `--`: `zakwas propose add-permission allow -- ls -la`. Also `-c PATH` and `-json`, which prints the proposal as JSON.
+`--providers`, `--arg` and `--env-var` take a comma list or repeat. Also `-c PATH` and `-json`, which prints the proposal as JSON. Flags go before `--`; any command word that starts with a dash goes after it: `zakwas propose -json add-permission allow -- ls -la`.
 
 Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared, a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
 

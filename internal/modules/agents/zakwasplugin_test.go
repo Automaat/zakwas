@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/proposal"
 )
 
 // repoRoot is the zakwas repository, which publishes the zakwas plugin.
@@ -74,18 +75,26 @@ func TestZakwasSkillTeachesTheProposalFlow(t *testing.T) {
 			t.Errorf("frontmatter lacks %q", key)
 		}
 	}
-	for _, want := range []string{
-		"zakwas_propose",
-		"zakwas propose",
-		"zakwas approve ID",
-		"Never",
-		"zakwas apply",
-		"zakwas.yaml",
-		"~/.claude/settings.json",
-		"high",
-	} {
+	wanted := []string{
+		"zakwas_config", "zakwas_plan", "zakwas_check", "zakwas_propose", "zakwas_discard", config.MCPApplyTool,
+		"zakwas propose -json", "zakwas approve ID", "zakwas.yaml", "~/.claude/settings.json", "`high`", "`low`",
+	}
+	for _, kind := range proposal.Kinds {
+		wanted = append(wanted, "`"+kind+"`")
+	}
+	for _, want := range wanted {
 		if !strings.Contains(body, want) {
 			t.Errorf("SKILL.md never mentions %q", want)
+		}
+	}
+	_, afterNever, found := strings.Cut(body, "## Never")
+	if !found {
+		t.Fatal("SKILL.md has no Never section")
+	}
+	never, _, _ := strings.Cut(afterNever, "\n## ")
+	for _, cmd := range config.GuardedCommands {
+		if !strings.Contains(never, "`"+cmd+"`") && !strings.Contains(never, "zakwas "+cmd+"`") {
+			t.Errorf("the Never section does not name the guarded command %q", cmd)
 		}
 	}
 	for _, personal := range []string{"/Users/", "/home/"} {
