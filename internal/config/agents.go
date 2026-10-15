@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -48,7 +49,7 @@ type Agents struct {
 	Profiles           map[string]Profile     `yaml:"profiles" jsonschema_description:"Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named) and a Gemini CLI subagent file ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md (delegate with '@<name>', only when gemini is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered."`
 	Skills             []Skill                `yaml:"skills" jsonschema_description:"Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex, opencode and Gemini CLI (${GEMINI_CLI_HOME:-~}/.agents/skills when GEMINI_CLI_HOME is set). Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them."`
 	Opencode           *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
-	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
+	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
 }
 
 // InstructionFiles is agents.instructions. In YAML it is either one file or
@@ -124,6 +125,28 @@ type MCPServer struct {
 
 // IsHTTP reports whether the server is reached by URL rather than started.
 func (s MCPServer) IsHTTP() bool { return s.URL != "" }
+
+// MCPApplyTool is the zakwas MCP tool that applies a proposal.
+const MCPApplyTool = "zakwas_apply"
+
+// PromptTools are the tools of the server that every agent must ask the
+// user about on each call, in the providers that can ask per tool. The
+// only one is MCPApplyTool of a `zakwas mcp --enable-apply` server.
+func (s MCPServer) PromptTools() []string {
+	if s.IsHTTP() || filepath.Base(s.Command) != "zakwas" || len(s.Args) == 0 || s.Args[0] != "mcp" {
+		return nil
+	}
+	for _, arg := range s.Args[1:] {
+		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if name != "enable-apply" || !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if on, err := strconv.ParseBool(value); !hasValue || err == nil && on {
+			return []string{MCPApplyTool}
+		}
+	}
+	return nil
+}
 
 // NamedMCPServer is one agents.mcp entry resolved for a provider.
 type NamedMCPServer struct {
@@ -417,8 +440,10 @@ func (a *Agents) Wants(provider string) bool {
 }
 
 // GuardedCommands are the zakwas commands that change the system or zakwas
-// itself, which the guard keeps agents from running.
-var GuardedCommands = []string{"apply", "upgrade", "self-update", "approve"}
+// itself, which the guard keeps agents from running. mcp is among them
+// because with --enable-apply an agent that starts it in a shell is the
+// client that answers its confirmation.
+var GuardedCommands = []string{"apply", "upgrade", "self-update", "approve", "mcp"}
 
 // GuardEnabled reports whether the guard is on: it is, for any agents
 // section, unless it sets guard to false.

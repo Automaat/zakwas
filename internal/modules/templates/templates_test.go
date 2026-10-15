@@ -148,7 +148,7 @@ var permissions = &config.Agents{
 
 func TestAgentPermissions(t *testing.T) {
 	var guard []string
-	for _, c := range []string{"apply", "upgrade", "self-update", "approve"} {
+	for _, c := range []string{"apply", "upgrade", "self-update", "approve", "mcp"} {
 		for _, name := range []string{"zakwas", "*/zakwas"} {
 			for _, p := range []string{name + " " + c, name + " " + c + " *", name + " * " + c, name + " * " + c + " *"} {
 				guard = append(guard, `"`+p+`": "deny"`)

@@ -363,7 +363,8 @@ func tomlStrings(list []string) string {
 }
 
 // renderCodexMCP renders a declared server as the tables `codex mcp add`
-// writes: the server, then its env and header maps as subtables.
+// writes: the server, then its env and header maps as subtables, then a
+// table per tool that must always prompt.
 func renderCodexMCP(name string, s config.MCPServer) string {
 	var b strings.Builder
 	header := "mcp_servers." + tomlKey(name)
@@ -394,5 +395,8 @@ func renderCodexMCP(name string, s config.MCPServer) string {
 	table("env", s.Env)
 	table("http_headers", s.Headers)
 	table("env_http_headers", s.HeaderEnv)
+	for _, tool := range s.PromptTools() {
+		b.WriteString("\n[" + header + ".tools." + tomlKey(tool) + "]\napproval_mode = \"prompt\"\n")
+	}
 	return b.String()
 }

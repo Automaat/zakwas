@@ -228,22 +228,8 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 		errOut.fail(err)
 		return ExitErr
 	}
-	ev, err := evaluate(ctx, env, cfg, []proposal.Op{op})
+	p, ev, err := saveProposal(ctx, env, cfg, op)
 	if err != nil {
-		errOut.fail(err)
-		return ExitErr
-	}
-	id, err := proposal.NewID()
-	if err != nil {
-		errOut.fail(err)
-		return ExitErr
-	}
-	p := &proposal.Proposal{
-		FormatVersion: engine.FormatVersion, ID: id, Created: env.now().UTC().Truncate(time.Second),
-		Config: cfg.Path, Summary: proposal.Summaries(ev.ops), Ops: ev.ops, Base: ev.base,
-		Tier: ev.tier, Reasons: ev.reasons, Modules: ev.modules, Diff: ev.diff, Plan: ev.plan.JSONModules(false),
-	}
-	if err := (proposal.Store{Dir: proposal.Dir(env.Home)}).Save(p); err != nil {
 		errOut.fail(err)
 		return ExitErr
 	}
@@ -262,6 +248,27 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 	}
 	out.printf("\nNothing was changed. Apply it from a terminal with: zakwas approve %s\n", p.ID)
 	return ExitOK
+}
+
+// saveProposal rates op against the config repo and saves it as a proposal.
+func saveProposal(ctx context.Context, env Env, cfg *config.Config, op proposal.Op) (*proposal.Proposal, *evaluation, error) {
+	ev, err := evaluate(ctx, env, cfg, []proposal.Op{op})
+	if err != nil {
+		return nil, nil, err
+	}
+	id, err := proposal.NewID()
+	if err != nil {
+		return nil, nil, err
+	}
+	p := &proposal.Proposal{
+		FormatVersion: engine.FormatVersion, ID: id, Created: env.now().UTC().Truncate(time.Second),
+		Config: cfg.Path, Summary: proposal.Summaries(ev.ops), Ops: ev.ops, Base: ev.base,
+		Tier: ev.tier, Reasons: ev.reasons, Modules: ev.modules, Diff: ev.diff, Plan: ev.plan.JSONModules(false),
+	}
+	if err := (proposal.Store{Dir: proposal.Dir(env.Home)}).Save(p); err != nil {
+		return nil, nil, err
+	}
+	return p, ev, nil
 }
 
 func runProposals(env Env, args []string, out, errOut *console) int {

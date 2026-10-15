@@ -69,7 +69,7 @@ func isBoolFlag(f *flag.Flag) bool {
 }
 
 type completionModel struct {
-	global, init, selfUpdate, propose, proposals, approve []complFlag
+	global, init, selfUpdate, propose, proposals, approve, mcp []complFlag
 }
 
 func newCompletionModel() completionModel {
@@ -80,9 +80,10 @@ func newCompletionModel() completionModel {
 	proposeFS, _ := newProposeFlags(discard)
 	proposalsFS, _ := newConfigFlags("proposals", "", true, discard)
 	approveFS, _ := newConfigFlags("approve", "", false, discard)
+	mcpFS, _ := newMCPFlags(discard)
 	return completionModel{
 		global: flagsOf(global), init: flagsOf(initFS), selfUpdate: flagsOf(selfUpdateFS),
-		propose: flagsOf(proposeFS), proposals: flagsOf(proposalsFS), approve: flagsOf(approveFS),
+		propose: flagsOf(proposeFS), proposals: flagsOf(proposalsFS), approve: flagsOf(approveFS), mcp: flagsOf(mcpFS),
 	}
 }
 
@@ -121,7 +122,7 @@ func commandNames() []string {
 }
 
 func (m completionModel) all() []complFlag {
-	return slices.Concat(m.global, m.init, m.selfUpdate, m.propose, m.proposals, m.approve)
+	return slices.Concat(m.global, m.init, m.selfUpdate, m.propose, m.proposals, m.approve, m.mcp)
 }
 
 func (m completionModel) bash() string {
@@ -156,6 +157,7 @@ func (m completionModel) bash() string {
 	fmt.Fprintf(&b, "        propose) words='%s' ;;\n", spellingsOf(m.propose))
 	fmt.Fprintf(&b, "        proposals) words='%s' ;;\n", spellingsOf(m.proposals))
 	fmt.Fprintf(&b, "        approve) words='%s' ;;\n", spellingsOf(m.approve))
+	fmt.Fprintf(&b, "        mcp) words='%s' ;;\n", spellingsOf(m.mcp))
 	fmt.Fprintf(&b, "        completion) words='%s' ;;\n", strings.Join(shells, " "))
 	b.WriteString("        *) return ;;\n    esac\n")
 	b.WriteString("    COMPREPLY=($(compgen -W \"$words\" -- \"$cur\"))\n}\n")
@@ -200,7 +202,7 @@ func (m completionModel) zsh() string {
 	for _, sub := range []struct {
 		name  string
 		flags []complFlag
-	}{{"propose", m.propose}, {"proposals", m.proposals}, {"approve", m.approve}} {
+	}{{"propose", m.propose}, {"proposals", m.proposals}, {"approve", m.approve}, {"mcp", m.mcp}} {
 		fmt.Fprintf(&b, "        %s) _arguments", sub.name)
 		for _, f := range sub.flags {
 			b.WriteString(" " + zshSpec(f, ""))
@@ -253,7 +255,7 @@ func (m completionModel) fish() string {
 	for _, sub := range []struct {
 		name  string
 		flags []complFlag
-	}{{"propose", m.propose}, {"proposals", m.proposals}, {"approve", m.approve}} {
+	}{{"propose", m.propose}, {"proposals", m.proposals}, {"approve", m.approve}, {"mcp", m.mcp}} {
 		for _, f := range sub.flags {
 			b.WriteString(fishFlag(fishQuote("__fish_seen_subcommand_from "+sub.name), f))
 		}

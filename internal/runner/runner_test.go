@@ -99,3 +99,35 @@ func TestExecCancelInterruptsChild(t *testing.T) {
 		t.Errorf("took %s; the child should exit on SIGINT, not after the kill delay", d)
 	}
 }
+
+func TestExecStreamStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	if _, err := w.WriteString("from the parent\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	saved := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = saved }()
+
+	for _, tc := range []struct {
+		name    string
+		noStdin bool
+		want    string
+	}{{"inherited", false, "got from the parent\n"}, {"closed for a protocol on stdin", true, "none\n"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			e := &Exec{Stdout: &out, Stderr: &out, NoStdin: tc.noStdin}
+			if _, err := e.Run(context.Background(), Cmd{Name: "sh", Args: []string{"-c", `if read line; then echo "got $line"; else echo none; fi`}, Stream: true}); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != tc.want {
+				t.Errorf("output %q, want %q", out.String(), tc.want)
+			}
+		})
+	}
+}

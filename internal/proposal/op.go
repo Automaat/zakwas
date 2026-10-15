@@ -59,6 +59,11 @@ var (
 	nameRe     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
 
+// Hidden reports a character that isn't visible text: a control character
+// or a format character such as a bidirectional override or a zero-width
+// space, which can reorder or hide what a reviewer reads.
+func Hidden(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }
+
 // Validate checks the operation's own fields; whether the edit fits the
 // config is checked when it is applied.
 func (o Op) Validate() error {
@@ -95,7 +100,7 @@ func (o Op) Validate() error {
 		need(!o.Cask, "only add-brew takes a cask")
 	}
 	for _, s := range []string{o.Name, o.Command, o.Justification, o.Version} {
-		need(!strings.ContainsFunc(s, unicode.IsControl), "values must be one line of printable text")
+		need(!strings.ContainsFunc(s, Hidden), "values must be one line of printable text")
 	}
 	return errors.Join(errs...)
 }
@@ -110,7 +115,7 @@ func (o Op) validateMCP() []error {
 		return append(errs, errors.New("set either a command or a url"))
 	}
 	for _, v := range append(slices.Clone(s.Args), s.Command, s.URL) {
-		if strings.ContainsFunc(v, unicode.IsControl) {
+		if strings.ContainsFunc(v, Hidden) {
 			errs = append(errs, errors.New("values must be one line of printable text"))
 			break
 		}

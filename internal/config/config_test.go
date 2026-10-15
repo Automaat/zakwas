@@ -646,3 +646,33 @@ func TestNoAgentsSectionHasNoGuard(t *testing.T) {
 		t.Error("a missing agents section is guarded")
 	}
 }
+
+func TestMCPPromptTools(t *testing.T) {
+	tests := []struct {
+		name string
+		s    MCPServer
+		want []string
+	}{
+		{"zakwas with apply", MCPServer{Command: "zakwas", Args: []string{"mcp", "--enable-apply"}}, []string{MCPApplyTool}},
+		{"single dash and path", MCPServer{Command: "/opt/homebrew/bin/zakwas", Args: []string{"mcp", "-c", "/x/zakwas.yaml", "-enable-apply"}}, []string{MCPApplyTool}},
+		{"explicit true", MCPServer{Command: "zakwas", Args: []string{"mcp", "--enable-apply=true"}}, []string{MCPApplyTool}},
+		{"read only", MCPServer{Command: "zakwas", Args: []string{"mcp"}}, nil},
+		{"numeric true", MCPServer{Command: "zakwas", Args: []string{"mcp", "--enable-apply=1"}}, []string{MCPApplyTool}},
+		{"capitalized", MCPServer{Command: "zakwas", Args: []string{"mcp", "-enable-apply=TRUE"}}, []string{MCPApplyTool}},
+		{"short true", MCPServer{Command: "zakwas", Args: []string{"mcp", "--enable-apply=t"}}, []string{MCPApplyTool}},
+		{"numeric false", MCPServer{Command: "zakwas", Args: []string{"mcp", "--enable-apply=0"}}, nil},
+		{"not a flag", MCPServer{Command: "zakwas", Args: []string{"mcp", "enable-apply"}}, nil},
+		{"explicit false", MCPServer{Command: "zakwas", Args: []string{"mcp", "--enable-apply=false"}}, nil},
+		{"another command", MCPServer{Command: "zakwas", Args: []string{"plan", "--enable-apply"}}, nil},
+		{"another binary", MCPServer{Command: "npx", Args: []string{"mcp", "--enable-apply"}}, nil},
+		{"no args", MCPServer{Command: "zakwas"}, nil},
+		{"http", MCPServer{URL: "https://example.com/mcp"}, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.s.PromptTools(); !slices.Equal(got, tc.want) {
+				t.Errorf("PromptTools() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

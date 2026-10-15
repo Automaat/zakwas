@@ -577,3 +577,30 @@ func TestMCPDiffHidesURLSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexMCPPromptsForTheApplyTool(t *testing.T) {
+	zakwas := stdioServer("/opt/homebrew/bin/zakwas", "mcp", "--enable-apply")
+	m := mcpModule(t, []string{config.ProviderCodex}, map[string]config.MCPServer{"zakwas": zakwas, "plain": stdioServer("zakwas", "mcp")})
+	apply(t, plan(t, m))
+
+	got := readFile(t, filepath.Join(m.CodexHome, "config.toml"))
+	want := "[mcp_servers.zakwas.tools.zakwas_apply]\napproval_mode = \"prompt\"\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("config.toml lacks the prompt:\n%s", got)
+	}
+	if strings.Count(got, "approval_mode") != 1 {
+		t.Errorf("a server without --enable-apply prompts too:\n%s", got)
+	}
+	if again := plan(t, m); len(again) != 0 {
+		t.Errorf("second plan has %d changes: %q", len(again), targets(again))
+	}
+}
+
+func TestClaudeMCPEntryCarriesNoToolApproval(t *testing.T) {
+	m := mcpModule(t, []string{config.ProviderClaude}, map[string]config.MCPServer{"zakwas": stdioServer("zakwas", "mcp", "--enable-apply")})
+	apply(t, plan(t, m))
+	got := readFile(t, filepath.Join(m.Paths.Home, ".claude.json"))
+	if strings.Contains(got, "approval") {
+		t.Errorf("claude.json mentions an approval mode:\n%s", got)
+	}
+}

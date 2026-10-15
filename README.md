@@ -65,9 +65,14 @@ zakwas plan --only brew,defaults
 zakwas propose add-plugin foo@market   # save a config edit without applying it
 zakwas proposals                       # pending proposals
 zakwas approve ID                      # diff + plan, confirm, apply, commit (terminal only)
+zakwas mcp --enable-apply              # serve plan/propose (and confirmed low-risk apply) to agents over MCP
 ```
 
 `propose` takes a typed operation (add a plugin, add or remove a permission, add a brew package, pin a mise tool, add an MCP server), splices it into the original file bytes, and saves it with its plan and risk tier. `approve` applies only the affected modules and commits to the current branch without pushing. See [docs/commands.md](docs/commands.md#propose-proposals-approve).
+
+`zakwas mcp` serves the same to coding agents over MCP: read-only config, plan and check tools, plus propose and discard. With `--enable-apply` it also applies a low-risk proposal after you confirm a diff and plan zakwas renders in the agent; high-risk proposals and clients that can't show the confirmation get the `zakwas approve ID` command. Register it with `agents.mcp: {zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, ~/dotfiles/zakwas.yaml]}}`. See [docs/commands.md](docs/commands.md#mcp).
+
+The repo is also an agent plugin marketplace. Its `zakwas` plugin ships a skill that tells agents to propose changes instead of editing agent config or `zakwas.yaml`, and to hand high-risk proposals to you as `zakwas approve ID`. Install it with zakwas itself: `agents.marketplaces: {zakwas: Automaat/zakwas}` and `agents.plugins: [zakwas@zakwas]` (Claude Code, Codex and opencode). See [docs/commands.md](docs/commands.md#teach-agents-the-flow).
 
 ```
 $ zakwas plan
@@ -302,7 +307,7 @@ mise run test:integration   # adds real `defaults` and mise round-trips
 mise run lint
 ```
 
-Releases: push a `vX.Y.Z` tag; GoReleaser publishes darwin arm64/amd64 binaries. See [CLAUDE.md](CLAUDE.md) for layout and conventions.
+Releases: set `version` in `plugins/zakwas/.claude-plugin/plugin.json` to `X.Y.Z` in a PR, merge it, then push the `vX.Y.Z` tag on that commit; the release workflow refuses a tag that differs from the plugin version, and GoReleaser publishes darwin arm64/amd64 binaries. See [CLAUDE.md](CLAUDE.md) for layout and conventions.
 
 ## License
 

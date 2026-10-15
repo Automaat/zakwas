@@ -73,14 +73,40 @@ func checkProposal(p *proposal.Proposal, cfg *config.Config, env Env) error {
 	return nil
 }
 
+// approval applies one proposal. ask shows the reviewed proposal and says
+// whether to go on; nil asks on the terminal. observer reports the steps
+// of the apply; nil prints them to out. maxTier, when set, refuses a
+// proposal rated above it. outcome says why nothing was applied when that
+// was on purpose. via says where it was approved, for the commit message,
+// and applied turns true once the changes ran and the commit is next.
 type approval struct {
-	env    Env
-	cfg    *config.Config
-	p      *proposal.Proposal
-	out    *console
-	errOut *console
+	env      Env
+	cfg      *config.Config
+	p        *proposal.Proposal
+	out      *console
+	errOut   *console
+	ask      func(ctx context.Context, r *review) (bool, error)
+	observer func(style engine.Style) engine.Observer
+	maxTier  string
+	outcome  string
+	via      string
+	applied  bool
 
 	summary, tier string
+}
+
+// Why an approval applied nothing.
+const (
+	outcomeDeclined = "declined"
+	outcomeRefused  = "refused"
+)
+
+// review is a proposal as shown to whoever approves it.
+type review struct {
+	ev     *evaluation
+	rels   []string
+	branch string
+	style  engine.Style
 }
 
 func (a *approval) fail(err error) int {
@@ -134,21 +160,30 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 
 	style := engine.Style{Color: a.env.Color, ShowDiffs: true}
 	a.summary, a.tier = proposal.Summaries(ev.ops), ev.tier
-	a.out.printf("Proposal %s: %s (%s risk)\n", a.p.ID, a.summary, a.tier)
-	for _, r := range ev.reasons {
-		a.out.print("  " + r + "\n")
+	if a.maxTier == proposal.TierLow && ev.tier != proposal.TierLow {
+		a.outcome = outcomeRefused
+		return a.fail(fmt.Errorf("proposal %s is %s risk, and only a terminal applies those: run `zakwas approve %s`", a.p.ID, ev.tier, a.p.ID))
 	}
-	a.out.print("\n" + ev.diff + "\n\n")
-	if err := engine.Render(a.out, ev.plan, style); err != nil {
-		return ExitErr
+	r := &review{ev: ev, rels: rels, branch: branch, style: style}
+	ask := a.ask
+	if ask == nil {
+		ask = a.askTerminal
 	}
-	a.out.printf("\nApprove %s: apply %d step(s) and commit %s to %s? [y/N] ", a.p.ID, ev.plan.Steps(), strings.Join(rels, ", "), branch)
-	line, _ := bufio.NewReader(a.env.Stdin).ReadString('\n')
-	if answer := strings.ToLower(strings.TrimSpace(line)); answer != "y" && answer != "yes" {
+	yes, err := ask(ctx, r)
+	switch {
+	case err != nil:
+		a.outcome = outcomeDeclined
+		return a.fail(fmt.Errorf("couldn't get a confirmation, so nothing was applied: %w", err))
+	case !yes:
+		a.outcome = outcomeDeclined
 		a.out.print("aborted\n")
 		return ExitErr
 	}
 
+	if _, err := store.Load(a.p.ID); err != nil {
+		a.outcome = outcomeDeclined
+		return a.fail(fmt.Errorf("proposal %s was discarded while waiting for the answer, so nothing was applied", a.p.ID))
+	}
 	if _, err := a.checkGit(ctx, checked); err != nil {
 		return a.fail(fmt.Errorf("while waiting for the answer: %w", err))
 	}
@@ -164,6 +199,7 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		}
 		return code
 	}
+	a.applied = true
 	if err := store.Delete(a.p.ID); err != nil {
 		a.errOut.print("zakwas: warning: proposal " + a.p.ID + " not removed: " + err.Error() + "\n")
 	}
@@ -174,6 +210,32 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 	sha, _ := git(ctx, a.env.Runner, a.cfg.Root, "rev-parse", "--short", "HEAD")
 	a.out.printf("Committed %s on %s; not pushed.\n", sha, branch)
 	return ExitOK
+}
+
+// showReview prints what the approver is asked to confirm: the proposal,
+// why it is rated as it is, the diff and the plan.
+func (a *approval) showReview(out *console, r *review) error {
+	out.printf("Proposal %s: %s (%s risk)\n", a.p.ID, a.summary, a.tier)
+	for _, reason := range r.ev.reasons {
+		out.print("  " + reason + "\n")
+	}
+	out.print("\n" + r.ev.diff + "\n\n")
+	return engine.Render(out, r.ev.plan, r.style)
+}
+
+func (a *approval) question(r *review) string {
+	return fmt.Sprintf("Approve %s: apply %d step(s) and commit %s to %s?", a.p.ID, r.ev.plan.Steps(), strings.Join(r.rels, ", "), r.branch)
+}
+
+// askTerminal shows the review and reads y or yes from stdin.
+func (a *approval) askTerminal(_ context.Context, r *review) (bool, error) {
+	if err := a.showReview(a.out, r); err != nil {
+		return false, err
+	}
+	a.out.print("\n" + a.question(r) + " [y/N] ")
+	line, _ := bufio.NewReader(a.env.Stdin).ReadString('\n')
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }
 
 // checkGit requires the edited files to be tracked and clean in a git
@@ -229,7 +291,10 @@ func (a *approval) apply(ctx context.Context, ev *evaluation, style engine.Style
 		return ExitErr
 	}
 	a.out.print("\n")
-	obs := &progress{out: a.out, style: style, groups: a.env.GitHubActions}
+	var obs engine.Observer = &progress{out: a.out, style: style, groups: a.env.GitHubActions}
+	if a.observer != nil {
+		obs = a.observer(style)
+	}
 	result, applyErr := engine.Apply(ctx, obs, plan)
 	if err := recordHistory(ctx, a.env, cfg.Root, plan, result, applyErr); err != nil {
 		a.errOut.print("zakwas: warning: history not recorded: " + err.Error() + "\n")
@@ -248,7 +313,11 @@ func (a *approval) commit(ctx context.Context, rels []string) error {
 	if r := []rune(subject); len(r) > 72 {
 		subject = string(r[:71]) + "…"
 	}
-	body := fmt.Sprintf("Proposal %s (%s risk), approved in a terminal.", a.p.ID, a.tier)
+	via := a.via
+	if via == "" {
+		via = "a terminal"
+	}
+	body := fmt.Sprintf("Proposal %s (%s risk), approved in %s.", a.p.ID, a.tier, via)
 	run := func(args ...string) error {
 		return runner.Check(ctx, a.env.Runner, runner.Cmd{Name: "git", Args: append([]string{"-C", root}, args...)})
 	}

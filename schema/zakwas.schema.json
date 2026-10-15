@@ -1200,7 +1200,7 @@
           ]
         },
         "guard": {
-          "description": "Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added.",
+          "description": "Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added.",
           "default": true,
           "type": [
             "boolean",
