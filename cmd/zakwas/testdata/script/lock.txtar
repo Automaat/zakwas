@@ -1,5 +1,5 @@
-exec zakwas apply -y &first&
-exec sh -c 'until [ -e home/started ]; do sleep 0.1; done'
+exec sh -c 'zakwas apply -y 2>first.err' &first&
+exec sh -c 'until [ -e home/started ] || [ -s first.err ]; do sleep 0.1; done'
 
 ! zakwas apply -y --no-wait
 stderr 'another run is in progress: "zakwas apply" \(pid \d+\); not waiting'
@@ -10,11 +10,15 @@ stdout 'slow'
 ! zakwas check
 stdout 'slow'
 
-zakwas apply -y
-stderr 'waiting for "zakwas apply" \(pid \d+\) to finish'
-stdout 'up to date'
+exec sh -c 'zakwas apply -y 2>second.err' &second&
+exec sh -c 'until [ -s second.err ]; do sleep 0.1; done'
+exec touch home/release
 
 wait first
+wait second
+stdout 'up to date'
+exec cat second.err
+stdout 'waiting for "zakwas apply" \(pid \d+\) to finish'
 exec cat home/log
 cmp stdout expected-log
 zakwas check
@@ -25,7 +29,7 @@ commands:
     check: test -e done
     run: |
       touch started
-      sleep 2
+      until [ -e release ]; do sleep 0.1; done
       echo ran >> log
       touch done
 -- expected-log --

@@ -338,14 +338,17 @@ func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *
 	if !ok {
 		return nil, ExitErr, false
 	}
-	if ex, ok := env.Runner.(*runner.Exec); ok {
+	if ex, ok := env.Runner.(*runner.Exec); ok && held != nil {
 		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
 	}
 	return held, ExitOK, true
 }
 
 // takeLock takes the run lock without marking the runner's commands as
-// running under it, for a long-lived process that sets that once.
+// running under it, for a long-lived process that sets that once. A lock the
+// state dir or file won't allow is a warning, not a failure, so a read-only
+// state dir keeps working as it did before the lock; the returned lock is
+// then nil.
 func takeLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, bool) {
 	if env.LockHeldBy != "" {
 		errOut.printf("zakwas: can't run %s inside a zakwas run (pid %s holds the lock and would wait for itself forever)\n", cmd, env.LockHeldBy)
@@ -357,6 +360,11 @@ func takeLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *con
 			errOut.print("zakwas: waiting for " + h.String() + " to finish\n")
 		},
 	})
+	var unavailable *lock.UnavailableError
+	if errors.As(err, &unavailable) {
+		errOut.print("zakwas: warning: " + unavailable.Error() + "; running without it, so another run is not kept out\n")
+		return nil, true
+	}
 	if err != nil {
 		if ctx.Err() == nil {
 			errOut.fail(err)

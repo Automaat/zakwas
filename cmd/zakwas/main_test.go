@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,6 +39,12 @@ func TestScripts(t *testing.T) {
 			env.Setenv("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
 			env.Setenv("ZAKWAS_PAM_FILE", filepath.Join(env.WorkDir, "sudo_local"))
 			return nil
+		},
+		Condition: func(cond string) (bool, error) {
+			if cond == "root" {
+				return os.Geteuid() == 0, nil
+			}
+			return false, fmt.Errorf("unknown condition %q", cond)
 		},
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){
 			"linkto": linkTo,

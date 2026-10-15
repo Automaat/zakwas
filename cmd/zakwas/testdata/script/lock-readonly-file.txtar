@@ -1,0 +1,27 @@
+[root] skip 'root ignores file modes'
+
+chmod 0444 home/.local/state/zakwas/lock
+exec sh -c 'zakwas apply -y 2>first.err' &first&
+exec sh -c 'until [ -e home/started ] || [ -s first.err ]; do sleep 0.1; done'
+
+! zakwas apply -y --no-wait
+stderr 'another run is in progress: another zakwas run; not waiting'
+! stderr '4242|pid'
+
+exec touch home/release
+wait first
+exists home/ran
+exec cat home/.local/state/zakwas/lock
+stdout '4242'
+
+-- zakwas.yaml --
+commands:
+  - name: hold
+    check: test -e ran
+    run: |
+      touch started
+      until [ -e release ]; do sleep 0.1; done
+      touch ran
+-- home/.local/state/zakwas/lock --
+4242
+zakwas apply

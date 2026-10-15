@@ -31,6 +31,9 @@ func Path(home string) string {
 }
 
 // Holder identifies the run that owns the lock. Both fields are best effort.
+// A run that can't write the lock file records nothing, and the file may
+// still name an earlier run, so a run that can't write it either reports the
+// zero Holder instead of reading it.
 type Holder struct {
 	PID     int
 	Command string
@@ -53,7 +56,26 @@ func (e *BusyError) Error() string {
 	return "another run is in progress: " + e.Holder.String() + "; not waiting (--no-wait)"
 }
 
-// Lock is a held lock; Release it when the run is done.
+// UnavailableError reports that the lock file can't be created or opened
+// because the state dir or the file denies access. Err is the original
+// error, not the one from the read-only retry.
+type UnavailableError struct {
+	Path string
+	Err  error
+}
+
+func (e *UnavailableError) Error() string {
+	return "can't take the run lock " + e.Path + ": " + e.Err.Error()
+}
+
+func (e *UnavailableError) Unwrap() error { return e.Err }
+
+func denied(err error) bool {
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS)
+}
+
+// Lock is a held lock; Release it when the run is done. Releasing a nil
+// Lock is a no-op.
 type Lock struct {
 	f        *os.File
 	writable bool
@@ -73,15 +95,20 @@ type Options struct {
 func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, error) {
 	path := Path(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if denied(err) {
+			return nil, &UnavailableError{Path: path, Err: err}
+		}
 		return nil, err
 	}
 	writable := true
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
-	if errors.Is(err, fs.ErrPermission) {
+	if denied(err) {
 		writable = false
-		f, err = os.Open(path)
-	}
-	if err != nil {
+		var roErr error
+		if f, roErr = os.Open(path); roErr != nil {
+			return nil, &UnavailableError{Path: path, Err: err}
+		}
+	} else if err != nil {
 		return nil, err
 	}
 	poll := opts.Poll
@@ -98,7 +125,10 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 			return nil, errors.Join(err, f.Close())
 		}
 		if !waited {
-			h := settledHolder(path)
+			var h Holder
+			if writable {
+				h = settledHolder(path)
+			}
 			if opts.NoWait {
 				return nil, errors.Join(&BusyError{h}, f.Close())
 			}
@@ -133,6 +163,9 @@ func (l *Lock) writeHolder(command string) error {
 
 // Release drops the lock; closing the file does it.
 func (l *Lock) Release() error {
+	if l == nil {
+		return nil
+	}
 	return l.f.Close()
 }
 
