@@ -13,6 +13,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/install"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
@@ -31,7 +32,12 @@ type Module struct {
 	// paths of the templates, which opencode's share of the guard needs.
 	Guard           bool
 	TemplateSources []string
-	klaudiushPath   string
+	// Vars are the templates.vars, which instructions can reference, and
+	// Immutable is protect.immutable for the instructions copies.
+	Vars          map[string]string
+	Immutable     bool
+	installer     *install.Installer
+	klaudiushPath string
 }
 
 func (m *Module) Name() string { return "agents" }
@@ -113,7 +119,7 @@ func (m *Module) desired(provider string) desired {
 }
 
 // Plan plans every provider with a backend, each provider's instructions
-// link first. A provider that fails to plan, its instructions included,
+// copy first. A provider that fails to plan, its instructions included,
 // plans nothing and doesn't hold back the others: their changes are
 // returned along with the error.
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
@@ -133,7 +139,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		errs = append(errs, klaudiushErr)
 	}
 	backends := m.backends()
-	for _, p := range config.Providers {
+	for _, p := range append(slices.Clone(config.Providers), sharedInstructions) {
 		if err := failed[p]; err != nil {
 			errs = append(errs, err)
 			delete(instructions, p)

@@ -76,9 +76,9 @@ func allowNull(s *jsonschema.Schema) {
 }
 
 // scalarShorthands lets an agents marketplace be written as its source
-// string, a plugin as its id and a permission as its command, matching
-// their UnmarshalYAML. Widening "type" keeps the object's properties for
-// editors, where anyOf would hide them.
+// string, a plugin as its id and a permission as its command, and the
+// instructions as one file, matching their UnmarshalYAML. Widening "type"
+// keeps the object's properties for editors, where anyOf would hide them.
 func scalarShorthands(root *jsonschema.Schema) error {
 	agents := property(root, "agents")
 	marketplaces := property(agents, "marketplaces")
@@ -95,8 +95,15 @@ func scalarShorthands(root *jsonschema.Schema) error {
 		}
 		shorthands = append(shorthands, list.Items)
 	}
+	instructions := property(agents, "instructions")
+	if instructions == nil || instructions.Items == nil {
+		return errors.New("schemagen: agents.instructions not found")
+	}
+	one := uint64(1)
+	instructions.Items.MinLength = &one
+	instructions.Extras = map[string]any{"type": []string{"string", "array", "null"}}
+	instructions.Type = ""
 	for _, s := range shorthands {
-		one := uint64(1)
 		s.MinLength = &one
 		if s.Extras == nil {
 			s.Extras = map[string]any{}

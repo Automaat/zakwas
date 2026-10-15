@@ -526,9 +526,10 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Paths: paths, Runner: env.Runner})
 	}
 	agentsCfg := cfg.Agents
-	if _, err := os.Lstat(agents.InstructionsStatePath(env.Home)); agentsCfg == nil && err == nil {
-		// Without the section, still remove the instructions links zakwas made.
-		agentsCfg = &config.Agents{}
+	for _, state := range []string{agents.InstructionsStatePath(env.Home), agents.InstructionFilesStatePath(env.Home)} {
+		if _, err := os.Lstat(state); agentsCfg == nil && err == nil {
+			agentsCfg = &config.Agents{}
+		}
 	}
 	if _, err := os.Lstat(agents.CommandHooksStatePath(env.Home)); agentsCfg == nil && err == nil {
 		agentsCfg = &config.Agents{}
@@ -543,6 +544,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		mods = append(mods, &agents.Module{
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
 			Guard: cfg.Agents.GuardEnabled(), TemplateSources: templateSrcs(cfg, paths),
+			Vars: cfg.Templates.Vars, Immutable: cfg.Protect.Immutable,
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
 		})
 	}

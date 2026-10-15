@@ -1,0 +1,78 @@
+mkdir claude
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+symlink claude/CLAUDE.md -> $WORK/base.md
+
+zakwas plan --only agents
+stdout 'replace symlink'
+stdout '~/.agents/AGENTS.md'
+! exists codex
+! exists home/.agents
+
+zakwas apply -y --only agents
+stdout 'Applied 3 of 3 steps'
+cmpenv claude/CLAUDE.md claude.golden
+cmp codex/AGENTS.md codex.golden
+cmp home/.agents/AGENTS.md shared.golden
+! exists claude/CLAUDE.md.zakwas-bak
+cmp base.md base.orig
+zakwas check --only agents
+stdout 'up to date: agents'
+
+cp zakwas-missing.yaml zakwas.yaml
+! zakwas plan --only agents
+stdout 'claude: instructions: .*import @docs/nope.md'
+stdout 'codex: instructions: .*import @docs/nope.md'
+cmpenv claude/CLAUDE.md claude.golden
+
+cp zakwas-bad-template.yaml zakwas.yaml
+! zakwas plan --only agents
+stdout 'claude: instructions: render'
+
+-- base.md --
+Base rules
+@docs/git.md
+-- base.orig --
+Base rules
+@docs/git.md
+-- docs/git.md --
+git rules
+-- claude.md --
+{{ if eq .Provider "claude" }}use the Skill tool
+{{ end }}
+-- codex.md --
+{{ if eq .Provider "codex" }}no skills here
+{{ end }}
+-- gone.md --
+@docs/nope.md
+-- bad.md --
+{{ .Nope }}
+-- zakwas.yaml --
+agents:
+  guard: false
+  providers: [claude, codex]
+  instructions: [base.md, claude.md, codex.md]
+  sharedInstructions: true
+-- zakwas-missing.yaml --
+agents:
+  guard: false
+  providers: [claude, codex]
+  instructions: [gone.md]
+-- zakwas-bad-template.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  instructions: [bad.md]
+-- claude.golden --
+Base rules
+@$WORK/docs/git.md
+
+use the Skill tool
+-- codex.golden --
+Base rules
+git rules
+
+no skills here
+-- shared.golden --
+Base rules
+git rules
