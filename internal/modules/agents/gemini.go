@@ -269,7 +269,7 @@ func geminiGuardRegex(words []string) string {
 	for n := 1; n <= geminiGuardQuotedValues; n++ {
 		middle = append(middle, `[^"]*`+strings.Repeat(`\\"[^"]*\\"[^"]*`, n)+`\s`)
 	}
-	return `(?:|\S*/|\\"[^"]*/)` + regexp.QuoteMeta(words[0]) + `(?:|\\"|')\s(?:` + strings.Join(middle, "|") + `)(?:|\\")` +
+	return `(?:|\S*/|\\"[^"]*/)(?:|\\")` + regexp.QuoteMeta(words[0]) + `(?:|\\"|')\s(?:` + strings.Join(middle, "|") + `)(?:|\\")` +
 		regexp.QuoteMeta(strings.Join(words[1:], " ")) + `(?:[\s"]|\\")`
 }
 
