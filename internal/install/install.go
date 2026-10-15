@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	udiff "github.com/aymanbagabas/go-udiff"
 
@@ -26,6 +27,10 @@ type Installer struct {
 	State     *State
 	StatePath string
 	Immutable bool
+
+	// mu guards the lazy state load: files and templates share one
+	// Installer and plan concurrently.
+	mu sync.Mutex
 }
 
 // ReadOnly strips write bits, keeping read and execute bits of perm.
@@ -214,6 +219,8 @@ func (in *Installer) finish(dst string, want []byte) error {
 }
 
 func (in *Installer) loadState() error {
+	in.mu.Lock()
+	defer in.mu.Unlock()
 	if in.State != nil {
 		return nil
 	}

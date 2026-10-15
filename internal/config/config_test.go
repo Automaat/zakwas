@@ -93,6 +93,32 @@ func TestLoadRejects(t *testing.T) {
 		body string
 		want []string
 	}{
+		{"launchd label is required", "launchd: [{program: [/bin/true], schedule: {at: '10:00'}}]", []string{"launchd[0]: label is required"}},
+		{"launchd label with a slash", "launchd: [{label: a/b, program: [/bin/true], schedule: {at: '10:00'}}]", []string{`label "a/b" may only hold`}},
+		{"launchd duplicate label", `
+launchd:
+  - {label: a.b, program: [/bin/true], schedule: {at: '10:00'}}
+  - {label: A.B, program: [/bin/true], schedule: {at: '11:00'}}`, []string{`launchd[1]: label "A.B" is already used by launchd[0]`}},
+		{"launchd plist overlaps a file", `
+files: [{src: a, dst: ~/Library/LaunchAgents/a.b.plist}]
+launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}}]`, []string{"launchd[0]: destination", "overlaps files[0]"}},
+		{"launchd program is required", "launchd: [{label: a.b, schedule: {at: '10:00'}}]", []string{"launchd[0]: program is required"}},
+		{"launchd relative program", "launchd: [{label: a.b, program: [zakwas], schedule: {at: '10:00'}}]", []string{`program "zakwas" must be an absolute path or start with ~/`}},
+		{"launchd program variable", "launchd: [{label: a.b, program: [$HOME/x], schedule: {at: '10:00'}}]", []string{"environment variables are not expanded"}},
+		{"launchd no schedule", "launchd: [{label: a.b, program: [/bin/true]}]", []string{"schedule needs 'every' or 'at'"}},
+		{"launchd both schedules", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00', every: 1h}}]", []string{"sets both 'every' and 'at'"}},
+		{"launchd interval too short", "launchd: [{label: a.b, program: [/bin/true], schedule: {every: 10s}}]", []string{"must be at least 1m0s"}},
+		{"launchd interval not a duration", "launchd: [{label: a.b, program: [/bin/true], schedule: {every: soon}}]", []string{`every "soon"`}},
+		{"launchd bad time", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '25:00'}}]", []string{`at "25:00" is not HH:MM`}},
+		{"launchd weekdays need at", "launchd: [{label: a.b, program: [/bin/true], schedule: {every: 1h, weekdays: [mon]}}]", []string{"weekdays only works with 'at'"}},
+		{"launchd unknown weekday", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00', weekdays: [monday]}}]", []string{`"monday" is not one of`}},
+		{"launchd repeated weekday", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00', weekdays: [mon, mon]}}]", []string{`"mon" is listed twice`}},
+		{"launchd empty weekdays", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00', weekdays: []}}]", []string{"schedule.weekdays is empty"}},
+		{"launchd control character in env", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}, env: {X: \"bell\\u0007x\"}}]", []string{"launchd[0]: env X", "contains a control character"}},
+		{"launchd control character in program", "launchd: [{label: a.b, program: [\"/bin/true\", \"a\\u0001\"], schedule: {at: '10:00'}}]", []string{"program[1]", "contains a control character"}},
+		{"launchd control character in log", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}, log: \"~/a\\u0000\"}]", []string{"launchd[0]: log"}},
+		{"launchd relative log", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}, log: out.log}]", []string{"launchd[0]: log:"}},
+		{"launchd env name with =", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}, env: {'A=B': x}}]", []string{`env name "A=B"`}},
 		{"unknown field", "linkz: []", []string{"field linkz not found"}},
 		{"missing link fields", "links: [{src: a}]", []string{"links[0]: src and dst are required"}},
 		{"duplicate destination", `
@@ -142,7 +168,7 @@ defaults:
 		{"unquoted date default", "defaults: [{domain: d, key: k, value: 2024-01-01}]", []string{"defaults[0] d k: YAML reads 2024-01-01 as a date; quote it"}},
 		{"unquoted timestamp default", "defaults: [{domain: d, key: k, value: 2024-01-01T10:00:00Z}]", []string{"YAML reads 2024-01-01T10:00:00Z as a date"}},
 		{"template mode 0o unreadable by owner", "templates: {files: [{src: a, dst: ~/a, mode: 0o044}]}", []string{"e.g. 0o644"}},
-		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode, gemini)`}},
+		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode, gemini, copilot)`}},
 		{"duplicate agent provider", "agents: {providers: [claude, claude]}", []string{`agents.providers: provider "claude" is listed twice`}},
 		{"duplicate plugin provider", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: [codex, codex]}]}", []string{`agents.plugins[0].providers: provider "codex" is listed twice`}},
 		{"empty agent providers", "agents: {providers: []}", []string{"agents.providers: list at least one provider"}},
@@ -270,6 +296,17 @@ commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
 
 func TestLoadAccepts(t *testing.T) {
 	tests := []struct{ name, body string }{
+		{"launchd jobs", `
+launchd:
+  - label: com.example.daily
+    program: [~/.local/bin/check, --quiet]
+    schedule: {at: '10:00', weekdays: [mon, tue, wed, thu, fri]}
+    env: {PATH: /usr/bin}
+    log: ~/Library/Logs/daily.log
+  - label: com.example.poll
+    program: [/bin/sh, -c, echo hi]
+    schedule: {every: 30m}
+    runAtLoad: true`},
 		{"sibling prefixes", `
 files: [{src: a, dst: ~/.a}, {src: b, dst: ~/.ab}, {src: c, dst: ~/.a-b/x}]
 links: [{src: d, dst: /etc/x}]`},
@@ -370,7 +407,7 @@ agents:
 		plugin int
 		want   []string
 	}{
-		{0, []string{ProviderClaude, ProviderCodex, ProviderOpencode}},
+		{0, []string{ProviderClaude, ProviderCodex, ProviderOpencode, ProviderCopilot}},
 		{1, []string{ProviderClaude}},
 		{2, []string{ProviderOpencode}},
 	} {

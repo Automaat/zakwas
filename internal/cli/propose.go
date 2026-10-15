@@ -396,7 +396,7 @@ func evaluate(ctx context.Context, env Env, cfg *config.Config, ops []proposal.O
 // the plan it will run is complete and stays away from sensitive paths.
 func rate(env Env, ops []proposal.Op, plan engine.Plan) (string, []string) {
 	tier, reasons := proposal.Classify(ops)
-	sens := proposal.Sensitive{Home: env.Home, Extra: []string{absFromCwd(env, env.ClaudeConfigDir), absFromCwd(env, env.CodexHome), absFromCwd(env, env.GeminiHome)}}
+	sens := proposal.Sensitive{Home: env.Home, Extra: []string{absFromCwd(env, env.ClaudeConfigDir), absFromCwd(env, env.CodexHome), absFromCwd(env, env.GeminiHome), absFromCwd(env, env.CopilotHome)}}
 	for _, mp := range plan {
 		if mp.Err != nil {
 			reasons = append(reasons, fmt.Sprintf("the %s plan is incomplete: %v", mp.Module, mp.Err))

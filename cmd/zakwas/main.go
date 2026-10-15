@@ -57,11 +57,13 @@ func run() int {
 		Stderr:  os.Stderr,
 		Home:    home,
 		Cwd:     cwd,
+		UID:     os.Getuid(),
 		Runner:  runner.NewExec(),
 		PAMFile: os.Getenv("ZAKWAS_PAM_FILE"),
 
 		ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
 		CodexHome:       os.Getenv("CODEX_HOME"),
+		CopilotHome:     os.Getenv("COPILOT_HOME"),
 		GeminiHome:      os.Getenv("GEMINI_CLI_HOME"),
 		LockHeldBy:      os.Getenv(cli.LockHeldEnv),
 		AgentSession:    cli.DetectAgentSession(os.Getenv),

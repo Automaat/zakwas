@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
@@ -44,35 +45,38 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	if err := requireTrust(entries); err != nil {
 		return nil, err
 	}
-	trust, err := m.planTrust(ctx, entries)
-	if err != nil {
+
+	// The read-only queries are independent and each costs a brew start-up
+	// of about a second, so run them together. Errors are reported in
+	// query order, as sequential planning would.
+	var (
+		trust, cleanup        []engine.Change
+		missing               []string
+		outdated              []Outdated
+		trustErr, missingErr  error
+		outdatedErr, cleanErr error
+		wg                    sync.WaitGroup
+	)
+	wg.Go(func() { trust, trustErr = m.planTrust(ctx, entries) })
+	wg.Go(func() { missing, missingErr = m.missing(ctx, file) })
+	if m.Brew.Upgrade {
+		wg.Go(func() { outdated, outdatedErr = m.outdated(ctx, entries) })
+	}
+	wg.Go(func() { cleanup, cleanErr = m.planCleanup(ctx, file) })
+	wg.Wait()
+	if err := cmp.Or(trustErr, missingErr, outdatedErr, cleanErr); err != nil {
 		return nil, err
 	}
 
 	var install []engine.Change
-	missing, err := m.missing(ctx, file)
-	if err != nil {
-		return nil, err
-	}
 	for _, e := range missing {
 		install = append(install, engine.Change{Action: engine.Create, Target: e})
 	}
-	if m.Brew.Upgrade {
-		outdated, err := m.outdated(ctx, entries)
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range outdated {
-			install = append(install, engine.Change{Action: engine.Update, Target: e.Name, From: e.From, To: e.To})
-		}
+	for _, e := range outdated {
+		install = append(install, engine.Change{Action: engine.Update, Target: e.Name, From: e.From, To: e.To})
 	}
 	if len(install) > 0 {
 		install = append(install, m.bundleInstall(file))
-	}
-
-	cleanup, err := m.planCleanup(ctx, file)
-	if err != nil {
-		return nil, err
 	}
 	return append(append(trust, install...), cleanup...), nil
 }

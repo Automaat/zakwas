@@ -18,16 +18,17 @@ import (
 const FileName = "zakwas.yaml"
 
 type Config struct {
-	Protect   Protect   `yaml:"protect" jsonschema_description:"How files and templates are locked down after zakwas writes them."`
-	Files     []Link    `yaml:"files" jsonschema_description:"Repo files installed into your home directory as protected, read-only copies. A directory src copies every file inside it. Edit the source in the repo and run 'zakwas apply' to change one."`
-	Links     []Link    `yaml:"links" jsonschema_description:"Repo files symlinked into your home directory, for configs an app must be able to write itself. Links are not protected."`
-	Templates Templates `yaml:"templates" jsonschema_description:"Go text/template files rendered into your home directory as protected copies, for dotfiles that need your home path or per-machine values."`
-	Brew      *Brew     `yaml:"brew" jsonschema_description:"Homebrew packages from a Brewfile. Homebrew is installed first when missing. Omit the section to leave Homebrew alone."`
-	Mise      *Mise     `yaml:"mise" jsonschema_description:"Tools pinned in a global mise config. mise is installed first when missing. Omit the section to leave mise alone."`
-	Defaults  []Default `yaml:"defaults" jsonschema_description:"macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once."`
-	System    System    `yaml:"system" jsonschema_description:"Machine-level setup: directories, Touch ID for sudo, an SSH key."`
-	Commands  []Command `yaml:"commands" jsonschema_description:"One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure."`
-	Agents    *Agents   `yaml:"agents" jsonschema_description:"Coding-agent plugins and the marketplaces they come from, converged per provider: claude (Claude Code), codex (Codex) and opencode (skills linked into its skills directory). Omit the section to leave agent plugins alone."`
+	Protect   Protect      `yaml:"protect" jsonschema_description:"How files and templates are locked down after zakwas writes them."`
+	Files     []Link       `yaml:"files" jsonschema_description:"Repo files installed into your home directory as protected, read-only copies. A directory src copies every file inside it. Edit the source in the repo and run 'zakwas apply' to change one."`
+	Links     []Link       `yaml:"links" jsonschema_description:"Repo files symlinked into your home directory, for configs an app must be able to write itself. Links are not protected."`
+	Templates Templates    `yaml:"templates" jsonschema_description:"Go text/template files rendered into your home directory as protected copies, for dotfiles that need your home path or per-machine values."`
+	Brew      *Brew        `yaml:"brew" jsonschema_description:"Homebrew packages from a Brewfile. Homebrew is installed first when missing. Omit the section to leave Homebrew alone."`
+	Mise      *Mise        `yaml:"mise" jsonschema_description:"Tools pinned in a global mise config. mise is installed first when missing. Omit the section to leave mise alone."`
+	Defaults  []Default    `yaml:"defaults" jsonschema_description:"macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once."`
+	System    System       `yaml:"system" jsonschema_description:"Machine-level setup: directories, Touch ID for sudo, an SSH key."`
+	Commands  []Command    `yaml:"commands" jsonschema_description:"One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure."`
+	Launchd   []LaunchdJob `yaml:"launchd" jsonschema_description:"launchd user agents for scheduled jobs, such as a daily drift check. Each job's plist is written to ~/Library/LaunchAgents and loaded; changing a job reloads it, and removing it unloads it and deletes its plist. Only jobs zakwas created are ever unloaded or deleted. Labels must be unique."`
+	Agents    *Agents      `yaml:"agents" jsonschema_description:"Coding-agent plugins and the marketplaces they come from, converged per provider: claude (Claude Code), codex (Codex) and opencode (skills linked into its skills directory). Omit the section to leave agent plugins alone."`
 
 	// Root is the directory holding zakwas.yaml; relative sources resolve from it.
 	Root string `yaml:"-"`
@@ -267,6 +268,7 @@ func (c *Config) Validate(home string) error {
 	if c.Agents != nil {
 		errs = append(errs, c.Agents.validate()...)
 	}
+	errs = append(errs, c.validateLaunchd(paths, claimDst)...)
 	for i, cmd := range c.Commands {
 		if cmd.Name == "" || cmd.Check == "" || cmd.Run == "" {
 			errs = append(errs, fmt.Errorf("commands[%d]: name, check and run are required", i))

@@ -140,12 +140,19 @@ func (c claudeMCP) unset(path, name string) error {
 }
 
 func (c claudeMCP) edit(path string, change func(servers *object) error) error {
+	return editMCPServers(c.m, path, change)
+}
+
+// editMCPServers changes the mcpServers object of the JSON config at path,
+// the layout Claude Code's .claude.json and Copilot's mcp-config.json
+// share, and leaves its other keys as they are.
+func editMCPServers(m *Module, path string, change func(servers *object) error) error {
 	return retryEdit(path, func() error {
-		if err := install.CheckParents(c.m.Paths, path); err != nil {
+		if err := install.CheckParents(m.Paths, path); err != nil {
 			return err
 		}
 		if err := checkMCPFile(path); err != nil {
-			return fmt.Errorf("%s: %w", c.m.Paths.Pretty(path), err)
+			return fmt.Errorf("%s: %w", m.Paths.Pretty(path), err)
 		}
 		data, err := readIfExists(path)
 		if err != nil {

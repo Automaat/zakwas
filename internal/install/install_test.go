@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -591,5 +593,23 @@ func TestPlanRemoveOutsideHome(t *testing.T) {
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Errorf("file outside $HOME must never be deleted: %v", err)
+	}
+}
+
+func TestPlanSharesStateAcrossConcurrentModules(t *testing.T) {
+	home := t.TempDir()
+	in := &Installer{Paths: config.Paths{Home: home}, StatePath: StatePath(home)}
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			dst := filepath.Join(home, "f"+strconv.Itoa(i))
+			if _, err := in.Plan(dst, []byte("x"), 0o644); err != nil {
+				t.Errorf("plan %d: %v", i, err)
+			}
+		})
+	}
+	wg.Wait()
+	if in.State == nil {
+		t.Error("state not loaded")
 	}
 }

@@ -1,5 +1,5 @@
 // Package agents converges coding-agent plugins and marketplaces per
-// provider. Claude Code, Codex and opencode have backends; Gemini CLI, which
+// provider. Claude Code, Codex, opencode and Copilot CLI have backends; Gemini CLI, which
 // has no plugins, has the extension of gemini.go.
 package agents
 
@@ -20,14 +20,15 @@ import (
 
 // Module converges the agents section. ClaudeConfigDir is an absolute
 // $CLAUDE_CONFIG_DIR, or empty for Claude's default ~/.claude; CodexHome
-// likewise for $CODEX_HOME and ~/.codex, and GeminiHome for $GEMINI_CLI_HOME
-// and ~.
+// likewise for $CODEX_HOME and ~/.codex, GeminiHome for $GEMINI_CLI_HOME and ~, and
+// CopilotHome for $COPILOT_HOME and ~/.copilot.
 type Module struct {
 	Agents          config.Agents
 	Paths           config.Paths
 	Runner          runner.Runner
 	ClaudeConfigDir string
 	CodexHome       string
+	CopilotHome     string
 	GeminiHome      string
 	// Guard is set when the zakwas.yaml has an agents section that leaves
 	// the guard on: the managed agents are then kept from applying the
@@ -44,6 +45,7 @@ type Module struct {
 	TemplateFiles []config.TemplateFile
 	installer     *install.Installer
 	profiles      *install.Installer
+	hooks         *install.Installer
 	gemini        *install.Installer
 	klaudiushPath string
 }
@@ -61,7 +63,17 @@ func (m *Module) backends() map[string]backend {
 		config.ProviderClaude:   m.claudeBackend(),
 		config.ProviderCodex:    m.codexBackend(),
 		config.ProviderOpencode: m.opencodeBackend(),
+		config.ProviderCopilot:  m.copilotBackend(),
 	}
+}
+
+// copilotBackend passes an explicit home on to copilot, so its reads and
+// zakwas's own match; the default is left implicit.
+func (m *Module) copilotBackend() *copilot {
+	if m.CopilotHome != "" {
+		return &copilot{runner: m.Runner, home: m.CopilotHome, env: []string{"COPILOT_HOME=" + m.CopilotHome}}
+	}
+	return &copilot{runner: m.Runner, home: filepath.Join(m.Paths.Home, ".copilot")}
 }
 
 func (m *Module) codexBackend() *codex {
@@ -94,9 +106,9 @@ type desired struct {
 	named    bool
 }
 
-// skip reports whether a provider has nothing to converge. Codex is opt-in:
-// a config that gets it only from the default providers predates Codex
-// support and leaves Codex alone.
+// skip reports whether a provider has nothing to converge. Codex and
+// Copilot are opt-in: a config that gets them only from the default
+// providers predates their support and leaves them alone.
 func (d desired) skip(provider string) bool {
 	if config.OptIn(provider) && !d.named {
 		return true
