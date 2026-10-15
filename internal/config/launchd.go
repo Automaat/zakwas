@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // LaunchAgentsDir is where zakwas writes launchd user agent plists.
@@ -123,7 +124,32 @@ func (j LaunchdJob) validate(paths Paths, what string) []error {
 			errs = append(errs, fmt.Errorf("%s: env name %q must be non-empty and contain no '='", what, k))
 		}
 	}
+	errs = append(errs, j.checkText(what)...)
 	return append(errs, j.Schedule.validate(what)...)
+}
+
+// checkText rejects control characters in the values written into the plist:
+// XML cannot hold them, so the escaper would silently replace them.
+func (j LaunchdJob) checkText(what string) []error {
+	var errs []error
+	check := func(field, value string) {
+		if i := strings.IndexFunc(value, plistUnsafe); i >= 0 {
+			errs = append(errs, fmt.Errorf("%s: %s %q contains a control character", what, field, value))
+		}
+	}
+	for i, a := range j.Program {
+		check(fmt.Sprintf("program[%d]", i), a)
+	}
+	check("log", j.Log)
+	for k, v := range j.Env {
+		check("env name", k)
+		check(fmt.Sprintf("env %s", k), v)
+	}
+	return errs
+}
+
+func plistUnsafe(r rune) bool {
+	return unicode.IsControl(r) && r != '\t' && r != '\n'
 }
 
 func (s LaunchdSchedule) validate(what string) []error {
@@ -144,6 +170,9 @@ func (s LaunchdSchedule) validate(what string) []error {
 	}
 	if s.At != "" && !launchdAt.MatchString(s.At) {
 		errs = append(errs, fmt.Errorf("%s: schedule.at %q is not HH:MM on a 24-hour clock", what, s.At))
+	}
+	if s.Weekdays != nil && len(s.Weekdays) == 0 {
+		errs = append(errs, fmt.Errorf("%s: schedule.weekdays is empty; list at least one day or omit it", what))
 	}
 	var days []string
 	for _, d := range s.Weekdays {

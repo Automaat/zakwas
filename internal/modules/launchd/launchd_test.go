@@ -505,3 +505,41 @@ func TestLabelCaseChangeKeepsThePlist(t *testing.T) {
 		t.Errorf("second plan = %v, want empty", again)
 	}
 }
+
+func TestPrintFailureIsNotTreatedAsNotLoaded(t *testing.T) {
+	broken := runner.Result{ExitCode: 5, Stderr: "Print failed: 5: Input/output error"}
+	t.Run("removal keeps plist and state", func(t *testing.T) {
+		j := job("com.example.gone")
+		e := newEnv(t)
+		body := e.rendered(t, j)
+		e.writePlist(t, j.Label, body)
+		e.track(t, j.Label, body)
+		e.fake.On(printCmd(j.Label), broken)
+
+		changes, err := e.mod.Plan(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "Input/output error") || len(changes) != 0 {
+			t.Fatalf("changes = %v, err = %v, want a plan error and no change", changes, err)
+		}
+		if _, err := os.Stat(e.plistPath(j.Label)); err != nil {
+			t.Errorf("plist removed: %v", err)
+		}
+		if labels := e.trackedLabels(t); !slices.Equal(labels, []string{j.Label}) {
+			t.Errorf("tracked = %v", labels)
+		}
+	})
+	t.Run("apply stops before touching the file", func(t *testing.T) {
+		j := job("com.example.check")
+		e := newEnv(t, j)
+		e.writePlist(t, j.Label, "<plist>old</plist>\n")
+		e.track(t, j.Label, "<plist>old</plist>\n")
+		e.fake.On(printCmd(j.Label), loadedOK)
+		changes := e.plan(t)
+		e.fake.On(printCmd(j.Label), broken)
+		if err := e.apply(t, changes); err == nil {
+			t.Fatal("apply succeeded although launchd state is unknown")
+		}
+		if got, _ := os.ReadFile(e.plistPath(j.Label)); string(got) != "<plist>old</plist>\n" {
+			t.Errorf("plist rewritten: %s", got)
+		}
+	})
+}

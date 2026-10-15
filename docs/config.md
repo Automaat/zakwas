@@ -671,7 +671,7 @@ Scheduled jobs as launchd user agents, such as a daily drift check. zakwas write
 | `env` | map | no | | Environment variables for the job. Values are not expanded. |
 | `log` | string | no | discarded | File for stdout and stderr: absolute or `~/…`. Its directory must exist. |
 
-launchd starts jobs from `/` with a minimal `PATH` and expands neither `$VAR` nor `~`, so point `program` at a script, or at `/bin/sh -c`, and set `env.PATH` when the job needs more. A Mac that sleeps through a scheduled time runs the job once on wake.
+launchd starts jobs from `/` with a minimal `PATH` and expands neither `$VAR` nor `~`, so point `program` at a script, or at `/bin/sh -c`, and set `env.PATH` when the job needs more. A Mac that sleeps through a scheduled time runs the job once on wake. `program`, `env` and `log` may not contain control characters other than tab and newline. `plan` fails when `launchctl print` fails for any reason other than "not loaded", so a job is never unloaded or deleted on a guess.
 
 - **Changing a job** rewrites its plist and reloads it (`bootout`, then `bootstrap`).
 - **Removing a job** from the config unloads it and deletes its plist. A plist edited since zakwas wrote it is moved to `<plist>.zakwas-bak` instead of being deleted.

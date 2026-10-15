@@ -104,6 +104,10 @@ func (s *state) forget(label string) error {
 	return s.save()
 }
 
+// printNotFound is the launchctl exit code for a service that is not loaded.
+// Any other failure says nothing about whether the job is loaded.
+const printNotFound = 113
+
 var errLoadedElsewhere = errors.New("already loaded from another plist; zakwas only manages jobs it created, so unload it or use another label")
 
 func (m *Module) domain() string { return "gui/" + strconv.Itoa(m.UID) }
@@ -121,7 +125,13 @@ func (m *Module) loaded(ctx context.Context, label string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return res.ExitCode == 0, nil
+	switch res.ExitCode {
+	case 0:
+		return true, nil
+	case printNotFound:
+		return false, nil
+	}
+	return false, res.Err(launchctl("print", m.domain()+"/"+label))
 }
 
 func (m *Module) bootstrap(ctx context.Context, label string) error {
