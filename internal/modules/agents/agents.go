@@ -34,9 +34,13 @@ type Module struct {
 	TemplateSources []string
 	// Vars are the templates.vars, which instructions can reference, and
 	// Immutable is protect.immutable for the instructions copies.
-	Vars          map[string]string
-	Immutable     bool
+	Vars      map[string]string
+	Immutable bool
+	// TemplateFiles are the templates, whose opencode.json can define agents
+	// that agents.profiles must not repeat.
+	TemplateFiles []config.TemplateFile
 	installer     *install.Installer
+	profiles      *install.Installer
 	klaudiushPath string
 }
 
@@ -131,6 +135,8 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	errs = append(errs, permErr)
 	mcp, mcpFailed, mcpErr := m.planMCP()
 	errs = append(errs, mcpErr)
+	profiles, profileFailed, profileErr := m.planProfiles()
+	errs = append(errs, profileErr)
 	var changes []engine.Change
 	var klaudiushChange *engine.Change
 	var klaudiushErr error
@@ -143,11 +149,13 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		if err := failed[p]; err != nil {
 			errs = append(errs, err)
 			delete(instructions, p)
+			delete(profiles, p)
 			continue
 		}
-		if err := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p]); err != nil {
+		if err := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p], profileFailed[p]); err != nil {
 			errs = append(errs, err)
 			delete(instructions, p)
+			delete(profiles, p)
 			continue
 		}
 		changes = append(changes, instructions[p]...)
@@ -155,6 +163,8 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		changes = append(changes, commandHooks[p]...)
 		changes = append(changes, permissions[p]...)
 		changes = append(changes, mcp[p]...)
+		changes = append(changes, profiles[p]...)
+		delete(profiles, p)
 		b, ok := backends[p]
 		if !ok {
 			continue
@@ -175,6 +185,9 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	}
 	for _, p := range slices.Sorted(maps.Keys(instructions)) {
 		changes = append(changes, instructions[p]...)
+	}
+	for _, p := range slices.Sorted(maps.Keys(profiles)) {
+		changes = append(changes, profiles[p]...)
 	}
 	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush && klaudiushChange == nil && len(changes) > 0 && klaudiushErr == nil {
 		klaudiushChange = m.klaudiushFinalizeChange()

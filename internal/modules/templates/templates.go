@@ -113,42 +113,18 @@ func agentPermissions(agents *config.Agents, provider string, catchAll ...string
 	if provider != config.ProviderOpencode {
 		return "", fmt.Errorf("agentPermissions: provider %q is not supported, only %s", provider, config.ProviderOpencode)
 	}
-	if len(catchAll) > 1 {
-		return "", fmt.Errorf("agentPermissions: want at most one default action, got %d", len(catchAll))
-	}
-	type rule struct{ pattern, action string }
-	var rules []rule
-	add := func(pattern, action string) {
-		rules = slices.DeleteFunc(rules, func(r rule) bool { return r.pattern == pattern })
-		rules = append(rules, rule{pattern, action})
-	}
-	if len(catchAll) == 1 {
-		if !slices.Contains([]string{"allow", "ask", "deny"}, catchAll[0]) {
-			return "", fmt.Errorf("agentPermissions: default action %q is not one of allow, ask, deny", catchAll[0])
-		}
-		add("*", catchAll[0])
-	}
-	for _, p := range agents.PermissionsFor(provider) {
-		action := opencodeActions[p.Decision]
-		add(p.Command(), action)
-		add(p.Command()+" *", action)
-	}
-	for _, p := range agents.GuardPermissions(provider) {
-		first, rest := p.Words[0], strings.Join(p.Words[1:], " ")
-		for _, name := range []string{first, "*/" + first} {
-			for _, pattern := range []string{name + " " + rest, name + " " + rest + " *", name + " * " + rest, name + " * " + rest + " *"} {
-				add(pattern, opencodeActions[p.Decision])
-			}
-		}
+	rules, err := OpencodeBashRules(agents, catchAll...)
+	if err != nil {
+		return "", err
 	}
 	var b strings.Builder
 	b.WriteByte('{')
 	for i, r := range rules {
-		key, err := json.Marshal(r.pattern)
+		key, err := json.Marshal(r.Pattern)
 		if err != nil {
 			return "", err
 		}
-		value, err := json.Marshal(r.action)
+		value, err := json.Marshal(r.Action)
 		if err != nil {
 			return "", err
 		}
@@ -161,6 +137,41 @@ func agentPermissions(agents *config.Agents, provider string, catchAll ...string
 	}
 	b.WriteByte('}')
 	return b.String(), nil
+}
+
+// BashRule is one pattern of opencode's permission.bash object.
+type BashRule struct{ Pattern, Action string }
+
+// OpencodeBashRules are the rules agentPermissions renders, in order.
+func OpencodeBashRules(agents *config.Agents, catchAll ...string) ([]BashRule, error) {
+	if len(catchAll) > 1 {
+		return nil, fmt.Errorf("agentPermissions: want at most one default action, got %d", len(catchAll))
+	}
+	var rules []BashRule
+	add := func(pattern, action string) {
+		rules = slices.DeleteFunc(rules, func(r BashRule) bool { return r.Pattern == pattern })
+		rules = append(rules, BashRule{pattern, action})
+	}
+	if len(catchAll) == 1 {
+		if !slices.Contains([]string{"allow", "ask", "deny"}, catchAll[0]) {
+			return nil, fmt.Errorf("agentPermissions: default action %q is not one of allow, ask, deny", catchAll[0])
+		}
+		add("*", catchAll[0])
+	}
+	for _, p := range agents.PermissionsFor(config.ProviderOpencode) {
+		action := opencodeActions[p.Decision]
+		add(p.Command(), action)
+		add(p.Command()+" *", action)
+	}
+	for _, p := range agents.GuardPermissions(config.ProviderOpencode) {
+		first, rest := p.Words[0], strings.Join(p.Words[1:], " ")
+		for _, name := range []string{first, "*/" + first} {
+			for _, pattern := range []string{name + " " + rest, name + " " + rest + " *", name + " * " + rest, name + " * " + rest + " *"} {
+				add(pattern, opencodeActions[p.Decision])
+			}
+		}
+	}
+	return rules, nil
 }
 
 // opencodeMCP is one entry of opencode's mcp object.

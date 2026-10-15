@@ -31,6 +31,13 @@ mise:
 #   mcp:
 #     docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
 #     search: {url: "https://mcp.example.com/mcp", bearerTokenEnv: SEARCH_TOKEN}
+#   profiles:  # claude --agent review, codex --profile review, opencode --agent review
+#     review:
+#       description: Read-only change review
+#       tools: [read, search, shell]
+#       edit: deny
+#       shell: ask
+#       mcp: {search: allow}
 
 system:
   sudoTouchID: true

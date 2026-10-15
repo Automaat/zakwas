@@ -208,6 +208,32 @@ agents:
 
 See [docs/config.md](docs/config.md#mcp).
 
+### Agent profiles
+
+`agents.profiles` declares a profile such as "read-only review" once, and zakwas renders it for each agent: a Claude Code subagent file (`claude --agent review`), a Codex profile file (`codex --profile review`) and an opencode agent file (`opencode --agent review`).
+
+```yaml
+agents:
+  mcp:
+    datadog: {url: https://mcp.example.com/mcp}
+  profiles:
+    review:
+      description: Read-only change review
+      prompt: dotfiles/agents/review.md
+      tools: [read, search, shell]
+      edit: deny
+      shell: ask
+      mcp: {datadog: allow}
+      claude: {model: sonnet}
+```
+
+- A profile denies the MCP servers declared under `agents.mcp` that it doesn't name, and every one it names must be declared there.
+- The plan lists, per provider, the profile fields that provider cannot express.
+- A profile name an opencode template also defines fails the plan.
+- Removing a profile removes only the files zakwas rendered.
+
+See [docs/config.md](docs/config.md#profiles).
+
 ### Agents can't apply the config
 
 With an `agents` section, zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update` and `approve` (Claude Code's `permissions.deny`, a Codex `forbidden` rule, opencode `deny` patterns), denies Claude Code edits to the config repo's main checkout and zakwas state, and refuses `apply`, `upgrade` and `approve` started from an agent session. Otherwise one prompt injection could make an agent widen its own permissions through `apply`. `plan` and `check` stay allowed, and the plan names a managed provider the guard can't cover. Set `agents.guard: false` to turn it off; zakwas then removes only the rules it added. See [docs/config.md](docs/config.md#guard).
