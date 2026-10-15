@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Automaat/zakwas/internal/config"
 )
@@ -349,6 +351,15 @@ func TestParsePrefixRule(t *testing.T) {
 		{`prefix_rule(pattern=[], decision="allow")`, nil, "", "empty"},
 		{`prefix_rule(decision="allow")`, nil, "", "alternatives"},
 		{`prefix_rule(pattern=["x"], decision="maybe")`, []string{"x"}, "", "not one zakwas declares"},
+		{`prefix_rule(pattern=["ls"], justification="the decision is pending")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(pattern=["ls"], justification="decision pending, decision=\"forbidden\"")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(justification="pattern=[\"rm\"]", pattern=["ls"], decision="prompt")`, []string{"ls"}, "review", ""},
+		{`prefix_rule(pattern=["ls"], justification="decision=\"allow\"", decision="forbidden")`, []string{"ls"}, "deny", ""},
+		{`prefix_rule(pattern=["ls"], decision=allow)`, []string{"ls"}, "", "isn't written as"},
+		{`prefix_rule(pattern=["ls"], decision='allow')`, []string{"ls"}, "", "isn't written as"},
+		{`prefix_rule(pattern=["ls"], decision=("allow"))`, []string{"ls"}, "", "isn't written as"},
+		{`prefix_rule(pattern=["ls"], justification="open (", decision="allow")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(pattern=["ls"], justification="unclosed, decision="allow")`, nil, "", "spans lines"},
 	}
 	for _, tt := range tests {
 		words, decision, why := parsePrefixRule(tt.line)
@@ -518,6 +529,13 @@ func TestLooksSecret(t *testing.T) {
 		{"foo", "123e4567-e89b-12d3-a456-426614174000"},
 		{"-e", "DB_PASS=VALUE"},
 		{"foo", "PATTOKEN=VALUE"},
+		{"--apiKey", "VALUE"},
+		{"--accesstoken", "VALUE"},
+		{"--auth-token", "VALUE"},
+		{"--client_secret=VALUE"},
+		{"-H", "X-Api-Key: VALUE"},
+		{"postgresql://user:hunter2@localhost/db"},
+		{"--header", "Authorization: Bearer VALUE"},
 	}
 	for _, words := range secret {
 		if !looksSecret(words) {
@@ -544,11 +562,57 @@ func TestLooksSecret(t *testing.T) {
 		{"/usr/local/bin/some-tool", "--flag"},
 		{"docker", "run", "--rm", "-it", "alpine"},
 		{"cargo", "test", "--workspace"},
+		{"npx", "task-tools"},
+		{"disk-usage"},
+		{"risk-marketplace"},
+		{"@scope/Task-tools", "TASK-TOOLS"},
+		{"--max-tokens", "1000"},
+		{"--max-tokens=1000"},
+		{"--tokenizer", "x"},
+		{"--password-file", "/etc/p"},
+		{"--password-file=/etc/p"},
+		{"--key-file", "/x"},
+		{"--keyfile", "/x"},
+		{"--key-size", "4096"},
+		{"--keyboard", "us"},
+		{"--author", "bob"},
+		{"--passthrough", "x"},
+		{"-H", "Content-Type: application/json"},
+		{"bypass", "x"},
+		{"auth-service", "start"},
+		{"MAX_TOKENS=1000"},
 	}
 	for _, words := range plain {
 		if looksSecret(words) {
 			t.Errorf("%q is refused", words)
 		}
+	}
+}
+
+func TestCaptureFailsCodexScanOnASpecialRulesFile(t *testing.T) {
+	m, fake := newCodexModule(t, config.Agents{})
+	rules := filepath.Join(m.CodexHome, "rules", "default.rules")
+	if err := os.MkdirAll(filepath.Dir(rules), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(rules, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(m.CodexHome, "config.toml"), "")
+	fake.OnOK(codexMarketList, `{"marketplaces":[]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.Capture(context.Background())
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "codex:") || !strings.Contains(err.Error(), "not a regular file") {
+			t.Errorf("error = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("capture blocks on a FIFO")
 	}
 }
 

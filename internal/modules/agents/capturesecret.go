@@ -28,9 +28,78 @@ var (
 	shortPass   = regexp.MustCompile(`^-p[^-\s]\S{3,}$`)
 	envIdent    = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 	plainSeg    = regexp.MustCompile(`^([a-z][a-z_.-]*|v[0-9]+)$`)
-	credName    = regexp.MustCompile(`(?i)(pass|pwd|pat([^h]|$)|key|token|secret|cred|auth|bearer|cookie)`)
-	bareName    = regexp.MustCompile(`(?i)(pass|pwd|secret|token|cred|cookie|[-_.]key|key[-_.]|^key$|apikey|bearer)`)
+	gluedCred   = regexp.MustCompile(`^(?:[a-z]*(?:token|secret|password|passwd|passphrase)|(?:api|access|auth|secret|private|ssh|client|session|license|signing|master|encryption)key)$`)
 )
+
+var credWords = map[string]bool{
+	"pass": true, "password": true, "passwords": true, "passwd": true, "pwd": true, "pw": true, "passphrase": true,
+	"secret": true, "secrets": true, "token": true, "key": true, "cred": true, "creds": true, "credential": true,
+	"credentials": true, "auth": true, "bearer": true, "cookie": true, "cookies": true, "pat": true,
+}
+
+// notValue ends a name whose value locates, describes or measures a
+// credential instead of being one: --password-file, --key-size.
+var notValue = map[string]bool{
+	"file": true, "path": true, "dir": true, "directory": true, "name": true, "url": true, "uri": true, "env": true,
+	"limit": true, "count": true, "size": true, "length": true, "bits": true, "type": true, "id": true, "ttl": true,
+	"timeout": true, "jar": true, "fd": true, "stdin": true, "format": true, "algorithm": true,
+}
+
+// nameWords splits a flag or variable name into lower-case words at
+// separators and case changes.
+func nameWords(name string) []string {
+	var words []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, string(cur))
+			cur = nil
+		}
+	}
+	var prev rune
+	for _, r := range name {
+		switch {
+		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
+			flush()
+		case unicode.IsUpper(r) && unicode.IsLower(prev):
+			flush()
+			cur = append(cur, unicode.ToLower(r))
+		default:
+			cur = append(cur, unicode.ToLower(r))
+		}
+		prev = r
+	}
+	flush()
+	return words
+}
+
+// credentialName reports a name that takes a credential as its value. Whole
+// words count, so --max-tokens, --tokenizer and --keyboard don't; a name
+// that ends in file, path or the like doesn't either. A bare word is only a
+// credential for its stronger names: auth and pat are commands and
+// abbreviations there.
+func credentialName(name string, bare bool) bool {
+	words := nameWords(name)
+	if len(words) == 0 || notValue[words[len(words)-1]] {
+		return false
+	}
+	for _, w := range words {
+		for suffix := range notValue {
+			if rest, ok := strings.CutSuffix(w, suffix); ok && rest != "" && (credWords[rest] || gluedCred.MatchString(rest)) {
+				return false
+			}
+		}
+	}
+	for _, w := range words {
+		if bare && (w == "auth" || w == "pat") {
+			continue
+		}
+		if credWords[w] || gluedCred.MatchString(w) {
+			return true
+		}
+	}
+	return false
+}
 
 // credentialFlags take their value as the next word.
 var credentialFlags = map[string]bool{
@@ -64,7 +133,7 @@ func looksSecret(words []string) bool {
 		if tokenLike(t) || shortPass.MatchString(t) || strings.Contains(strings.ToLower(t), "authorization") {
 			return true
 		}
-		if m := assignment.FindStringSubmatch(t); m != nil && m[2] != "" && credName.MatchString(m[1]) && !strings.EqualFold(m[1], "path") {
+		if m := assignment.FindStringSubmatch(t); m != nil && m[2] != "" && credentialName(m[1], false) {
 			return true
 		}
 		switch {
@@ -72,11 +141,11 @@ func looksSecret(words []string) bool {
 			return true
 		case userFlags[t] && strings.Contains(next, ":"):
 			return true
-		case (t == "-H" || t == "--header" || t == "--headers") && credName.MatchString(next):
+		case (t == "-H" || t == "--header" || t == "--headers") && credentialName(next, false):
 			return true
-		case strings.HasPrefix(t, "-") && !strings.Contains(t, "=") && credName.MatchString(t) && !strings.HasSuffix(t, "-path") && next != "" && !strings.HasPrefix(next, "-"):
+		case strings.HasPrefix(t, "-") && !strings.Contains(t, "=") && credentialName(t, false) && next != "" && !strings.HasPrefix(next, "-"):
 			return true
-		case !strings.HasPrefix(t, "-") && bareName.MatchString(t) && next != "" && !strings.HasPrefix(next, "-") && t != "auth":
+		case !strings.HasPrefix(t, "-") && credentialName(t, true) && next != "" && !strings.HasPrefix(next, "-"):
 			return true
 		case strings.EqualFold(t, "login") && next != "" && !strings.HasPrefix(next, "-"):
 			return true
