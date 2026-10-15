@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,6 +22,8 @@ brew: {file: Brewfile}
 mise: {config: dotfiles/mise.toml}
 commands:
   - {name: once, check: "test -e /nonexistent", run: "true"}
+launchd:
+  - {label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}
 defaults:
   - {domain: com.apple.dock, key: autohide, value: true}
 system: {sudoTouchID: true}
@@ -101,6 +104,18 @@ func TestOfflineCheckStartsNoCommand(t *testing.T) {
 	}
 }
 
+func TestOfflineSplitCoversEveryModule(t *testing.T) {
+	var split []string
+	split = append(split, offlineChecked...)
+	split = append(split, offlineSkipped...)
+	slices.Sort(split)
+	want := slices.Clone(ModuleNames)
+	slices.Sort(want)
+	if !slices.Equal(split, want) {
+		t.Errorf("offline checked and skipped modules = %v, modules = %v", split, want)
+	}
+}
+
 func TestOfflineCheckJSON(t *testing.T) {
 	env, _ := setupOffline(t)
 	r := invoke(env, "", "check", "--offline", "--json")
@@ -153,7 +168,7 @@ func TestOfflineCheckWithOnlyNamesTheUnselectedModules(t *testing.T) {
 	if r.code != ExitDrift || strings.Contains(r.stdout, ".greeting") {
 		t.Fatalf("%+v", r)
 	}
-	want := "offline: not checked: system, brew, mise, agents, commands, defaults, files, templates;"
+	want := "offline: not checked: system, brew, mise, agents, commands, launchd, defaults, files, templates;"
 	if !strings.Contains(r.stdout, want) {
 		t.Errorf("note does not name files and templates as unchecked:\n%s", r.stdout)
 	}
@@ -163,7 +178,7 @@ func TestOfflineCheckWithOnlyNamesTheUnselectedModules(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.stdout), &doc); err != nil {
 		t.Fatalf("%v\n%s", err, r.stdout)
 	}
-	if got := strings.Join(doc.Skipped, ","); got != "system,brew,mise,agents,commands,defaults,files,templates" {
+	if got := strings.Join(doc.Skipped, ","); got != "system,brew,mise,agents,commands,launchd,defaults,files,templates" {
 		t.Errorf("skipped = %s", got)
 	}
 
