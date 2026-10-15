@@ -269,6 +269,7 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `hooks.klaudiush` | bool | no | `false` | Register klaudiush's enabled providers. See below. |
 | `permissions.allow`, `permissions.review`, `permissions.deny` | list | no | | Shell command prefixes the agents may run without asking, must have reviewed, or must never run. Each is a command string, or `{command, providers, justification}`. See [permissions](#permissions). |
 | `mcp` | map | no | | MCP server name → `{command, args, env, envVars}` for a stdio server or `{url, headers, headerEnv, bearerTokenEnv, oauth}` for an HTTP one, each with optional `providers`. See [mcp](#mcp). |
+| `codex.settings` | map | no | | Selected global Codex config.toml values, edited in place independently of profiles. See [global Codex settings](#global-codex-settings). |
 | `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex and opencode: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode` blocks. See [profiles](#profiles). |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 | `guard` | bool | no | `true` | Keep the managed agents from applying this config. See [guard](#guard). |
@@ -465,6 +466,24 @@ A server targets opencode through its `providers` or, without them, `agents.prov
 - When the config dir moves (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the servers zakwas registered in the old file are removed there.
 
 `plan` and `check` only read the two files: they start no MCP server and open no browser. A server with `oauth: true` shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
+
+### Global Codex settings
+
+`agents.codex.settings` updates selected values in `${CODEX_HOME:-~/.codex}/config.toml` using native Codex field names. Explicitly name `codex` in `agents.providers` or a marketplace/plugin entry's `providers`. Settings apply globally, independently of `agents.profiles`, without requiring the Codex CLI.
+
+```yaml
+agents:
+  providers: [codex]
+  codex:
+    settings:
+      agents:
+        enabled: true
+        max_concurrent_threads_per_session: 8
+```
+
+Values accept strings, booleans, finite numbers, scalar arrays and nonempty nested mappings. Quote YAML values that must stay strings. This is configuration data: no templates, commands or secret expansion. Keep credentials outside this mapping. Use the dedicated agents fields for `profiles`, `mcp_servers`, `plugins` and `marketplaces`; these keys are rejected here.
+
+Only declared leaves are updated. Removing a value or the settings block leaves its current value in Codex. The plan shows each changed value. Apply rereads the live file, preserving concurrent unrelated edits, comments, MCP registrations and other settings. New files use mode `0600`; existing file permissions stay unchanged. Invalid TOML, read-only files, unsafe paths and conflicting inline-table representations fail without replacing the file. An unchanged inline value needs no edit. Run `zakwas apply` outside an agent session while the agents guard is enabled.
 
 ### profiles
 

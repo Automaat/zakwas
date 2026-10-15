@@ -366,6 +366,23 @@
     },
     "agents": {
       "properties": {
+        "codex": {
+          "properties": {
+            "settings": {
+              "description": "Selected global config.toml values using native Codex names. Supports strings, booleans, finite numbers, arrays and nested mappings. Only declared values are updated; omitted values remain. No templates or secret expansion. Profiles, MCP servers, plugins and marketplaces use their dedicated agents fields.",
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "description": "Global Codex configuration, applied independently of profiles. Requires explicitly opting in to codex.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "providers": {
           "items": {
             "type": "string",

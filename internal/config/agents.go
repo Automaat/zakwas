@@ -29,6 +29,7 @@ var Providers = []string{ProviderClaude, ProviderCodex, ProviderOpencode}
 // Agents declares agent plugin marketplaces and plugins once, for every
 // provider they target.
 type Agents struct {
+	Codex              *CodexSettings         `yaml:"codex" jsonschema_description:"Global Codex configuration, applied independently of profiles. Requires explicitly opting in to codex."`
 	Providers          []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three."`
 	Upgrade            bool                   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Update installed plugins to the version their marketplace offers on apply. Run 'zakwas upgrade' to refresh the marketplaces first. Default false."`
 	Prune              bool                   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false."`
@@ -576,6 +577,7 @@ func (a *Agents) validate() []error {
 			}
 		}
 	}
+	errs = append(errs, a.validateCodexSettings()...)
 	errs = append(errs, a.validatePermissions(checkProviders)...)
 	errs = append(errs, a.validateMCP(checkProviders)...)
 	errs = append(errs, a.validateProfiles(checkProviders)...)
