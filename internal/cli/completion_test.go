@@ -92,8 +92,8 @@ func TestBashCompletion(t *testing.T) {
 		want  string
 	}{
 		{[]string{"zakwas", ""}, strings.Join(commandNames(), " ")},
-		{[]string{"zakwas", "ap"}, "apply"},
-		{[]string{"zakwas", "-y", "ap"}, "apply"},
+		{[]string{"zakwas", "ap"}, "apply approve"},
+		{[]string{"zakwas", "-y", "ap"}, "apply approve"},
 		{[]string{"zakwas", "-c", "x.yaml", "pl"}, "plan"},
 		{[]string{"zakwas", "plan", "--d"}, "--diff"},
 		{[]string{"zakwas", "--only", "b"}, "brew"},

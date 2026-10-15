@@ -339,6 +339,11 @@ func ParseBrewfile(file string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseEntries(data), nil
+}
+
+// ParseEntries reads the tap/brew/cask entries of Brewfile contents.
+func ParseEntries(data []byte) []Entry {
 	var entries []Entry
 	for line := range strings.Lines(string(data)) {
 		if g := entryLine.FindStringSubmatch(strings.TrimSpace(line)); g != nil {
@@ -346,7 +351,7 @@ func ParseBrewfile(file string) ([]Entry, error) {
 			entries = append(entries, Entry{Kind: g[1], Name: g[2], Trusted: trustedTrue.MatchString(code)})
 		}
 	}
-	return entries, nil
+	return entries
 }
 
 // TrustTaps marks every third-party tap line without a `trusted:` option as

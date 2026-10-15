@@ -1,0 +1,116 @@
+chmod 755 bin/brew
+chmod 755 bin/mise
+
+zakwas propose add-brew jq2
+stdout 'Proposal [0-9a-f]{8}: add brew package jq2 \(low risk\)'
+stdout '\+brew "jq2"'
+stdout '\+ formula jq2'
+stdout 'Nothing was changed'
+cmp Brewfile Brewfile.orig
+
+zakwas propose pin-mise jq 1.8.0
+stdout 'Proposal [0-9a-f]{8}: pin mise tool jq to 1.8.0 \(low risk\)'
+stdout '\+jq = "1.8.0"'
+stdout 'jq@1.8.0'
+cmp dotfiles/mise.toml mise.orig
+
+zakwas propose add-permission allow -- ls -la
+stdout 'Proposal [0-9a-f]{8}: allow "ls -la" \(high risk\)'
+stdout 'allowing a command widens'
+
+zakwas propose add-permission deny dd --providers opencode --justification 'never write raw disks'
+stdout '\(low risk\)'
+stdout '\+      - command: dd'
+stdout '\+        providers: \[opencode\]'
+stdout '\+        justification: never write raw disks'
+
+zakwas propose -json add-mcp docs --command npx --arg -y --arg docs-mcp --env-var DOCS_TOKEN
+stdout '"tier": "high"'
+stdout '"kind": "add-mcp"'
+stdout '"modules": \['
+
+zakwas propose add-brew --cask iterm2
+stdout '\(high risk\)'
+stdout 'casks install apps'
+
+! zakwas propose add-plugin foo@nowhere
+stderr 'marketplace "nowhere" is not declared'
+! zakwas propose add-brew jq
+stderr 'already in the Brewfile'
+! zakwas propose remove-permission deny ls
+stderr 'no rule for "ls"'
+! zakwas propose pin-mise jq 'a b'
+stderr 'unsupported characters'
+! zakwas propose
+stderr 'Usage: zakwas propose'
+! zakwas propose add-permission deny x --cask
+stderr 'add-permission doesn''t take -cask'
+
+zakwas proposals
+stdout -count=6 '^[0-9a-f]{8}  '
+stdout '^[0-9a-f]{8}  low   in 7d     add brew package jq2$'
+stdout '^[0-9a-f]{8}  high  in 7d     add MCP server docs$'
+zakwas proposals -json
+stdout '"proposals": \['
+cmp zakwas.yaml zakwas.orig
+cmp dotfiles/mise.toml mise.orig
+cmp Brewfile Brewfile.orig
+! exists home/.config/mise/config.toml
+
+! zakwas approve 12345678
+stderr 'stdin is not a terminal'
+
+env CLAUDECODE=1
+! zakwas approve 12345678
+stderr 'refusing to approve from a Claude Code session'
+env CLAUDECODE=
+zakwas propose add-permission deny sudo
+stdout 'Proposal'
+
+-- zakwas.yaml --
+brew: {file: Brewfile}
+mise: {config: dotfiles/mise.toml}
+files:
+  - {src: dotfiles/mise.toml, dst: ~/.config/mise/config.toml}
+agents:
+  providers: [opencode]
+  permissions:
+    deny:
+      - rm
+-- zakwas.orig --
+brew: {file: Brewfile}
+mise: {config: dotfiles/mise.toml}
+files:
+  - {src: dotfiles/mise.toml, dst: ~/.config/mise/config.toml}
+agents:
+  providers: [opencode]
+  permissions:
+    deny:
+      - rm
+-- Brewfile --
+brew "jq"
+-- Brewfile.orig --
+brew "jq"
+-- dotfiles/mise.toml --
+[tools]
+jq = "1.7.1"
+-- mise.orig --
+[tools]
+jq = "1.7.1"
+-- bin/brew --
+#!/bin/sh
+case "$1 $2" in
+  "bundle check")
+    file=$4
+    if grep -q jq2 "$file"; then echo "→ Formula jq2 needs to be installed."; fi
+    if grep -q iterm2 "$file"; then echo "→ Cask iterm2 needs to be installed."; fi
+    exit 1 ;;
+  *) echo "unexpected brew $*" >&2; exit 99 ;;
+esac
+-- bin/mise --
+#!/bin/sh
+case "$1" in
+  ls)
+    if grep -q 1.8.0 "$MISE_GLOBAL_CONFIG_FILE"; then echo '{"jq":[{"version":"1.8.0","installed":false}]}'; else echo '{}'; fi ;;
+  *) exit 99 ;;
+esac

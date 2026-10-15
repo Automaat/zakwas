@@ -39,7 +39,7 @@ When the config uses them and they are missing, zakwas installs Homebrew and mis
 
 ## Coding agents
 
-An agent that can run `zakwas apply` can write agent config files it can't edit itself: permissions, hooks, marketplaces. With an `agents` section zakwas therefore denies the managed agents `zakwas apply`, `upgrade` and `self-update`, denies Claude Code edits to the config repo and zakwas state, and refuses `apply` and `upgrade` started from an agent session. The deny rules are the boundary: zakwas can't prove a person is at the terminal, since an agent can unset environment variables and get a terminal through `script` or a PTY. See [`agents.guard`](config.md#guard) for what is covered and how to turn it off.
+An agent that can run `zakwas apply` can write agent config files it can't edit itself: permissions, hooks, marketplaces. With an `agents` section zakwas therefore denies the managed agents `zakwas apply`, `upgrade`, `self-update` and `approve`, denies Claude Code edits to the config repo and zakwas state, and refuses `apply`, `upgrade` and `approve` started from an agent session. The deny rules are the boundary: zakwas can't prove a person is at the terminal, since an agent can unset environment variables and get a terminal through `script` or a PTY. See [`agents.guard`](config.md#guard) for what is covered and how to turn it off.
 
 ## sudo
 
