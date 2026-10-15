@@ -49,7 +49,7 @@ type Agents struct {
 	Hooks              *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration."`
 	Permissions        *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file and a Gemini CLI user policy file, and to opencode through the agentPermissions template function. Copilot CLI has no user-level shell rules (only root-owned managed settings), so the plan reports them as unsupported for copilot."`
 	MCP                map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json), Codex (config.toml, edited in place) and Copilot CLI (${COPILOT_HOME:-~/.copilot}/mcp-config.json, edited in place), in the zakwas extension of Gemini CLI, and in opencode through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
-	Profiles           map[string]Profile     `yaml:"profiles" jsonschema_description:"Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named) a Gemini CLI subagent file ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md (delegate with '@<name>', only when gemini is named) and a Copilot CLI agent file ${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md ('copilot --agent <name>', only when copilot is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered."`
+	Profiles           map[string]Profile     `yaml:"profiles" jsonschema_description:"Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named) a Gemini CLI subagent file ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md (delegate with '@<name>', only when gemini is named) and a Copilot CLI agent file ${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md ('copilot --agent <name>', only when copilot is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name may be at most 64 characters, and a profile name an opencode template also defines under 'agent' fails the plan, as does a profile file that a 'files', 'links' or 'templates' destination also writes. Removing a profile removes only the files zakwas rendered."`
 	Skills             []Skill                `yaml:"skills" jsonschema_description:"Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex, opencode and Gemini CLI (${GEMINI_CLI_HOME:-~}/.agents/skills when GEMINI_CLI_HOME is set), and for Copilot CLI too unless COPILOT_HOME is set, which then reads ${COPILOT_HOME}/skills only. Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them."`
 	Opencode           *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
 	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected, such as Copilot CLI, which has no user-level deny rules and is covered only by the refusal. Default true; false removes the rules zakwas added."`
@@ -910,6 +910,48 @@ func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []st
 
 var profileName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// MaxProfileName keeps a profile's file name, with the longest suffix a
+// provider adds, within every file system's limit and each provider's own
+// limit on agent names.
+const MaxProfileName = 64
+
+// rejectNullProfileNames fails a profile declared under a null key (null:,
+// ~: or an empty key), which the decoder drops without a trace.
+func rejectNullProfileNames(data []byte) error {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return err
+	}
+	if len(doc.Content) == 0 {
+		return nil
+	}
+	profiles := mappingValue(mappingValue(doc.Content[0], "agents"), "profiles")
+	if profiles == nil || profiles.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(profiles.Content); i += 2 {
+		if k := profiles.Content[i]; k.Kind == yaml.ScalarNode && k.Tag == "!!null" {
+			return fmt.Errorf("line %d: agents.profiles: a profile cannot be named null; quote the name (\"null\") or choose another", k.Line)
+		}
+	}
+	return nil
+}
+
+func mappingValue(n *yaml.Node, key string) *yaml.Node {
+	for n != nil && n.Kind == yaml.AliasNode {
+		n = n.Alias
+	}
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i+1]
+		}
+	}
+	return nil
+}
+
 func (a *Agents) validateProfiles(checkProviders func(what string, list, allowed []string, allowedWhat string)) []error {
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(a.Profiles)) {
@@ -918,6 +960,9 @@ func (a *Agents) validateProfiles(checkProviders func(what string, list, allowed
 		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
 		if !profileName.MatchString(name) {
 			fail("name may only contain lowercase letters, digits and '-', and must start with a letter")
+		}
+		if len(name) > MaxProfileName {
+			fail("name is %d characters long; at most %d are allowed", len(name), MaxProfileName)
 		}
 		switch {
 		case strings.TrimSpace(p.Description) == "":

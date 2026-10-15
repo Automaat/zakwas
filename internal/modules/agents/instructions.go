@@ -200,6 +200,10 @@ func (m *Module) planInstructions() (map[string][]engine.Change, map[string]erro
 				continue
 			}
 			keep[samePath(dst)] = true
+			if err := m.sharedDestination(dst); err != nil {
+				failed[p] = fmt.Errorf("%s: instructions: %w", p, err)
+				continue
+			}
 			if !strict && !m.Runner.Installed(p) {
 				continue
 			}

@@ -407,3 +407,87 @@ func TestProfilesClaudeAcceptEditsHonorsNoShellAsk(t *testing.T) {
 		t.Errorf("warnings = %v, want %v", got, want)
 	}
 }
+
+func TestAgentFilesRejectSharedDestinations(t *testing.T) {
+	tests := []struct {
+		name         string
+		agents       func() config.Agents
+		destinations []config.Destination
+		want         string
+	}{
+		{
+			name: "profile file also a files entry",
+			agents: func() config.Agents {
+				return config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}}
+			},
+			destinations: []config.Destination{
+				{What: "files[0]", Dst: "~/.claude/agents/zakwas/p.md", Path: "{home}/.claude/agents/zakwas/p.md"},
+			},
+			want: "claude: profiles: profile \"p\": ~/.claude/agents/zakwas/p.md is also written by files[0] (~/.claude/agents/zakwas/p.md)",
+		},
+		{
+			name: "profile file inside a linked directory, ignoring case",
+			agents: func() config.Agents {
+				return config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}}
+			},
+			destinations: []config.Destination{
+				{What: "links[2]", Dst: "~/.Claude/Agents", Path: "{home}/.Claude/Agents"},
+			},
+			want: "is also written by links[2] (~/.Claude/Agents)",
+		},
+		{
+			name: "codex profile file also a template",
+			agents: func() config.Agents {
+				return config.Agents{Providers: []string{config.ProviderCodex}, Profiles: map[string]config.Profile{"p": {Description: "d"}}}
+			},
+			destinations: []config.Destination{
+				{What: "templates.files[0]", Dst: "~/.codex/p.config.toml", Path: "{home}/.codex/p.config.toml"},
+			},
+			want: "codex: profiles: profile \"p\": ~/.codex/p.config.toml is also written by templates.files[0]",
+		},
+		{
+			name: "instructions file also a files entry",
+			agents: func() config.Agents {
+				return config.Agents{Instructions: config.InstructionFiles{"AGENTS.md"}}
+			},
+			destinations: []config.Destination{
+				{What: "files[1]", Dst: "~/.claude/CLAUDE.md", Path: "{home}/.claude/CLAUDE.md"},
+			},
+			want: "claude: instructions: ~/.claude/CLAUDE.md is also written by files[1] (~/.claude/CLAUDE.md)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := profileModule(t, tt.agents())
+			writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "x")
+			for _, d := range tt.destinations {
+				d.Path = strings.ReplaceAll(d.Path, "{home}", m.Paths.Home)
+				m.Destinations = append(m.Destinations, d)
+			}
+			changes, err := m.Plan(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tt.want)
+			}
+			if len(changes) != 0 {
+				t.Errorf("planned %v despite the shared destination", groups(changes))
+			}
+		})
+	}
+}
+
+func TestAgentFilesAcceptNeighbouringDestinations(t *testing.T) {
+	m := profileModule(t, config.Agents{
+		Instructions: config.InstructionFiles{"AGENTS.md"},
+		Profiles:     map[string]config.Profile{"p": {Description: "d"}},
+	})
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "x")
+	m.Destinations = []config.Destination{
+		{What: "files[0]", Dst: "~/.claude/settings.json", Path: filepath.Join(m.Paths.Home, ".claude", "settings.json")},
+		{What: "links[0]", Dst: "~/.claude/agents/zakwas/p.md.bak", Path: filepath.Join(m.Paths.Home, ".claude", "agents", "zakwas", "p.md.bak")},
+	}
+	apply(t, plan(t, m))
+	if again := plan(t, m); len(again) != 0 {
+		t.Errorf("second plan = %v, want none", groups(again))
+	}
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "x")
+}
