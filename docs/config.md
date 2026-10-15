@@ -509,9 +509,9 @@ agents:
 | `sandbox` | `read-only`, `workspace-write` or `danger-full-access`: Codex's sandbox mode. Without it, Codex gets `read-only` for `edit: deny` and `workspace-write` for `edit: allow`. |
 | `network` | `true` or `false`. |
 | `reviewer` | `user`, or `auto` for an automatic reviewer. |
-| `mcp` | Server name → `allow`, `ask` or `deny`. Every server must be declared under [`mcp`](#mcp); one the profile doesn't list is denied, so a profile exposes only what it names. |
+| `mcp` | Server name → `allow`, `ask` or `deny`. Every server must be declared under [`mcp`](#mcp); one the profile doesn't list is denied. Servers added outside zakwas (`claude mcp add`, a plugin, a hand-edited config) are not affected. |
 | `providers` | Providers to render for; default `agents.providers`, with Codex opt-in as for plugins. |
-| `claude`, `codex`, `opencode` | `model` in the provider's own spelling, and `overrides`: extra top-level keys written as is. A key zakwas sets from the profile's own fields (`tools`, `permission`, `sandbox_mode`, …) is rejected. |
+| `claude`, `codex`, `opencode` | `model` in the provider's own spelling, and `overrides`: extra top-level keys written as is. A key zakwas sets from the profile's own fields (`tools`, `permission`, `sandbox_mode`, …) is rejected; opencode's `mode` (`primary`) can be overridden. Values are re-typed by YAML, so quote ones that must stay strings: `2024-01-01` becomes a timestamp. |
 
 How each field maps:
 
@@ -519,7 +519,7 @@ How each field maps:
 |---|---|---|---|
 | `tools` | `tools` allowlist | not expressible | other tools `deny` in `permission` |
 | `edit` | `deny` removes the edit tools; `allow` is `permissionMode: acceptEdits`; `ask` is `default` | `deny` is sandbox `read-only`, `allow` is `workspace-write`; `ask` is not expressible | `permission.edit` |
-| `shell` | `deny` removes `Bash`; `ask` is `default`; `allow` is not expressible | `ask` is `approval_policy = "on-request"`, `allow` is `"never"`; `deny` is not expressible | `permission.bash`: `deny`, or the [`agents.permissions`](#permissions) rules with `allow` or `ask` as the catch-all, the guard's deny rules last |
+| `shell` | `deny` removes `Bash`; `ask` is `default` (with `edit: allow` it is not honored: `acceptEdits` also approves filesystem commands); `allow` is not expressible | `ask` is `approval_policy = "on-request"`, `allow` is `"never"`; `deny` is not expressible | `permission.bash`: `deny`, or the [`agents.permissions`](#permissions) rules with `allow` or `ask` as the catch-all, the guard's deny rules last |
 | `sandbox` | not expressible | `sandbox_mode` | not expressible |
 | `network` | `false` removes `WebFetch` and `WebSearch`; shell commands stay unrestricted | `sandbox_workspace_write.network_access` | `false` denies `webfetch` and `websearch`; shell commands stay unrestricted |
 | `reviewer` | `auto` is `permissionMode: auto`, `user` is `default` | `approvals_reviewer`: `user` or `auto_review` | `auto` is not expressible |

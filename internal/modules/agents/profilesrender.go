@@ -171,6 +171,9 @@ func (m *Module) claudeProfile(p config.NamedProfile) profileFile {
 	if p.Shell == config.PermissionAllow {
 		unsupported = append(unsupported, "shell: allow")
 	}
+	if p.Shell == "ask" && p.Edit == config.PermissionAllow && p.Reviewer != "auto" && hasShell {
+		unsupported = append(unsupported, "shell: ask with edit: allow (acceptEdits also approves filesystem commands)")
+	}
 	if p.Network != nil && !*p.Network && hasShell {
 		unsupported = append(unsupported, "network: false for shell commands")
 	}

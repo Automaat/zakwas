@@ -368,3 +368,42 @@ func TestProfilesDenyShellAndToolsPerProvider(t *testing.T) {
 		t.Errorf("warnings = %v, want %v", got, want)
 	}
 }
+
+func TestProfilesReadJSONCTemplates(t *testing.T) {
+	m := profileModule(t, profileAgents())
+	writeFile(t, filepath.Join(m.Paths.Root, "review.md"), "x")
+	m.TemplateFiles = []config.TemplateFile{{Src: "opencode.jsonc.tmpl", Dst: "~/.config/opencode/opencode.jsonc"}}
+	writeFile(t, filepath.Join(m.Paths.Root, "opencode.jsonc.tmpl"), `{
+  // agents of mine
+  "url": "http://example.com/*", /* block */
+  "agent": {
+    "review": {"description": "a // b",},
+  },
+}`)
+	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), `profile "review" is also defined by the opencode template`) {
+		t.Fatalf("err = %v", err)
+	}
+	writeFile(t, filepath.Join(m.Paths.Root, "opencode.jsonc.tmpl"), `{"agent": {"review": `)
+	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "can't read the agents") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestProfilesKeepFilesWhenOpencodeGoesMissing(t *testing.T) {
+	a := config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}}
+	m, fake := newModule(t, a)
+	m.Agents.Providers = nil
+	apply(t, plan(t, m))
+	assertCopy(t, filepath.Join(m.Paths.Home, ".config", "opencode", "agents", "p.md"), readFile(t, filepath.Join(m.Paths.Home, ".config", "opencode", "agents", "p.md")))
+	fake.Missing("opencode")
+	assertConverged(t, m)
+}
+
+func TestProfilesClaudeAcceptEditsHonorsNoShellAsk(t *testing.T) {
+	m := profileModule(t, config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d", Edit: config.PermissionAllow, Shell: "ask"}}})
+	got := m.Warnings(context.Background())
+	want := []string{"claude profile p can't express: shell: ask with edit: allow (acceptEdits also approves filesystem commands)"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("warnings = %v, want %v", got, want)
+	}
+}

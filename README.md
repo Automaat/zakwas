@@ -222,7 +222,7 @@ agents:
       claude: {model: sonnet}
 ```
 
-- A profile exposes only the MCP servers it names, and every one must be declared under `agents.mcp`.
+- A profile denies the MCP servers declared under `agents.mcp` that it doesn't name, and every one it names must be declared there.
 - The plan lists, per provider, the profile fields that provider cannot express.
 - A profile name an opencode template also defines fails the plan.
 - Removing a profile removes only the files zakwas rendered.

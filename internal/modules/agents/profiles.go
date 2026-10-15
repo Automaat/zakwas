@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,19 +82,25 @@ func (m *Module) planProfiles() (map[string][]engine.Change, map[string]error, e
 		if len(list) == 0 || !m.Agents.Manages(p) {
 			continue
 		}
+		for _, prof := range list {
+			keep[samePath(m.profilePath(p, prof.Name))] = true
+		}
 		strict := p == config.ProviderClaude || m.Agents.NamesInProfile(p)
 		if !strict && !m.Runner.Installed(p) {
 			continue
 		}
+		var errs []error
 		var conflicts map[string]string
 		if p == config.ProviderOpencode {
-			conflicts = m.opencodeTemplateAgents()
+			var err error
+			if conflicts, err = m.opencodeTemplateAgents(); err != nil {
+				failed[p] = fmt.Errorf("%s: profiles: %w", p, err)
+				continue
+			}
 		}
-		var errs []error
 		var changes []engine.Change
 		for _, prof := range list {
 			dst := m.profilePath(p, prof.Name)
-			keep[samePath(dst)] = true
 			if src, taken := conflicts[prof.Name]; taken {
 				errs = append(errs, fmt.Errorf("profile %q is also defined by the opencode template %s under \"agent\"; rename one of them", prof.Name, m.Paths.Pretty(src)))
 				continue
@@ -142,9 +149,11 @@ func (m *Module) planProfiles() (map[string][]engine.Change, map[string]error, e
 }
 
 // opencodeTemplateAgents maps the agent names the templates that render an
-// opencode.json define to that template. A template that doesn't render or
-// isn't plain JSON can't be read and defines nothing here.
-func (m *Module) opencodeTemplateAgents() map[string]string {
+// opencode.json define to that template. A template that doesn't render is
+// left to the templates module to report; one that renders to something
+// that is not JSON, comments and trailing commas aside, fails the plan, since
+// the names it defines can't be known.
+func (m *Module) opencodeTemplateAgents() (map[string]string, error) {
 	out := map[string]string{}
 	for _, f := range m.TemplateFiles {
 		if base := filepath.Base(f.Dst); base != "opencode.json" && base != "opencode.jsonc" {
@@ -158,11 +167,62 @@ func (m *Module) opencodeTemplateAgents() map[string]string {
 		var doc struct {
 			Agent map[string]json.RawMessage `json:"agent"`
 		}
-		if json.Unmarshal(data, &doc) != nil {
-			continue
+		if err := json.Unmarshal(stripJSONC(data), &doc); err != nil {
+			return nil, fmt.Errorf("can't read the agents %s defines, to check them against the profiles: %w", m.Paths.Pretty(src), err)
 		}
 		for name := range doc.Agent {
 			out[name] = src
+		}
+	}
+	return out, nil
+}
+
+// stripJSONC drops the comments and trailing commas of JSONC, leaving
+// strings alone.
+func stripJSONC(data []byte) []byte {
+	return scanJSONC(scanJSONC(data, false), true)
+}
+
+// scanJSONC copies data without its comments, or, with commas set, without
+// the commas before a closing brace or bracket.
+func scanJSONC(data []byte, commas bool) []byte {
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		switch {
+		case c == '"':
+			j := i + 1
+			for j < len(data) && data[j] != '"' {
+				if data[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			end := min(j+1, len(data))
+			out = append(out, data[i:end]...)
+			i = end - 1
+		case !commas && c == '/' && i+1 < len(data) && data[i+1] == '/':
+			for i < len(data) && data[i] != '\n' {
+				i++
+			}
+			out = append(out, '\n')
+		case !commas && c == '/' && i+1 < len(data) && data[i+1] == '*':
+			end := bytes.Index(data[i+2:], []byte("*/"))
+			if end < 0 {
+				return append(out, data[i:]...)
+			}
+			i += end + 3
+		case commas && c == ',':
+			j := i + 1
+			for j < len(data) && (data[j] == ' ' || data[j] == '\t' || data[j] == '\n' || data[j] == '\r') {
+				j++
+			}
+			if j < len(data) && (data[j] == '}' || data[j] == ']') {
+				continue
+			}
+			out = append(out, c)
+		default:
+			out = append(out, c)
 		}
 	}
 	return out

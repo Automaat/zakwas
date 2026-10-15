@@ -204,6 +204,7 @@ defaults:
 		{"profile provider not managed", "agents: {providers: [claude], profiles: {r: {description: d, providers: [codex]}}}", []string{`agents.profiles.r.providers: provider "codex" is not in agents.providers`}},
 		{"profile block for a provider it skips", "agents: {profiles: {r: {description: d, providers: [claude], codex: {model: m}}}}", []string{"agents.profiles.r: codex: the profile is not rendered for codex"}},
 		{"profile override of a managed key", "agents: {profiles: {r: {description: d, claude: {overrides: {tools: x}}}}}", []string{"agents.profiles.r: claude.overrides.tools: zakwas sets it from the profile's own fields"}},
+		{"profile codex block while codex is opt-in", "agents: {profiles: {r: {description: d, codex: {model: m}}}}", []string{"agents.profiles.r: codex: the profile is not rendered for codex; Codex is opt-in"}},
 		{"empty profile provider block", "agents: {profiles: {r: {description: d, opencode: {}}}}", []string{"agents.profiles.r: opencode: set a model or overrides, or remove it"}},
 		{"mcp oauth and bearer token", "agents: {mcp: {a: {url: 'https://e.com', oauth: true, bearerTokenEnv: T}}}", []string{"agents.mcp.a: oauth can't be combined with an Authorization header (bearerTokenEnv)"}},
 		{"mcp control character", "agents: {mcp: {a: {command: x, args: [\"a\\nb\"]}}}", []string{"agents.mcp.a: values may not hold control characters"}},
