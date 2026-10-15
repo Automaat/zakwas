@@ -39,9 +39,58 @@ When the config uses them and they are missing, zakwas installs Homebrew and mis
 
 ## Coding agents
 
-An agent that can run `zakwas apply` can write agent config files it can't edit itself: permissions, hooks, marketplaces. With an `agents` section zakwas therefore denies the managed agents `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`, denies Claude Code edits to the config repo and zakwas state, and refuses `apply`, `upgrade` and `approve` started from an agent session. The deny rules are the boundary: zakwas can't prove a person is at the terminal, since an agent can unset environment variables and get a terminal through `script` or a PTY. `zakwas propose` stays allowed, since it changes nothing, and so does `zakwas capture`, which only saves a proposal with `--write`; `zakwas approve` is denied and refuses agent sessions the same way, so a proposal an agent saved is applied only by a person at a terminal, after the diff and plan are shown. See [`agents.guard`](config.md#guard) for what is covered and how to turn it off.
+An agent that can run `zakwas apply` can write the agent config files it may not edit itself: permissions, hooks, MCP servers, marketplaces. One prompt injection in a README or a web page is enough for an agent to ask zakwas to widen its own permissions. With an `agents` section zakwas therefore keeps the managed agents from applying the config, and sends every change an agent wants through a proposal that a person approves. The guard is on by default; [`agents.guard`](config.md#guard) lists the rules and how to turn it off.
 
-The one way an agent applies anything itself is `zakwas_apply` of [`zakwas mcp --enable-apply`](commands.md#mcp), which you turn on by registering the server that way. It applies only a low-risk proposal, rated again when called, and only after you confirm a diff and plan zakwas rendered, in a form the client shows you; a client that can't show it, a high-risk proposal and any other answer than yes apply nothing and give `zakwas approve ID` for a terminal. The tool is marked so Claude Code prompts on every call even in bypass mode, and Codex gets `approval_mode = "prompt"` for it. What stops an agent from answering its own form is that it does not start the server: the guard denies it `zakwas mcp`. Like the other deny rules this matches the command as the agent writes it, so a wrapper (`sh -c`, a script) is outside it, and an agent that starts the server through one is the client that answers the form. A person who runs the server in a shell outside the agent is out of scope.
+### What the guard does
+
+- **Denies commands.** Every managed agent is denied `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`, also with a flag before the command and, where the agent can express it, when run by path.
+- **Denies edits.** Claude Code is denied edits to the config repo's main checkout (and the linked worktree zakwas runs from) and to `~/.local/state/zakwas`. Worktrees an agent creates elsewhere stay editable, so an agent can still propose a change as a branch.
+- **Refuses sessions.** `zakwas apply`, `upgrade` and `approve` exit 1 before changing anything when they start inside an agent session.
+- **Leaves reading and proposing open.** `plan`, `check`, `capture` and `propose` change nothing outside a saved proposal, so agents keep them.
+
+### Why deny rules are the boundary
+
+zakwas recognizes an agent session by environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, `COPILOT_AGENT_SESSION_ID`, and a few more). That cannot be a boundary: an agent can unset a variable, and it can get a terminal through `script` or a PTY, so zakwas cannot prove a person is at the keyboard. The refusal catches accidents and injections that don't know about it.
+
+The deny rules are the boundary, because the agent's own runtime enforces them. Claude Code applies its `permissions.deny` in every permission mode, `bypassPermissions` included. They match the command as the agent writes it. A wrapper (`sh -c '...'`, a script, a PTY) is outside what they match, so keep the agent's own approval mode on for shells you don't trust.
+
+### Per-agent coverage
+
+| Agent | Command rules | Caveat |
+|---|---|---|
+| Claude Code | `permissions.deny` in `settings.json`; also edit rules | Edit rules cover Claude's file tools, not a shell command that writes a file. |
+| Codex | `forbidden` rules in `rules/zakwas.rules` | Matches the command as written: `zakwas apply` is denied, `zakwas -c zakwas.yaml apply` is not. Codex applies the strictest rule of all files, so no other file loosens these. No edit rules. |
+| opencode | `deny` patterns, written only through the `agentPermissions` template function | Not protected until a template renders it into `opencode.json`; the plan warns. No edit rules. |
+| Gemini CLI | `deny` rules in `policies/zakwas.toml` | Match an unquoted flag before the command and an unquoted path; a quoted flag value or binary path is not matched. No edit rules. |
+| Copilot CLI | none | Copilot keeps user-level deny rules only in root-owned managed settings, so only the refusal covers it, and an agent that unsets its marker variable gets past it. The plan warns. |
+
+Codex, Gemini CLI and Copilot CLI are guarded only when `zakwas.yaml` names them, like their other settings. A guard that can't cover a managed provider is a warning in `plan`, not a change, so `check` stays clean.
+
+### Proposals and who may approve
+
+An agent that wants a change runs `zakwas propose` (or calls `zakwas_propose` over MCP). The proposal is saved with its diff, plan and risk tier; nothing else changes. A person applies it with `zakwas approve ID`, which shows the diff and plan again, computed from the files as they are now, and needs a terminal on stdin with no `-y`. It refuses to run in an agent session and is denied to the agents.
+
+Each proposal has one of two tiers, decided by zakwas from what it does, never from what the agent says:
+
+| Tier | What it covers |
+|---|---|
+| low | tightens rules or adds something from a source the config already trusts: a plugin from a declared marketplace, a `deny` or `review` rule, removing an `allow` rule, a core Homebrew formula, a mise pin from the registry |
+| high | everything else: an `allow` rule, removing a `deny` or `review` rule, an MCP server, a marketplace, a cask or tap formula, a mise tool from a backend such as `npm:` or `github:` |
+
+A proposal is also high when the plan it will run touches agent config (`~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `~/.gemini`, `~/.copilot`), a shell rc file, `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The tier stored in the proposal file is not trusted: it is rated again when used.
+
+High needs a terminal because those changes decide what agents run unasked, where their code comes from and which services they reach. The only confirmation an agent can't answer for itself is a prompt on a terminal that the agent's own commands don't control, so that is what `approve` demands. A confirmation inside the agent is shown by the agent's client, which is the party the injection may be steering; zakwas allows it only for low-tier changes, where a wrong yes loosens no rule and adds no new source of code.
+
+### `zakwas mcp --enable-apply`
+
+[`zakwas mcp`](commands.md#mcp) serves read-only tools and `zakwas_propose` to an agent. Started as `zakwas mcp --enable-apply` it adds `zakwas_apply`, the one way an agent applies anything itself. It applies only a low-risk proposal, rated again when called, and only after you confirm a diff and plan that zakwas renders in a form the client shows you. A high-risk proposal, a client that can't show the form, and any answer but yes apply nothing and return `zakwas approve ID`. Claude Code prompts on every `zakwas_apply` call, even in bypass mode, and Codex gets `approval_mode = "prompt"` for it.
+
+What stops an agent from answering its own form is that it does not start the server: you register it in `agents.mcp`, and the guard denies the agent `zakwas mcp`. That denial is a command rule, so it has the limit above. An agent that can run a wrapper such as `sh -c 'zakwas mcp --enable-apply -c ...'` or a script can start the server itself, speak MCP to it over pipes and answer the form: it is both client and user. Two things follow:
+
+- Not registering `--enable-apply` does not remove the risk. The flag is an argument of the command the agent would write, so a wrapper can pass it.
+- No environment check stands in the way. The server has to run inside agent sessions, so unlike `apply` it has no session refusal.
+
+What remains bounded is the damage: the wrapped server applies only a low-risk proposal, checks it again before writing, commits to the current branch without pushing, and records the apply in the history. High-risk changes still need `zakwas approve` in a terminal. To close the gap, don't let the agent run shell wrappers unreviewed: keep its own approval prompts on for commands the deny rules don't recognize. A person who starts the server in a shell outside the agent is out of scope.
 
 ## sudo
 

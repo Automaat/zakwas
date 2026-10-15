@@ -81,6 +81,148 @@ agents:
 }
 ```
 
+## One MCP server for several agents
+
+Declare each MCP server once, as a stdio `command` or an HTTP `url`. zakwas registers it at user scope in Claude Code, Codex and Copilot CLI (and in Gemini CLI once you name it), each in its own format. Secrets stay environment references: you name the variable, and each agent reads it from its own environment, so nothing secret reaches the config repo or the agents' files.
+
+```yaml
+agents:
+  providers: [claude, codex, copilot]
+  mcp:
+    docs:
+      command: npx
+      args: [-y, "@example/docs-mcp"]
+      envVars: [DOCS_TOKEN]
+    search:
+      url: https://mcp.example.com/mcp
+      bearerTokenEnv: SEARCH_TOKEN
+      providers: [claude, codex]
+```
+
+`docs` is a stdio server that passes `DOCS_TOKEN` through; `search` is an HTTP server that sends `SEARCH_TOKEN` as a bearer token, and only to Claude Code and Codex. Export both variables where the agents start (your shell profile), since an agent reads them when it launches the server. `zakwas plan --diff` shows `${DOCS_TOKEN}` (Codex: `env_vars`), never a value. Servers you added yourself stay, and removing an entry removes only what zakwas registered.
+
+opencode takes its servers from its config template: add `"mcp": {{ agentMCP "opencode" }}` to the `opencode.json` template, as in [Agent permissions](#agent-permissions). A server with `oauth: true` shows the login command in the plan; zakwas never signs in.
+
+## Instructions from several files
+
+`instructions` is one file or a list, joined in order with a blank line between them. Every file is a template, so one list serves agents that differ: branch on `{{ .Provider }}` (`claude`, `codex`, `opencode`, `gemini`, `copilot`).
+
+```yaml
+agents:
+  providers: [claude, codex]
+  instructions:
+    - dotfiles/agents/base.md
+    - dotfiles/agents/tools.md
+```
+
+`dotfiles/agents/base.md`:
+
+```markdown
+# Working agreements
+
+- Read the code before changing it.
+- Run the tests before saying a change works.
+{{ if eq .Provider "claude" }}
+- Use the Skill tool for skills.
+{{ else }}
+- Read a skill's SKILL.md before using it.
+{{ end }}
+```
+
+Each agent gets its own protected copy: `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and so on. A file that renders empty for an agent is left out of that agent's copy. Codex reads at most 32 KiB of `AGENTS.md`; a longer copy fails the plan. See [instructions](config.md#instructions) for `@path` imports and the paths of every agent.
+
+## Skills from a path and from git
+
+`skills` links skills that don't come from a plugin marketplace into every managed agent's skills directory: one from the config repo, one from another repository.
+
+```yaml
+agents:
+  providers: [claude, codex]
+  skills:
+    - dotfiles/skills/review
+    - {git: example/agent-skills, path: skills/pdf, ref: v1}
+```
+
+A skill is a directory with a `SKILL.md`, and the directory name must equal the `name` in that file. `plan` never fetches: a git skill shows as a step that `apply` runs, which clones the repository (`--depth 1`) and links the skill. `zakwas upgrade` pulls the clone, and the link follows. A directory or link at the target that zakwas didn't make, such as one from `npx skills`, fails the plan instead of being replaced.
+
+## Profiles: read-only review, build without network
+
+A profile is a named set of permissions you start a session with. Declare it once; zakwas renders a Claude Code subagent, a Codex profile, an opencode agent, and so on.
+
+```yaml
+agents:
+  providers: [claude, codex]
+  profiles:
+    review:
+      description: Read-only change review
+      prompt: dotfiles/agents/review.md
+      edit: deny
+      shell: ask
+    build:
+      description: Build and test without network
+      edit: allow
+      sandbox: workspace-write
+      network: false
+```
+
+Start them with `claude --agent review`, `codex --profile review`, `opencode --agent review`, `copilot --agent review`, or `@review` in Gemini CLI. `review` removes the edit tools in Claude Code and runs Codex in its read-only sandbox, and it denies every MCP server declared under `agents.mcp` that it doesn't name. `build` can edit, and turns network access off where the agent can: Codex's workspace sandbox and Claude Code's web tools. Claude Code can't stop a shell command from using the network and has no `sandbox`, so the plan lists `claude profile build can't express: sandbox; network: false for shell commands` instead of promising it. Every field a provider can't express is listed that way, and none of them makes `check` fail. The mapping per field is in [profiles](config.md#profiles).
+
+## Guard: keep agents from applying the config
+
+With an `agents` section the guard is on, with nothing to configure. zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`, denies Claude Code edits to the config repo and zakwas state, and refuses `apply` started from an agent session. Run `apply` in a terminal outside the agent. Agents keep `plan`, `check`, `capture` and `propose`.
+
+To turn it off:
+
+```yaml
+agents:
+  guard: false
+```
+
+The next `apply` removes the rules zakwas added, and only those. Turn it off only if you want the agents to apply the config themselves. What the guard covers per agent, and what it can't stop, is in [security.md](security.md#coding-agents).
+
+## Adopt an existing setup
+
+A Mac that already has plugins, MCP servers and approved commands: let zakwas list them, review, and approve them into the config.
+
+```
+$ zakwas capture
+claude
+  marketplace  team  example/agent-plugins
+  plugin       review@team
+  mcp server   docs  stdio npx -y @example/docs-mcp
+  allow rule   git status
+
+Save these as one proposal with: zakwas capture --write
+$ zakwas capture --write
+Proposal d82fd6f6: add marketplace team; add plugin review@team; add MCP server docs; allow "git status" (high risk)
+  ...
+$ zakwas approve d82fd6f6
+  ...
+Approve d82fd6f6: apply 2 step(s) and commit zakwas.yaml to main? [y/N]
+```
+
+`capture` lists what Claude Code and Codex have that `zakwas.yaml` doesn't declare, and under "Not captured" what it left out because it may hold a credential. `--write` saves the findings as one proposal and changes nothing. `approve` shows the diff and plan, asks, applies and commits to the current branch of the config repo; it needs a terminal. The `zakwas plan` after it shows nothing left to change, and a second `capture` lists nothing. An agent can run `capture` and `propose` too, through [`zakwas mcp`](commands.md#mcp), but only you run `approve`. See [Agents](agents.md#day-to-day).
+
+## Opt in to Gemini CLI and Copilot CLI
+
+Codex, Gemini CLI and Copilot CLI stay untouched until the config names them. Naming one also gives it every entry that has no `providers` of its own, so one declaration covers all of them.
+
+```yaml
+agents:
+  providers: [claude, gemini, copilot]
+  instructions: dotfiles/agents/AGENTS.md
+  mcp:
+    docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
+  skills:
+    - dotfiles/skills/review
+```
+
+- Gemini CLI needs `gemini` on `PATH`: zakwas renders one extension under `~/.gemini/zakwas` (instructions, MCP servers, hooks, subagents) and links it with `gemini extensions link`, plus a policy file for permissions. It never writes `~/.gemini/settings.json` or `GEMINI.md`. Gemini has no plugin marketplaces, so `plugins` never reach it.
+- Copilot CLI needs no CLI for these keys, only for plugins and marketplaces. It gets `instructions/zakwas.instructions.md`, `mcp-config.json` servers, skills and profile files in `~/.copilot`, and never `config.json`. It has no user-level shell rules, so `permissions` that reach it are reported in the plan as unsupported, and the guard covers it only by the refusal.
+- `GEMINI_CLI_HOME` and `COPILOT_HOME` move their directories, and zakwas follows them.
+
+The [provider table](agents.md#providers) lists the rest.
+
 ## Per-machine values
 
 Templates get `.Home` and your `vars`:
