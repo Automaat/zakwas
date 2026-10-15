@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -35,6 +36,84 @@ func TestBuildKeepsPlanningAfterAFailure(t *testing.T) {
 	if plan.Count() != 1 {
 		t.Errorf("Count = %d", plan.Count())
 	}
+}
+
+// gateModule blocks in Plan until every module has started planning, so the
+// test only passes when modules plan at the same time.
+type gateModule struct {
+	stubModule
+	started *sync.WaitGroup
+	release chan struct{}
+	warn    []string
+}
+
+func (g gateModule) Plan(ctx context.Context) ([]Change, error) {
+	g.started.Done()
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return g.changes, g.err
+}
+
+func (g gateModule) Warnings(context.Context) []string { return g.warn }
+
+func TestBuildPlansModulesConcurrentlyInOrder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var started sync.WaitGroup
+	release := make(chan struct{})
+	names := []string{"a", "b", "c", "d"}
+	started.Add(len(names))
+	var mods []Module
+	for i, n := range names {
+		g := gateModule{
+			stubModule: stubModule{name: n, changes: []Change{{Action: Create, Target: n + "-change"}}},
+			started:    &started, release: release, warn: []string{n + "-warning"},
+		}
+		if i == 1 {
+			g.err = errors.New("boom")
+		}
+		mods = append(mods, g)
+	}
+	go func() {
+		started.Wait()
+		close(release)
+	}()
+
+	plan := Build(ctx, mods)
+	if ctx.Err() != nil {
+		t.Fatal("modules did not plan concurrently")
+	}
+	var got []string
+	for _, mp := range plan {
+		got = append(got, mp.Module+":"+mp.Changes[0].Target+":"+mp.Warnings[0])
+	}
+	want := []string{"a:a-change:a-warning", "b:b-change:b-warning", "c:c-change:c-warning", "d:d-change:d-warning"}
+	if !slices.Equal(got, want) {
+		t.Errorf("plan = %v, want %v", got, want)
+	}
+	if err := plan.Err(); err == nil || err.Error() != "plan b: boom" {
+		t.Errorf("Err = %v", err)
+	}
+}
+
+type panicModule struct{ stubModule }
+
+func (panicModule) Plan(context.Context) ([]Change, error) { panic("boom") }
+
+func TestBuildRaisesAModulePanicOnTheCallersGoroutine(t *testing.T) {
+	defer func() {
+		if got := recover(); got != "boom" {
+			t.Errorf("recovered %v, want boom", got)
+		}
+	}()
+	Build(context.Background(), []Module{
+		stubModule{name: "ok"},
+		panicModule{stubModule{name: "bad"}},
+	})
+	t.Error("Build returned despite a panicking module")
 }
 
 type recorder struct{ events []string }
