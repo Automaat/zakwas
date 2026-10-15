@@ -62,6 +62,9 @@ func (c copilotMCP) load(path string) (mcpFile, error) {
 		if err := json.Unmarshal(servers.values[name], &v); err != nil {
 			return nil, fmt.Errorf("%s mcpServers.%s: %w", path, name, err)
 		}
+		if v == nil {
+			continue
+		}
 		if out[name], err = copilotEntry(v); err != nil {
 			return nil, err
 		}
