@@ -113,6 +113,8 @@ type profileFile struct {
 	front       *ordered
 	table       map[string]any
 	unsupported []string
+	// rules are the policy rules a Gemini profile adds to zakwas.toml.
+	rules []geminiRule
 }
 
 func (m *Module) resolveProfile(provider string, p config.NamedProfile) profileFile {
@@ -121,6 +123,8 @@ func (m *Module) resolveProfile(provider string, p config.NamedProfile) profileF
 		return m.claudeProfile(p)
 	case config.ProviderCodex:
 		return m.codexProfile(p)
+	case config.ProviderGemini:
+		return m.geminiProfile(p)
 	}
 	return m.opencodeProfile(p)
 }
@@ -363,4 +367,89 @@ func (m *Module) renderProfile(provider string, p config.NamedProfile) ([]byte, 
 		buf.WriteString("\n" + prompt + "\n")
 	}
 	return buf.Bytes(), nil
+}
+
+// geminiToolNames are Gemini CLI's names for each abstract tool.
+var geminiToolNames = map[string][]string{
+	"read": {"read_file", "read_many_files", "list_directory"}, "search": {"glob", "grep_search"},
+	"edit": {"write_file", "replace"}, "shell": {"run_shell_command"},
+	"web": {"web_fetch", "google_web_search"},
+}
+
+// geminiProfile renders a profile as a Gemini subagent. Its tools list is
+// exact, with the MCP servers it keeps as mcp_<server>_* wildcards, only
+// when the profile lists tools: a subagent without one inherits every tool,
+// which keeps Gemini's own helpers, so what such a profile takes away is a
+// deny rule scoped to the subagent. Those rules, and the ones that allow or
+// ask for what the profile keeps, sit in zakwas.toml below the rules of
+// agents.permissions, whose allow rules still let their commands through.
+func (m *Module) geminiProfile(p config.NamedProfile) profileFile {
+	share := p.Share(config.ProviderGemini)
+	front := &ordered{}
+	var unsupported []string
+	front.set("name", p.Name)
+	front.set("description", p.Description)
+	front.set("kind", "local")
+	if share.Model != "" {
+		front.set("model", share.Model)
+	}
+	kept, removed := profileToolSets(p.Profile)
+	servers, access := m.profileAccess(config.ProviderGemini, p.Profile)
+	registered, _ := m.geminiServers()
+	servers = slices.DeleteFunc(servers, func(s string) bool { _, ok := registered[s]; return !ok })
+	exposed := func(d string) bool { return d == config.PermissionAllow || d == "ask" }
+	if p.Tools != nil {
+		list := toolNames(kept, geminiToolNames)
+		for _, s := range servers {
+			if exposed(access[s]) {
+				list = append(list, "mcp_"+s+"_*")
+			}
+		}
+		front.set("tools", list)
+	}
+	var rules []geminiRule
+	rule := func(tool any, mcp, decision string) {
+		r := geminiRule{ToolName: tool, MCPName: mcp, Subagent: p.Name, Decision: "allow", Priority: geminiProfilePriority}
+		switch decision {
+		case "ask":
+			r.Decision = "ask_user"
+		case config.PermissionDeny:
+			r.Decision, r.Priority = "deny", geminiProfileDenyPriority
+		}
+		rules = append(rules, r)
+	}
+	if p.Tools == nil {
+		for _, t := range removed {
+			rule(geminiToolNames[t], "", config.PermissionDeny)
+		}
+		for _, s := range servers {
+			if !exposed(access[s]) {
+				rule("*", s, config.PermissionDeny)
+			}
+		}
+	}
+	if (p.Edit == config.PermissionAllow || p.Edit == "ask") && slices.Contains(kept, "edit") {
+		rule(geminiToolNames["edit"], "", p.Edit)
+	}
+	if (p.Shell == config.PermissionAllow || p.Shell == "ask") && slices.Contains(kept, "shell") {
+		rule("run_shell_command", "", p.Shell)
+	}
+	for _, s := range servers {
+		if exposed(access[s]) {
+			rule("*", s, access[s])
+		}
+	}
+	if p.Sandbox != "" {
+		unsupported = append(unsupported, "sandbox")
+	}
+	if p.Reviewer == "auto" {
+		unsupported = append(unsupported, "reviewer: auto")
+	}
+	if p.Network != nil && !*p.Network && slices.Contains(kept, "shell") {
+		unsupported = append(unsupported, "network: false for shell commands")
+	}
+	for _, k := range slices.Sorted(maps.Keys(share.Overrides)) {
+		front.set(k, share.Overrides[k])
+	}
+	return profileFile{front: front, unsupported: unsupported, rules: rules}
 }

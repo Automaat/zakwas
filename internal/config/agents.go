@@ -22,29 +22,34 @@ const (
 	ProviderClaude   = "claude"
 	ProviderCodex    = "codex"
 	ProviderOpencode = "opencode"
+	ProviderGemini   = "gemini"
 )
 
 // Providers lists every known provider, in the order they are planned.
-var Providers = []string{ProviderClaude, ProviderCodex, ProviderOpencode}
+var Providers = []string{ProviderClaude, ProviderCodex, ProviderOpencode, ProviderGemini}
+
+// OptIn reports whether provider is converged only when zakwas.yaml names it,
+// so configs that predate it leave it alone.
+func OptIn(provider string) bool { return provider == ProviderCodex || provider == ProviderGemini }
 
 // Agents declares agent plugin marketplaces and plugins once, for every
 // provider they target.
 type Agents struct {
 	Codex              *CodexSettings         `yaml:"codex" jsonschema_description:"Global Codex configuration, applied independently of profiles. Requires explicitly opting in to codex."`
-	Providers          []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three."`
+	Providers          []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode,enum=gemini" jsonschema_description:"Providers zakwas manages: claude, codex, opencode, gemini. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex and gemini are converged only when named here or in an entry's 'providers'; gemini has no plugin marketplaces, so only its instructions, MCP servers, skills, hooks, permissions and profiles are converged. A provider whose CLI is missing fails its plan; the others still converge. Default: claude, codex and opencode, with codex and gemini opt-in."`
 	Upgrade            bool                   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Update installed plugins to the version their marketplace offers on apply. Run 'zakwas upgrade' to refresh the marketplaces first. Default false."`
 	Prune              bool                   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false."`
 	Marketplaces       map[string]Marketplace `yaml:"marketplaces" jsonschema_description:"Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'."`
 	Plugins            []Plugin               `yaml:"plugins" jsonschema_description:"Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own."`
-	Instructions       InstructionFiles       `yaml:"instructions" jsonschema_description:"Global instructions: one file in the config repo, or a list joined in order, each relative to the directory holding zakwas.yaml (or absolute). Every file is a template that sees '{{ .Provider }}' (claude, codex, opencode or shared), '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Each managed provider gets its own rendered, protected copy: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). Claude keeps its '@path' imports, the others get them inlined; a missing import fails the plan, as does a copy over the provider's size limit (codex: 32768 bytes). A file already there is backed up, a link zakwas made is replaced; copies of providers no longer managed are removed."`
+	Instructions       InstructionFiles       `yaml:"instructions" jsonschema_description:"Global instructions: one file in the config repo, or a list joined in order, each relative to the directory holding zakwas.yaml (or absolute). Every file is a template that sees '{{ .Provider }}' (claude, codex, opencode, gemini or shared), '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Each managed provider gets its own rendered, protected copy: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named), gemini the context file of its zakwas extension, ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/GEMINI.md (only when gemini is named); ~/.gemini/GEMINI.md is never written. Claude keeps its '@path' imports, the others get them inlined; a missing import fails the plan, as does a copy over the provider's size limit (codex: 32768 bytes). A file already there is backed up, a link zakwas made is replaced; copies of providers no longer managed are removed."`
 	SharedInstructions bool                   `yaml:"sharedInstructions" jsonschema:"default=false" jsonschema_description:"Also write the rendered instructions, as provider 'shared', to ~/.agents/AGENTS.md, which Warp, Cline and Factory Droid read, and which Claude, Codex and opencode don't. Needs 'instructions'. Default false."`
 	Hooks              *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration."`
-	Permissions        *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
-	MCP                map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
-	Profiles           map[string]Profile     `yaml:"profiles" jsonschema_description:"Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) and an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered."`
-	Skills             []Skill                `yaml:"skills" jsonschema_description:"Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex and opencode. Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them."`
+	Permissions        *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file and a Gemini CLI user policy file, and to opencode through the agentPermissions template function."`
+	MCP                map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place), in the zakwas extension of Gemini CLI, and in opencode through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
+	Profiles           map[string]Profile     `yaml:"profiles" jsonschema_description:"Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named) and a Gemini CLI subagent file ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md (delegate with '@<name>', only when gemini is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered."`
+	Skills             []Skill                `yaml:"skills" jsonschema_description:"Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex, opencode and Gemini CLI (${GEMINI_CLI_HOME:-~}/.agents/skills when GEMINI_CLI_HOME is set). Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them."`
 	Opencode           *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
-	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
+	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
 }
 
 // InstructionFiles is agents.instructions. In YAML it is either one file or
@@ -84,22 +89,22 @@ type AgentHooks struct {
 type AgentCommandHook struct {
 	Event     string   `yaml:"event" jsonschema:"required,enum=beforeTool,enum=afterTool,enum=sessionStart,enum=stop" jsonschema_description:"Shared lifecycle event: beforeTool, afterTool, sessionStart, or stop. Zakwas maps it to each provider's native event."`
 	Command   string   `yaml:"command" jsonschema:"required,minLength=1" jsonschema_description:"Shell command to run. Use an absolute executable path when the agent may have a different PATH; the command receives provider-specific event JSON on stdin."`
-	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers for this hook; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
+	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode,enum=gemini" jsonschema_description:"Providers for this hook; must be in agents.providers. Default: agents.providers, with Codex and Gemini opt-in as for plugins."`
 }
 
 // AgentPermissions lists shell command prefixes by decision.
 type AgentPermissions struct {
-	Allow  []AgentPermission `yaml:"allow" jsonschema_description:"Commands the agents run without asking: Claude Code permissions.allow, Codex decision allow (runs outside the sandbox without approval), opencode allow."`
-	Review []AgentPermission `yaml:"review" jsonschema_description:"Commands that need a review before they run: Codex decision prompt, opencode ask. Not written for Claude Code, whose auto mode already reviews every command it doesn't allow."`
-	Deny   []AgentPermission `yaml:"deny" jsonschema_description:"Commands the agents must never run: Claude Code permissions.deny, Codex decision forbidden, opencode deny."`
+	Allow  []AgentPermission `yaml:"allow" jsonschema_description:"Commands the agents run without asking: Claude Code permissions.allow, Codex decision allow (runs outside the sandbox without approval), Gemini CLI decision allow, opencode allow."`
+	Review []AgentPermission `yaml:"review" jsonschema_description:"Commands that need a review before they run: Codex decision prompt, Gemini CLI decision ask_user, opencode ask. Not written for Claude Code, whose auto mode already reviews every command it doesn't allow."`
+	Deny   []AgentPermission `yaml:"deny" jsonschema_description:"Commands the agents must never run: Claude Code permissions.deny, Codex decision forbidden, Gemini CLI decision deny, opencode deny."`
 }
 
 // AgentPermission is one command prefix. In YAML it is either the command
 // string or a mapping.
 type AgentPermission struct {
 	Command       string   `yaml:"command" jsonschema:"required,minLength=1" jsonschema_description:"Command prefix: one or more words separated by spaces, matched on whole words, e.g. 'git status' matches 'git status --short' but not 'git statusx'. No shell operators, quotes, globs or variables."`
-	Providers     []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
-	Justification string   `yaml:"justification" jsonschema:"minLength=1,pattern=\\S" jsonschema_description:"One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it."`
+	Providers     []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode,enum=gemini" jsonschema_description:"Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex and Gemini opt-in as for plugins."`
+	Justification string   `yaml:"justification" jsonschema:"minLength=1,pattern=\\S" jsonschema_description:"One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Gemini CLI shows it for deny rules. Other providers ignore it."`
 }
 
 // MCPServer is one MCP server: a stdio server when it has a command, an
@@ -109,13 +114,13 @@ type MCPServer struct {
 	Command        string            `yaml:"command" jsonschema:"minLength=1" jsonschema_description:"Command that starts a stdio server. Set either 'command' or 'url'."`
 	Args           []string          `yaml:"args" jsonschema_description:"Arguments of the command. Written to the agents' config as is, so keep secrets out of them."`
 	Env            map[string]string `yaml:"env" jsonschema_description:"Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead."`
-	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, opencode environment NAME={env:NAME}."`
+	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env or headers hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so."`
 	URL            string            `yaml:"url" jsonschema:"minLength=1" jsonschema_description:"URL of an HTTP (streamable) server, http:// or https://, without a user name or password. Written as is, so keep keys out of the query. Set either 'command' or 'url'."`
 	Headers        map[string]string `yaml:"headers" jsonschema_description:"HTTP headers with their values. Written to the agents' config as is, so use 'headerEnv' or 'bearerTokenEnv' for secrets."`
 	HeaderEnv      map[string]string `yaml:"headerEnv" jsonschema_description:"HTTP headers whose value is read from an environment variable: header name to variable name."`
 	BearerTokenEnv string            `yaml:"bearerTokenEnv" jsonschema:"minLength=1" jsonschema_description:"Name of the environment variable holding a bearer token, sent as 'Authorization: Bearer <token>'."`
 	OAuth          bool              `yaml:"oauth" jsonschema:"default=false" jsonschema_description:"The server signs in with OAuth. Nothing is registered differently; plan and apply show how to log in, because zakwas never opens a browser. Not combined with bearerTokenEnv or an Authorization header. Default false."`
-	Providers      []string          `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to register this server with; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
+	Providers      []string          `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode,enum=gemini" jsonschema_description:"Providers to register this server with; must be in agents.providers. Default: agents.providers, with Codex and Gemini opt-in as for plugins."`
 }
 
 // IsHTTP reports whether the server is reached by URL rather than started.
@@ -178,10 +183,11 @@ type Profile struct {
 	Network     *bool             `yaml:"network" jsonschema_description:"Network access. Codex: sandbox_workspace_write.network_access. Claude Code and opencode: false removes the web tools, but their shell commands stay unrestricted."`
 	Reviewer    string            `yaml:"reviewer" jsonschema:"enum=user,enum=auto" jsonschema_description:"Who approves what needs approval: user, or auto, an automatic reviewer. Claude Code: permission mode auto; Codex: approvals_reviewer auto_review; opencode has none."`
 	MCP         map[string]string `yaml:"mcp" jsonschema_description:"Access to each MCP server declared under 'mcp': allow, ask or deny. A declared server not listed is denied. Codex: enabled and default_tools_approval_mode; Claude Code: the server's tools in or out of the profile (allow is not expressible, its tools ask); opencode: a '<server>_*' permission."`
-	Providers   []string          `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to render the profile for; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
+	Providers   []string          `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode,enum=gemini" jsonschema_description:"Providers to render the profile for; must be in agents.providers. Default: agents.providers, with Codex and Gemini opt-in as for plugins."`
 	Claude      *ProfileProvider  `yaml:"claude" jsonschema_description:"Claude Code only: model and extra frontmatter."`
 	Codex       *ProfileProvider  `yaml:"codex" jsonschema_description:"Codex only: model and extra profile settings."`
 	Opencode    *ProfileProvider  `yaml:"opencode" jsonschema_description:"opencode only: model and extra frontmatter."`
+	Gemini      *ProfileProvider  `yaml:"gemini" jsonschema_description:"Gemini CLI only: model and extra frontmatter of its subagent file, such as temperature or max_turns."`
 }
 
 // ProfileProvider is one provider's share of a profile.
@@ -196,7 +202,7 @@ type Skill struct {
 	Path      string   `yaml:"path" jsonschema:"required,minLength=1" jsonschema_description:"Skill directory holding SKILL.md, named like the skill. Without 'git': relative to the directory holding zakwas.yaml, or absolute or '~/...'. With 'git': a relative path inside the repository."`
 	Git       string   `yaml:"git" jsonschema:"minLength=1" jsonschema_description:"Git source of the skill: GitHub 'owner/repo' or a clone URL. zakwas clones it on apply into ~/.local/share/zakwas/skills and pulls it on 'zakwas upgrade'. Omit for a skill on disk."`
 	Ref       string   `yaml:"ref" jsonschema:"minLength=1" jsonschema_description:"Branch or tag to clone, only with 'git'. Default: the repository's default branch."`
-	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to link this skill for; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins. Codex and opencode share ~/.agents/skills."`
+	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode,enum=gemini" jsonschema_description:"Providers to link this skill for; must be in agents.providers. Default: agents.providers, with Codex and Gemini opt-in as for plugins. Codex and opencode share ~/.agents/skills."`
 }
 
 func (s *Skill) UnmarshalYAML(n *yaml.Node) error {
@@ -263,6 +269,7 @@ var ProfileControlled = map[string][]string{
 	ProviderClaude:   {"name", "description", "model", "tools", "disallowedTools", "permissionMode"},
 	ProviderCodex:    {"model", "approval_policy", "approvals_reviewer", "sandbox_mode", "sandbox_workspace_write", "developer_instructions", "mcp_servers"},
 	ProviderOpencode: {"description", "model", "permission"},
+	ProviderGemini:   {"name", "description", "kind", "model", "tools"},
 }
 
 // NamedProfile is one agents.profiles entry resolved for a provider.
@@ -280,6 +287,8 @@ func (p Profile) share(provider string) *ProfileProvider {
 		return p.Codex
 	case ProviderOpencode:
 		return p.Opencode
+	case ProviderGemini:
+		return p.Gemini
 	}
 	return nil
 }
@@ -388,15 +397,46 @@ func (a *Agents) permissionProviders(e AgentPermission) []string {
 }
 
 // targets are the providers an entry targets: its own, or agents.providers,
-// where Codex counts only when zakwas.yaml names it.
+// where Codex and Gemini count only when zakwas.yaml names them.
 func (a *Agents) targets(own []string) []string {
 	if own != nil {
 		return own
 	}
-	if a.Names(ProviderCodex) {
-		return a.DefaultProviders()
+	return slices.DeleteFunc(slices.Clone(a.DefaultProviders()), func(p string) bool { return OptIn(p) && !a.Names(p) })
+}
+
+// Wants reports whether provider is to be converged at all: an opt-in
+// provider only when zakwas.yaml names it, in agents.providers or in the
+// providers of an entry that has them; the others when managed.
+func (a *Agents) Wants(provider string) bool {
+	if a == nil || !a.Manages(provider) {
+		return false
 	}
-	return slices.DeleteFunc(slices.Clone(a.DefaultProviders()), func(p string) bool { return p == ProviderCodex })
+	if !OptIn(provider) || a.Names(provider) {
+		return true
+	}
+	if a.Hooks != nil {
+		for _, h := range a.Hooks.Commands {
+			if slices.Contains(h.Providers, provider) {
+				return true
+			}
+		}
+	}
+	if a.Permissions != nil {
+		for _, l := range a.Permissions.lists() {
+			for _, e := range l.entries {
+				if slices.Contains(e.Providers, provider) {
+					return true
+				}
+			}
+		}
+	}
+	for _, s := range a.MCP {
+		if slices.Contains(s.Providers, provider) {
+			return true
+		}
+	}
+	return a.NamesInProfile(provider) || a.NamesInSkill(provider)
 }
 
 // GuardedCommands are the zakwas commands that change the system or zakwas
@@ -533,7 +573,12 @@ func (a *Agents) MarketplaceProviders(name string) []string {
 	if m, ok := a.Marketplaces[name]; ok && m.Providers != nil {
 		return m.Providers
 	}
-	return a.DefaultProviders()
+	return pluginProviders(a.DefaultProviders())
+}
+
+// pluginProviders drops the providers without plugin marketplaces.
+func pluginProviders(list []string) []string {
+	return slices.DeleteFunc(slices.Clone(list), func(p string) bool { return p == ProviderGemini })
 }
 
 // PluginProviders returns the providers a plugin targets.
@@ -605,6 +650,9 @@ func (a *Agents) validate() []error {
 		}
 	}
 	checkProviders("agents.providers", a.Providers, Providers, "the default (all)")
+	if (len(a.Marketplaces) > 0 || len(a.Plugins) > 0) && len(pluginProviders(a.DefaultProviders())) == 0 {
+		errs = append(errs, errors.New("agents.marketplaces and agents.plugins: no provider in agents.providers has plugins (gemini has none); add claude, codex or opencode"))
+	}
 	folded := map[string]string{}
 	for _, name := range a.MarketplaceNames() {
 		m := a.Marketplaces[name]
@@ -618,6 +666,9 @@ func (a *Agents) validate() []error {
 		}
 		if m.Source == "" {
 			errs = append(errs, fmt.Errorf("%s: source is required", what))
+		}
+		if slices.Contains(m.Providers, ProviderGemini) {
+			errs = append(errs, fmt.Errorf("%s.providers: gemini has no plugin marketplaces", what))
 		}
 		checkProviders(what+".providers", m.Providers, a.DefaultProviders(), "agents.providers")
 	}
@@ -685,6 +736,9 @@ func (a *Agents) validate() []error {
 		if _, ok := a.Marketplaces[mk]; !ok {
 			errs = append(errs, fmt.Errorf("%s: marketplace %q of %s is not declared in agents.marketplaces", what, mk, p.ID))
 			continue
+		}
+		if slices.Contains(p.Providers, ProviderGemini) {
+			errs = append(errs, fmt.Errorf("%s.providers: gemini has no plugins", what))
 		}
 		checkProviders(what+".providers", p.Providers, a.MarketplaceProviders(mk), "the providers of marketplace "+mk)
 	}
@@ -915,7 +969,11 @@ func (a *Agents) validateProfiles(checkProviders func(what string, list, allowed
 				fail("%s: set a model or overrides, or remove it", provider)
 			}
 			if !slices.Contains(a.targets(p.Providers), provider) || !a.Manages(provider) {
-				fail("%s: the profile is not rendered for %s; Codex is opt-in, so name it in agents.providers or the profile's providers", provider, provider)
+				hint := "name it in agents.providers or the profile's providers"
+				if OptIn(provider) {
+					hint = strings.ToUpper(provider[:1]) + provider[1:] + " is opt-in, so " + hint
+				}
+				fail("%s: the profile is not rendered for %s; %s", provider, provider, hint)
 			}
 			if strings.ContainsFunc(share.Model, unicode.IsControl) || strings.TrimSpace(share.Model) != share.Model {
 				fail("%s.model %q must be one line without surrounding whitespace", provider, share.Model)
