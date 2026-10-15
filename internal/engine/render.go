@@ -70,7 +70,7 @@ func Render(w io.Writer, p Plan, s Style) error {
 			if len(mp.Changes) == 0 {
 				continue
 			}
-		case len(mp.Changes) == 0:
+		case len(mp.Changes) == 0 && len(mp.Warnings) == 0:
 			upToDate = append(upToDate, mp.Module)
 			continue
 		}
@@ -89,6 +89,9 @@ func Render(w io.Writer, p Plan, s Style) error {
 			if s.ShowDiffs && c.Diff != "" {
 				s.writeDiff(&b, c.Diff)
 			}
+		}
+		for _, w := range mp.Warnings {
+			b.WriteString("  " + s.Warn("⚠ "+w) + "\n")
 		}
 	}
 	if len(upToDate) > 0 {

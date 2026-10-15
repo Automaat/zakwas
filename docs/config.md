@@ -266,6 +266,7 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `hooks.klaudiush` | bool | no | `false` | Register klaudiush's enabled providers. See below. |
 | `permissions.allow`, `permissions.review`, `permissions.deny` | list | no | | Shell command prefixes the agents may run without asking, must have reviewed, or must never run. Each is a command string, or `{command, providers, justification}`. See [permissions](#permissions). |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
+| `guard` | bool | no | `true` | Keep the managed agents from applying this config. See [guard](#guard). |
 
 A marketplace `source` is a GitHub `owner/repo` or a git URL (either optionally with `#ref`), or a local path starting with `./`, `../`, `~/` or `/` (relative paths resolve from the directory holding `zakwas.yaml`). A marketplace targets `agents.providers` unless it lists its own `providers`; a plugin targets its marketplace's providers unless it lists its own, which must be a subset.
 
@@ -370,6 +371,17 @@ If you edit `zakwas.rules` by hand, zakwas backs it up to `zakwas.rules.zakwas-b
 opencode applies the last pattern that matches. The function therefore writes the optional catch-all `"*"` first, then the `allow`, `review` (`ask`) and `deny` entries in that order, so a deny always wins. Each entry becomes two patterns, `"<cmd>"` and `"<cmd> *"`. opencode merges its built-in defaults, the global `permission`, then each agent's own `permission`. An agent block that declares its own `bash`, for example `{"*": "allow"}`, overrides the global rules for that agent, so call the function in every agent block that declares `bash` too.
 
 `zakwas plan` lists the added and removed rules per file (`--diff` shows them), and `zakwas check` reports drift when `settings.json`, `zakwas.rules` or the rendered `opencode.json` no longer match. Removing `permissions`, or the whole `agents` section, removes the Claude rules and the Codex file zakwas wrote. Don't also manage `zakwas.rules` with `files`, `links` or `templates`.
+
+### guard
+
+An agent that can run `zakwas apply`, or edit the config repo or zakwas state, can widen its own permissions, add hooks or install marketplaces, because `apply` writes agent config files the agent may not edit itself. One prompt injection in a README is enough. So with an `agents` section, zakwas keeps the managed agents from applying the config unless you set `guard: false`:
+
+- **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade` and `zakwas self-update`, also with a flag before the command (`zakwas -c zakwas.yaml apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
+- **Edits.** Claude Code is also denied edits (`Edit(…)` rules, which cover its file tools) to the config repo's main checkout, and to the checkout zakwas runs from when that is a linked worktree of it, and to `~/.local/state/zakwas`. Worktrees agents create elsewhere stay editable, so an agent can still propose a change as a branch. A repo that holds your home directory can't be denied, and the plan says so. These rules don't stop a shell command that writes a file; the command rules above are what stop `apply`.
+- **Refusal.** `zakwas apply` and `zakwas upgrade` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and propose changes.
+- **Providers that can't be protected.** The plan lists a managed provider the guard can't cover, under `agents`: opencode when no template renders `agentPermissions "opencode"` into its `opencode.json`. Such a warning doesn't count as a change, so `check` stays clean.
+
+Codex is guarded only when `zakwas.yaml` names `codex`, like its other settings. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
 
 ## system
 

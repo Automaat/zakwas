@@ -25,6 +25,12 @@ type Module struct {
 	Runner          runner.Runner
 	ClaudeConfigDir string
 	CodexHome       string
+	// Guard is set when the zakwas.yaml has an agents section that leaves
+	// the guard on: the managed agents are then kept from applying the
+	// config, see config.Agents.Guard. TemplateSources are the absolute
+	// paths of the templates, which opencode's share of the guard needs.
+	Guard           bool
+	TemplateSources []string
 	klaudiushPath   string
 }
 

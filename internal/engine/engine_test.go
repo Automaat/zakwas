@@ -286,3 +286,41 @@ func TestChangeString(t *testing.T) {
 		}
 	}
 }
+
+type warningModule struct {
+	stubModule
+	warnings []string
+}
+
+func (w warningModule) Warnings(context.Context) []string { return w.warnings }
+
+func TestWarningsDontMakeAPlanDrift(t *testing.T) {
+	plan := Build(context.Background(), []Module{
+		warningModule{stubModule{name: "agents"}, []string{"opencode can't be protected"}},
+		stubModule{name: "links"},
+	})
+	if !plan.Empty() || plan.Err() != nil {
+		t.Fatalf("plan = %+v, want empty and without errors", plan)
+	}
+	if got := plan[0].Warnings; !slices.Equal(got, []string{"opencode can't be protected"}) {
+		t.Errorf("warnings = %q", got)
+	}
+	if plan[1].Warnings != nil {
+		t.Errorf("a module that can't warn got %q", plan[1].Warnings)
+	}
+
+	var out bytes.Buffer
+	if err := Render(&out, plan, Style{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"agents\n  ⚠ opencode can't be protected\n", "up to date: links\n", "No changes"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("render lacks %q:\n%s", want, out.String())
+		}
+	}
+
+	mods := plan.JSONModules(false)
+	if mods[0].Status != StatusUpToDate || !slices.Equal(mods[0].Warnings, []string{"opencode can't be protected"}) || mods[1].Warnings != nil {
+		t.Errorf("modules = %+v", mods)
+	}
+}

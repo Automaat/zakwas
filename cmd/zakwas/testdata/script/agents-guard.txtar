@@ -1,0 +1,68 @@
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+
+zakwas plan --only agents
+stdout 'permissions \+14 deny'
+stdout 'permissions \+3 forbidden'
+stdout '⚠ opencode can''t be protected'
+
+env CLAUDECODE=1
+! zakwas apply -y
+stderr 'refusing to apply from a Claude Code session'
+stderr 'agents.guard: false'
+! zakwas upgrade
+stderr 'refusing to upgrade from a Claude Code session'
+! grep zakwas claude/settings.json
+! exists codex/rules/zakwas.rules
+zakwas plan --only agents
+! zakwas check --only agents
+stdout 'permissions \+14 deny'
+
+env CLAUDECODE=
+zakwas apply -y --only agents
+stdout 'Applied 2 of 2 steps'
+grep -count=1 '"Bash\(zakwas apply\)"' claude/settings.json
+grep -count=1 '"Bash\(zakwas \* self-update \*\)"' claude/settings.json
+grep -count=1 '"Edit\(~/\.local/state/zakwas/\*\*\)"' claude/settings.json
+grep -count=1 '^prefix_rule\(pattern=\["zakwas", "apply"\], decision="forbidden", justification="agents must not apply the zakwas config; ask the user to run it in a terminal"\)$' codex/rules/zakwas.rules
+grep -count=1 '"Bash\(rm:\*\)"' claude/settings.json
+
+zakwas check --only agents
+stdout '⚠ opencode can''t be protected'
+stdout 'No changes'
+
+cp zakwas-template.yaml zakwas.yaml
+zakwas plan --only agents
+! stdout '⚠'
+zakwas apply -y --only templates
+grep '"zakwas \* apply": "deny"' home/.config/opencode/opencode.json
+
+cp zakwas-off.yaml zakwas.yaml
+zakwas plan --only agents
+stdout 'permissions -14 deny'
+stdout '- .*/codex/rules/zakwas.rules'
+zakwas apply -y --only agents
+! exists codex/rules/zakwas.rules
+grep -count=1 '"Bash\(rm:\*\)"' claude/settings.json
+! grep 'zakwas' claude/settings.json
+env CLAUDECODE=1
+zakwas apply -y --only agents
+zakwas check --only agents
+
+-- zakwas.yaml --
+agents:
+  providers: [claude, codex, opencode]
+-- zakwas-template.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  providers: [claude, codex, opencode]
+-- zakwas-off.yaml --
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+-- opencode.json.tmpl --
+{"permission": {"bash": {{ agentPermissions "opencode" "ask" }}}}
+-- claude/settings.json --
+{"permissions": {"deny": ["Bash(rm:*)"]}}
