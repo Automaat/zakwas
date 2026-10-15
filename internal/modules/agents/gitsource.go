@@ -15,7 +15,8 @@ func gitCmd(args ...string) runner.Cmd {
 
 // gitClone clones src, a GitHub 'owner/repo' or URL with an optional '#ref',
 // shallowly into cacheDir/name. It clones next to the final dir and then
-// swaps it in, so a failed clone leaves the previous copy alone.
+// swaps it in without a gap, so a failed clone leaves the previous copy
+// alone and a concurrent plan never sees the dir missing.
 func gitClone(ctx context.Context, r runner.Runner, cacheDir, name, src string) error {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		return err
@@ -39,11 +40,7 @@ func gitClone(ctx context.Context, r runner.Runner, cacheDir, name, src string) 
 	if err := runner.Check(ctx, r, gitCmd(append(args, "--", url, tmp)...)); err != nil {
 		return err
 	}
-	dir := filepath.Join(cacheDir, name)
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dir)
+	return replaceDir(tmp, filepath.Join(cacheDir, name))
 }
 
 // gitPull moves a clone made by gitClone to the newest commit of its ref.
