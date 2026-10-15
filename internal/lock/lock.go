@@ -32,8 +32,9 @@ func Path(home string) string {
 
 // Holder identifies the run that owns the lock. Both fields are best effort.
 // A run that can't write the lock file records nothing, and the file may
-// still name an earlier run, so a run that can't write it either reports the
-// zero Holder instead of reading it.
+// still name an earlier run. A run that can't write it either reports the
+// zero Holder instead of reading it, and one that can reports it only while
+// the recorded pid is alive.
 type Holder struct {
 	PID     int
 	Command string
@@ -65,7 +66,12 @@ type UnavailableError struct {
 }
 
 func (e *UnavailableError) Error() string {
-	return "can't take the run lock " + e.Path + ": " + e.Err.Error()
+	reason := e.Err
+	var pe *fs.PathError
+	if errors.As(e.Err, &pe) {
+		reason = pe.Err
+	}
+	return "can't take the run lock " + e.Path + ": " + reason.Error()
 }
 
 func (e *UnavailableError) Unwrap() error { return e.Err }
@@ -180,6 +186,11 @@ func settledHolder(path string) Holder {
 	return h
 }
 
+func alive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
 func readHolder(path string) Holder {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -188,6 +199,9 @@ func readHolder(path string) Holder {
 	pid, command, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
 	n, err := strconv.Atoi(pid)
 	if err != nil {
+		return Holder{}
+	}
+	if !alive(n) {
 		return Holder{}
 	}
 	return Holder{PID: n, Command: strings.TrimSpace(command)}

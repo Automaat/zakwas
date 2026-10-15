@@ -426,10 +426,10 @@ func (t *mcpTools) apply(ctx context.Context, c *mcp.Call) (mcp.Result, error) {
 	if err := checkProposal(p, cfg, t.env); err != nil {
 		return mcp.Result{}, err
 	}
-	var errBuf, logBuf bytes.Buffer
-	held, ok := takeLock(ctx, t.env, "mcp apply", true, &console{w: &errBuf})
+	var errBuf, logBuf, lockBuf bytes.Buffer
+	held, ok := takeLock(ctx, t.env, "mcp apply", true, &console{w: &lockBuf})
 	if !ok {
-		return mcp.Result{}, errors.New(reasonText(errBuf.String()))
+		return mcp.Result{}, errors.New(reasonText(lockBuf.String()))
 	}
 	defer func() { _ = held.Release() }()
 

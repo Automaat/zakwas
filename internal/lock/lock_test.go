@@ -86,7 +86,12 @@ func TestWaitsUntilReleased(t *testing.T) {
 		done <- l
 	}()
 
-	h := <-waiting
+	var h Holder
+	select {
+	case h = <-waiting:
+	case <-done:
+		t.Fatal("acquired without waiting while the lock was held")
+	}
 	select {
 	case <-done:
 		t.Fatal("acquired while the lock was held")
@@ -305,5 +310,39 @@ func TestReleaseNilLock(t *testing.T) {
 	var l *Lock
 	if err := l.Release(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBlockedRunIgnoresAHolderThatIsGone(t *testing.T) {
+	skipIfRoot(t)
+	home := t.TempDir()
+	gone := exec.Command(os.Args[0], "-test.run=^$")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := acquire(t, home, Options{}).Release(); err != nil {
+		t.Fatal(err)
+	}
+	stale := fmt.Sprintf("%d\nzakwas apply\n", gone.Process.Pid)
+	if err := os.WriteFile(Path(home), []byte(stale), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(Path(home), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	readOnly := acquire(t, home, Options{})
+	defer func() { _ = readOnly.Release() }()
+	if err := os.Chmod(Path(home), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Acquire(context.Background(), home, "zakwas apply", Options{NoWait: true})
+
+	var busy *BusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("got %v, want *BusyError", err)
+	}
+	if busy.Holder != (Holder{}) {
+		t.Errorf("holder %+v, want none: its pid %d is gone", busy.Holder, gone.Process.Pid)
 	}
 }
