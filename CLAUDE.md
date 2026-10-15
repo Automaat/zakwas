@@ -12,6 +12,7 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `internal/engine/` | `Module` interface, plan/apply |
 | `internal/modules/<name>/` | one package per module |
 | `internal/proposal/` | typed config edits (byte-splicing), proposal store, risk tiers |
+| `.claude-plugin/`, `plugins/zakwas/` | the repo's agent marketplace and its `zakwas` plugin (skill teaching agents the proposal flow); `plugin.json` holds the plugin version |
 | `internal/install/` | protected-copy writer + hash state (`~/.local/state/zakwas/files.json`) |
 | `internal/lock/` | flock that serializes `apply`/`upgrade` (`~/.local/state/zakwas/lock`) |
 | `internal/runner/` | exec abstraction; `runnertest.Fake` for tests |
@@ -66,5 +67,6 @@ system → files → links → templates → brew → mise → agents → comman
 - Proposals (`propose`/`proposals`/`approve`): edits splice the original bytes of `zakwas.yaml`, the Brewfile and the mise config, never re-encode them. `propose` never touches the repo or system and saves under `~/.local/state/zakwas/proposals/`; `approve` recomputes diff, plan and tier from the saved operations (the stored ones are informational), refuses a changed base, an age over 7 days, a dirty edited file, a non-TTY stdin and an agent session (`GuardedCommands` includes `approve`), restores the files when apply fails, and commits only the edited files without pushing. Low tier is a closed list (`proposal.Classify`); a plan touching agent config, shell rc files, `~/.ssh`, `/etc` or failing to plan makes it high.
 - Release attestation runs in a separate `attest` job on the uploaded `dist` artifact; if it fails, re-run only that job. Don't make GoReleaser releases drafts while the cask is published: the cask would point at undownloadable assets.
 - The Homebrew installer is pinned to a commit (`installerCommit` in `internal/modules/brew/brew.go`); never fetch `HEAD`.
+- The plugin version (`plugins/zakwas/.claude-plugin/plugin.json`, nowhere else) must equal the release tag: bump it in a PR before tagging; `release.yml` fails a tag that differs. Change the skill together with the `zakwas mcp` tools and `propose` operations it names.
 - Nothing user-specific in code or `examples/`: no personal paths, taps, or keys.
 - `install.sh` passes `shellcheck`, workflows pass `actionlint` (both in CI).

@@ -98,7 +98,7 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 | `pin-mise TOOL VERSION` | the `[tools]` table of the mise config (`mise.config`) | |
 | `add-mcp NAME` | `agents.mcp` | `--command CMD` with `--arg A` and `--env-var NAME`, or `--url URL` with `--bearer-token-env NAME`; `--providers LIST` |
 
-`--providers`, `--arg` and `--env-var` take a comma list or repeat. A command that starts with a dash goes after `--`: `zakwas propose add-permission allow -- ls -la`. Also `-c PATH` and `-json`, which prints the proposal as JSON.
+`--providers`, `--arg` and `--env-var` take a comma list or repeat. Also `-c PATH` and `-json`, which prints the proposal as JSON. Flags go before `--`; any command word that starts with a dash goes after it: `zakwas propose -json add-permission allow -- ls -la`.
 
 Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared, a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
 
@@ -169,6 +169,20 @@ After a yes it does what [`approve`](#approve) does: the same checks, files writ
 **Always asked.** `zakwas_apply` carries `_meta["anthropic/requiresUserInteraction"]`, so Claude Code prompts on every call, even in bypass mode. For a server registered through `agents.mcp` as `zakwas mcp --enable-apply`, zakwas also writes `approval_mode = "prompt"` for the tool in Codex's `config.toml`. opencode has no place zakwas can edit for this: the plan names the `permission` entry to add to your `opencode.json` template. The form comes on top of those prompts.
 
 Only people should start this server with `--enable-apply`: the [guard](config.md#guard) denies the managed agents `zakwas mcp`, since an agent that ran it in a shell would be the client that answers the form.
+
+### Teach agents the flow
+
+The `zakwas` plugin in this repo's marketplace holds one skill. It tells an agent that zakwas manages agent config, `zakwas.yaml`, the Brewfile and the mise config, so it proposes changes (`zakwas_propose`, or `zakwas propose -json` without the MCP server) instead of editing them or running `apply`, and gives the user `zakwas approve ID` for a high-risk proposal. It works with or without the MCP server. Install it through `agents`:
+
+```yaml
+agents:
+  marketplaces:
+    zakwas: Automaat/zakwas
+  plugins:
+    - zakwas@zakwas
+```
+
+Claude Code and Codex install the plugin; opencode gets the skill linked. The plugin version is the zakwas release it was published with: the release workflow stops when `plugins/zakwas/.claude-plugin/plugin.json` differs from the tag. Pin the marketplace with `Automaat/zakwas#vX.Y.Z` to follow one release; the default branch can be ahead of the binary you run.
 
 ## init
 

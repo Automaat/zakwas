@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "zakwas",
+  "owner": {
+    "name": "Automaat",
+    "url": "https://github.com/Automaat"
+  },
+  "metadata": {
+    "description": "Agent plugins for zakwas, which converges a Mac to zakwas.yaml"
+  },
+  "plugins": [
+    {
+      "name": "zakwas",
+      "source": "./plugins/zakwas",
+      "description": "Teaches coding agents to change the machine setup through zakwas proposals instead of editing agent config or zakwas.yaml",
+      "category": "productivity"
+    }
+  ]
+}
