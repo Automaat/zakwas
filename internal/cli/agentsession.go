@@ -11,6 +11,7 @@ var agentMarkers = []struct{ env, agent string }{
 	{"CODEX_SANDBOX_NETWORK_DISABLED", "Codex"},
 	{"CODEX_THREAD_ID", "Codex"},
 	{"OPENCODE", "opencode"},
+	{"COPILOT_AGENT_SESSION_ID", "Copilot CLI"},
 	{"GEMINI_CLI", "Gemini CLI"},
 }
 
