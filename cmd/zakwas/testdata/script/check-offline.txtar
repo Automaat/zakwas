@@ -1,0 +1,64 @@
+chmod 755 bin/brew
+chmod 755 bin/mise
+chmod 755 bin/defaults
+
+! zakwas check --offline
+stdout '\+ ~/.zshrc'
+stdout 'offline: not checked: system, brew, mise, agents, commands, defaults'
+
+zakwas apply -y --only files,links
+
+zakwas check --offline
+stdout 'up to date: files, links'
+stdout 'offline: not checked: system, brew, mise'
+! exists tool-called
+
+chmod 644 home/.config/git/config
+exec sh -c 'echo "[core] editor = nano" >> home/.config/git/config'
+! zakwas check --offline
+stdout 'edited in place, back up to config.zakwas-bak'
+! exists tool-called
+
+! zakwas check --offline --json
+stdout '"offline": true'
+stdout '"skipped": \['
+! exists tool-called
+
+! zakwas plan --offline
+stderr '-offline only works with check'
+
+# control: the full check does start the tools
+! zakwas check
+exists tool-called
+
+-- zakwas.yaml --
+files:
+  - {src: dotfiles/gitconfig, dst: ~/.config/git/config}
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+brew: {file: Brewfile}
+mise: {config: dotfiles/mise.toml}
+commands:
+  - {name: once, check: "test -e home/commands-ran", run: "touch home/commands-ran"}
+defaults:
+  - {domain: com.apple.dock, key: autohide, value: true}
+-- Brewfile --
+-- dotfiles/mise.toml --
+[tools]
+-- dotfiles/gitconfig --
+[user]
+	name = Test
+-- dotfiles/zshrc --
+export EDITOR=vim
+-- bin/brew --
+#!/bin/sh
+touch "$WORK/tool-called"
+exit 1
+-- bin/mise --
+#!/bin/sh
+touch "$WORK/tool-called"
+exit 1
+-- bin/defaults --
+#!/bin/sh
+touch "$WORK/tool-called"
+exit 1

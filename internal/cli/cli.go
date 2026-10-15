@@ -38,7 +38,7 @@ var commandList = []struct{ name, args, help string }{
 	{"plan", "", "show pending changes"},
 	{"apply", "", "show pending changes, confirm, apply them"},
 	{"upgrade", "", "refresh Homebrew and agent marketplaces, then apply (picks up new versions)"},
-	{"check", "", "exit 2 when anything drifted (for CI/cron)"},
+	{"check", "[--offline]", "exit 2 when anything drifted (for CI/cron, agent hooks)"},
 	{"propose", "OPERATION [ARGS]...", "save a config change as a proposal, without editing anything"},
 	{"proposals", "", "list pending proposals"},
 	{"approve", "ID", "show a proposal's diff and plan, confirm, apply it and commit it"},
@@ -163,6 +163,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		errOut.print("zakwas: " + msg + "\n")
 		return ExitUsage
 	}
+	if o.offline {
+		env.Runner = offlineRunner{}
+	}
 
 	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
 	if err != nil {
@@ -185,6 +188,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		o.only = strings.Join(doc.Only, ",")
 	}
 	mods, err := selectModules(Modules(cfg, env), o.only)
+	if err == nil && o.offline {
+		mods, err = offlineModules(mods, o.only != "")
+	}
 	if err != nil {
 		errOut.fail(err)
 		return ExitUsage
@@ -216,7 +222,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 	machine := o.asJSON || o.outFile != "" || saved != nil
 	var commit string
-	if machine {
+	if machine && !o.offline {
 		commit, _ = git(ctx, env.Runner, cfg.Root, "rev-parse", "HEAD")
 	}
 	full := newPlanDoc(env, cfg.Path, commit, onlyList, plan, true)
@@ -233,6 +239,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		}
 	}
 	doc := newPlanDoc(env, cfg.Path, commit, onlyList, plan, o.diff)
+	if o.offline {
+		doc.Offline, doc.Skipped = true, offlineSkipped
+	}
 	switch {
 	case o.asJSON && cmd == "plan", o.asJSON && cmd == "check":
 		out.print(mustIndent(doc))
@@ -241,6 +250,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	default:
 		if err := engine.Render(out, plan, style); err != nil {
 			return ExitErr
+		}
+		if o.offline {
+			out.print(offlineNote(style))
 		}
 	}
 
@@ -384,7 +396,7 @@ func refresh(ctx context.Context, env Env, cfg *config.Config, mods []engine.Mod
 type options struct {
 	cfgPath, only, outFile, planFile string
 	yes, diff, noColor, asJSON       bool
-	noWait                           bool
+	noWait, offline                  bool
 }
 
 // newFlags defines the flags of plan, apply, upgrade and check.
@@ -403,6 +415,7 @@ func newFlags(errOut io.Writer) (*flag.FlagSet, *options) {
 	fs.BoolVar(&o.noColor, "no-color", false, "disable colors (also NO_COLOR)")
 	fs.BoolVar(&o.asJSON, "json", false, "machine-readable output: a plan document, or JSON lines events for apply")
 	fs.BoolVar(&o.noWait, "no-wait", false, "apply: exit 1 at once when another zakwas run holds the lock, instead of waiting for it")
+	fs.BoolVar(&o.offline, "offline", false, "check: only compare the files zakwas owns with its recorded state, starting no command (fast; skips "+strings.Join(offlineSkipped, ", ")+")")
 	fs.StringVar(&o.outFile, "out", "", "plan: also save the plan to this file, for apply -plan")
 	fs.StringVar(&o.planFile, "plan", "", "apply: apply this saved plan if the machine still matches it, without prompting")
 	return fs, &o
@@ -416,6 +429,8 @@ func flagConflict(cmd string, o *options) string {
 	switch {
 	case o.noWait && !apply:
 		return "-no-wait only works with apply and upgrade"
+	case o.offline && cmd != "check":
+		return "-offline only works with check"
 	case outFile != "" && cmd != "plan":
 		return "-out only works with plan"
 	case planFile != "" && cmd != "apply":

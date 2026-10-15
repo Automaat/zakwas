@@ -20,6 +20,8 @@ type planDoc struct {
 	Config        string              `json:"config"`
 	Commit        string              `json:"commit,omitempty"`
 	Only          []string            `json:"only,omitempty"`
+	Offline       bool                `json:"offline,omitempty"`
+	Skipped       []string            `json:"skipped,omitempty"`
 	Modules       []engine.JSONModule `json:"modules"`
 	Summary       engine.JSONSummary  `json:"summary"`
 }

@@ -61,6 +61,7 @@ zakwas plan            # what would change (--diff shows file contents)
 zakwas apply           # show plan, confirm, apply (-y skips the prompt)
 zakwas upgrade         # brew update + refresh agent marketplaces, then apply
 zakwas check           # exit 2 when the machine drifted (cron/launchd friendly)
+zakwas check --offline # same for the files zakwas owns only, in ~30 ms, no commands (agent session start)
 zakwas plan --only brew,defaults
 zakwas propose add-plugin foo@market   # save a config edit without applying it
 zakwas proposals                       # pending proposals

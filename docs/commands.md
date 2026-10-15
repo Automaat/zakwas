@@ -33,6 +33,7 @@ These four read `zakwas.yaml` and share one set of flags.
 | `--diff` | all four | show file content diffs and command scripts |
 | `--json` | all four | machine-readable output: one plan document (`plan`, `check`) or JSON lines events (`apply`, `upgrade`) |
 | `--no-color` | all four | disable colors (also `NO_COLOR`, or stdout not a terminal) |
+| `--offline` | `check` | compare only the files zakwas owns with its recorded state, start no command; see [`check`](#check) |
 | `-y` | `apply`, `upgrade` | apply without asking for confirmation |
 | `--no-wait` | `apply`, `upgrade` | exit 1 at once when another zakwas run holds the lock, instead of waiting for it |
 | `-out FILE` | `plan` | also save the plan to FILE, for `apply -plan` |
@@ -74,6 +75,34 @@ Like `plan`, but exits 2 when anything would change. For CI, cron or launchd.
 zakwas check || notify "machine drifted"
 zakwas check --json
 ```
+
+`--offline` is a fast variant that starts no command: it runs only the `files`, `links` and `templates` modules, which compare the files zakwas owns with the content, links and hashes it recorded in `~/.local/state/zakwas/files.json`. It takes about 30 ms on a config with 55 managed files, so it fits in an agent's session start. The exit codes are those of `check` (0 clean, 2 drift, 1 error) and the output ends with the modules it did not check: `system`, `brew`, `mise`, `agents`, `commands` and `defaults`. Drift in those, such as a missing brew package or an agent plugin, shows only in a full `check`. With `--json` the plan document carries `"offline": true` and the skipped modules in `skipped`, and has no `commit`. `--only` accepts only `files`, `links` and `templates` with `--offline`.
+
+#### Report drift when an agent session starts
+
+A `sessionStart` hook can tell the agent that its setup is stale before the first prompt. Claude Code and Codex add a `SessionStart` hook's stdout to the session context when it exits 0; OpenCode ignores the output of session hooks, so this recipe does not reach it. A nonzero exit counts as a hook failure and `check` exits 2 on drift, so a small script turns that exit into text and always exits 0:
+
+```sh
+#!/bin/sh
+out=$(zakwas check --offline 2>/dev/null)
+if [ $? -eq 2 ]; then
+  printf 'zakwas: this Mac drifted from its config. Pending changes:\n%s\n' "$out"
+fi
+exit 0
+```
+
+Keep it in the config repo, executable, and let zakwas install it and register the hook:
+
+```yaml
+files:
+  - {src: scripts/zakwas-drift, dst: ~/.local/bin/zakwas-drift}
+agents:
+  hooks:
+    commands:
+      - {event: sessionStart, command: $HOME/.local/bin/zakwas-drift, providers: [claude, codex]}
+```
+
+Nothing is printed when the machine matches the config, when zakwas isn't on `PATH` or when the check fails, so a healthy session starts with no extra context. The hook runs `check`, never `apply`: [`agents.guard`](config.md#guard) keeps agents from applying the config. Install `zakwas` where the agent's shell finds it (`~/.local/bin` by default).
 
 ## propose, proposals, approve
 
