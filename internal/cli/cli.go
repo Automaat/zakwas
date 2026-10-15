@@ -332,13 +332,15 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 // acquireLock serializes the commands that change the system: a second one
 // waits for the first, so it plans against what the first left behind. plan
 // and check take no lock; state files are replaced atomically, so they never
-// read a half-written one.
+// read a half-written one. The commands the run starts are marked as running
+// under it whether or not the lock could be taken, so a nested zakwas apply is
+// refused even in a state dir the lock can't live in.
 func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, int, bool) {
 	held, ok := takeLock(ctx, env, cmd, noWait, errOut)
 	if !ok {
 		return nil, ExitErr, false
 	}
-	if ex, ok := env.Runner.(*runner.Exec); ok && held != nil {
+	if ex, ok := env.Runner.(*runner.Exec); ok {
 		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
 	}
 	return held, ExitOK, true
