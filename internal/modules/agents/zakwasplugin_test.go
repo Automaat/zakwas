@@ -97,6 +97,11 @@ func TestZakwasSkillTeachesTheProposalFlow(t *testing.T) {
 			t.Errorf("the Never section does not name the guarded command %q", cmd)
 		}
 	}
+	for _, provider := range config.Providers {
+		if !strings.Contains(body, "`"+provider+"`") {
+			t.Errorf("SKILL.md does not name the provider %q", provider)
+		}
+	}
 	for _, personal := range []string{"/Users/", "/home/"} {
 		if strings.Contains(skill, personal) {
 			t.Errorf("SKILL.md holds a personal path (%s)", personal)
