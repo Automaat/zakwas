@@ -158,8 +158,6 @@ case "$*" in
   "plugin marketplace remove old")
     touch "$st/old-gone"
     echo 'Marketplace "old" removed successfully.' ;;
-  "plugin marketplace browse sai --json")
-    echo '[{"name":"humanize","marketplace":"sai"}]' ;;
   "plugin marketplace update sai"|"plugin update humanize@sai")
     echo ok ;;
   *) echo "unexpected copilot $*" >&2; exit 99 ;;

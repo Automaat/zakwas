@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/runner"
 )
@@ -107,25 +106,6 @@ func (c *copilot) state(ctx context.Context) (copilotState, error) {
 	return st, nil
 }
 
-// available names the plugins a marketplace offers.
-func (c *copilot) available(ctx context.Context, marketplace string) (map[string]bool, error) {
-	out, err := runner.Output(ctx, c.runner, c.cmd("plugin", "marketplace", "browse", marketplace, "--json"))
-	if err != nil {
-		return nil, err
-	}
-	var list []struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal([]byte(out), &list); err != nil {
-		return nil, fmt.Errorf("copilot plugin marketplace browse %s: %w", marketplace, err)
-	}
-	names := map[string]bool{}
-	for _, p := range list {
-		names[p.Name] = true
-	}
-	return names, nil
-}
-
 // refs reads the ref each marketplace was added with from Copilot's
 // settings.json, which the list omits. A missing or unreadable file
 // reads as no refs.
@@ -197,25 +177,9 @@ func (c *copilot) plan(ctx context.Context, d desired) ([]engine.Change, error) 
 	for _, p := range st.installed {
 		installed[p.id()] = p
 	}
-	offered := map[string]map[string]bool{}
 	for _, id := range d.plugins {
-		name, mk, _ := config.SplitPluginID(id)
 		inst, ok := installed[id]
 		if !ok {
-			if _, added := st.marketplaces[mk]; added {
-				if offered[mk] == nil {
-					list, err := c.available(ctx, mk)
-					if err != nil {
-						errs = append(errs, err)
-						continue
-					}
-					offered[mk] = list
-				}
-				if !offered[mk][name] {
-					errs = append(errs, fmt.Errorf("copilot: plugin %q is not in marketplace %q", name, mk))
-					continue
-				}
-			}
 			changes = append(changes, engine.Change{
 				Action: engine.Create, Target: "copilot plugin " + id,
 				Apply: func(ctx context.Context) error { return c.mutate(ctx, "install", id) },

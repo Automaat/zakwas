@@ -40,7 +40,7 @@ func assertCopilotCalls(t *testing.T, m *Module, fake *runnertest.Fake) {
 func assertCopilotReadOnly(t *testing.T, fake *runnertest.Fake) {
 	t.Helper()
 	for _, l := range fake.Lines() {
-		if l != copilotMarketList && l != copilotPluginList && !strings.HasPrefix(l, "copilot plugin marketplace browse ") {
+		if l != copilotMarketList && l != copilotPluginList {
 			t.Errorf("plan ran %q", l)
 		}
 	}
@@ -143,25 +143,24 @@ func TestCopilotIsOptIn(t *testing.T) {
 	}
 }
 
-func TestCopilotEnablesAndRejects(t *testing.T) {
+func TestCopilotEnablesAndNeverBrowsesInPlan(t *testing.T) {
 	m, fake := newCopilotModule(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
 		Plugins:      []config.Plugin{{ID: "a@sai"}, {ID: "b@sai"}},
 	})
 	fake.OnOK(copilotMarketList, `[{"name":"sai","source":"GitHub: o/sai","isDefault":false}]`)
 	fake.OnOK(copilotPluginList, `[{"name":"a","marketplace":"sai","enabled":false,"source":"installed"}]`)
-	fake.OnOK("copilot plugin marketplace browse sai --json", `[{"name":"a","marketplace":"sai"}]`)
-	_, err := m.Plan(t.Context())
-	if err == nil || !strings.Contains(err.Error(), `plugin "b" is not in marketplace "sai"`) {
-		t.Fatalf("err = %v", err)
-	}
-
-	m.Agents.Plugins = m.Agents.Plugins[:1]
 	changes := plan(t, m)
-	if got, want := targets(changes), []string{"~ copilot plugin a@sai (enable)"}; !slices.Equal(got, want) {
+	if got, want := targets(changes), []string{"~ copilot plugin a@sai (enable)", "+ copilot plugin b@sai"}; !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
+	assertCopilotReadOnly(t, fake)
 	fake.OnOK("copilot plugin enable a@sai", `Enabled plugin "a@sai".`)
+	fake.On("copilot plugin install b@sai", runner.Result{ExitCode: 1, Stderr: `Failed to install plugin: Plugin "b" not found in marketplace "sai"`})
+	if err := runApply(changes); err == nil || !strings.Contains(err.Error(), `Plugin "b" not found in marketplace "sai"`) {
+		t.Fatalf("apply err = %v", err)
+	}
+	changes = changes[:1]
 	apply(t, changes)
 }
 
@@ -427,6 +426,16 @@ func TestCopilotMCPRefusesADifferingServer(t *testing.T) {
 	writeFile(t, filepath.Join(m.CopilotHome, "mcp-config.json"), `{"mcpServers":{"docs":{"tools":["*"],"type":"local","command":"other"}}}`)
 	_, err := planErr(t, m)
 	if err == nil || !strings.Contains(err.Error(), `server "docs" is already in`) || !strings.Contains(err.Error(), "copilot mcp remove docs") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestCopilotMCPKeepsANullEntryAsAnError(t *testing.T) {
+	m := mcpModule(t, []string{config.ProviderCopilot}, map[string]config.MCPServer{"docs": stdioServer("docs-mcp")})
+	m.CopilotHome = filepath.Join(m.Paths.Home, "copilot")
+	writeFile(t, filepath.Join(m.CopilotHome, "mcp-config.json"), `{"mcpServers":{"x":null,"y":{"command":"y"}}}`)
+	_, err := planErr(t, m)
+	if err == nil || !strings.Contains(err.Error(), "server entry is null") {
 		t.Fatalf("err = %v", err)
 	}
 }
