@@ -410,9 +410,13 @@ func TestCaptureKeepsCredentialsOutOfTheFindings(t *testing.T) {
 	if c := find(t, got, KindMCP, "fine"); c.Server == nil {
 		t.Errorf("an ordinary argument was refused: %q", c.Skip)
 	}
-	for _, c := range got {
-		if strings.Contains(c.Source, "SECRET") && c.Skip == "" {
-			t.Errorf("a secret reached a finding: %+v", c)
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"SECRET123", "token=ABC", "ARGSECRET"} {
+		if strings.Contains(string(data), secret) {
+			t.Errorf("%s reached the output: %s", secret, data)
 		}
 	}
 }

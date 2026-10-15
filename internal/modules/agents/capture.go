@@ -148,7 +148,7 @@ func (m *Module) marketplaceCandidate(provider, name, source string) Candidate {
 	c := Candidate{Provider: provider, Kind: KindMarketplace, Name: name, Source: source}
 	switch _, named := m.Agents.Marketplaces[name]; {
 	case secretSource(source) != "":
-		c.Skip = secretSource(source)
+		c.Skip, c.Source = secretSource(source), ""
 	case named:
 		c.Skip = "declared in zakwas.yaml for other providers only; add this provider to its providers by hand"
 	case source == "":
