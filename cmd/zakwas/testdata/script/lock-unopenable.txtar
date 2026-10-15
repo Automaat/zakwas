@@ -1,0 +1,28 @@
+[root] skip 'root ignores file modes'
+
+exec sh -c 'zakwas apply -y 2>first.err' &first&
+exec sh -c 'until [ -e home/started ] || [ -s first.err ]; do sleep 0.1; done'
+chmod 0000 home/.local/state/zakwas/lock
+
+! zakwas apply -y
+stderr 'zakwas: can.t open the run lock .*/zakwas/lock: permission denied'
+stderr 'remove it or chmod it'
+! stdout .
+
+exec touch home/release
+wait first
+exec cat home/log
+cmp stdout expected-log
+chmod 0644 home/.local/state/zakwas/lock
+
+-- zakwas.yaml --
+commands:
+  - name: slow
+    check: test -e done
+    run: |
+      touch started
+      until [ -e release ]; do sleep 0.1; done
+      echo ran >> log
+      touch done
+-- expected-log --
+ran

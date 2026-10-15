@@ -255,7 +255,7 @@ func TestUnavailable(t *testing.T) {
 		{"state dir can't be created", func(t *testing.T, home string) {
 			mkdir(t, home, 0o555)
 		}},
-		{"lock file allows no access", func(t *testing.T, home string) {
+		{"state dir is read-only and holds an unopenable lock file", func(t *testing.T, home string) {
 			mkdir(t, filepath.Dir(Path(home)), 0o755)
 			if err := os.WriteFile(Path(home), nil, 0o600); err != nil {
 				t.Fatal(err)
@@ -263,6 +263,7 @@ func TestUnavailable(t *testing.T) {
 			if err := os.Chmod(Path(home), 0); err != nil {
 				t.Fatal(err)
 			}
+			mkdir(t, filepath.Dir(Path(home)), 0o555)
 		}},
 	}
 	for _, tt := range tests {
@@ -344,5 +345,38 @@ func TestBlockedRunIgnoresAHolderThatIsGone(t *testing.T) {
 	}
 	if busy.Holder != (Holder{}) {
 		t.Errorf("holder %+v, want none: its pid %d is gone", busy.Holder, gone.Process.Pid)
+	}
+}
+
+func TestUnopenableLockFileFailsInAWritableDir(t *testing.T) {
+	skipIfRoot(t)
+	home := t.TempDir()
+	if err := acquire(t, home, Options{}).Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(Path(home), 0); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := Acquire(context.Background(), home, "zakwas apply", Options{})
+
+	if l != nil {
+		t.Fatal("got a lock, want none")
+	}
+	var fileErr *FileError
+	if !errors.As(err, &fileErr) {
+		t.Fatalf("got %v, want *FileError", err)
+	}
+	var unavailable *UnavailableError
+	if errors.As(err, &unavailable) {
+		t.Errorf("%v must not be the warn-and-continue error", err)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("%v does not wrap the permission error", err)
+	}
+	for _, want := range []string{Path(home), "permission denied", "another user", "remove it or chmod it"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
 	}
 }

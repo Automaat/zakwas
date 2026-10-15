@@ -16,6 +16,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // The holder writes its identity right after locking, so a blocked run waits
@@ -57,9 +59,9 @@ func (e *BusyError) Error() string {
 	return "another run is in progress: " + e.Holder.String() + "; not waiting (--no-wait)"
 }
 
-// UnavailableError reports that the lock file can't be created or opened
-// because the state dir or the file denies access. Err is the original
-// error, not the one from the read-only retry.
+// UnavailableError reports that the lock file can't be created because the
+// state dir can't be written or created, so there is no shared state to
+// protect. Err is the original error, not the one from the read-only retry.
 type UnavailableError struct {
 	Path string
 	Err  error
@@ -75,6 +77,31 @@ func (e *UnavailableError) Error() string {
 }
 
 func (e *UnavailableError) Unwrap() error { return e.Err }
+
+// FileError reports that the lock file exists in a state dir that can be
+// written, but this user can't open it, typically because another user
+// (root, from sudo zakwas apply) created it. Running anyway would let two
+// runs execute at once, so it fails the run.
+type FileError struct {
+	Path string
+	Err  error
+}
+
+func (e *FileError) Error() string {
+	reason := e.Err
+	var pe *fs.PathError
+	if errors.As(e.Err, &pe) {
+		reason = pe.Err
+	}
+	return "can't open the run lock " + e.Path + ": " + reason.Error() +
+		"; it was probably created by another user, such as root from sudo zakwas apply: remove it or chmod it so this user can read it"
+}
+
+func (e *FileError) Unwrap() error { return e.Err }
+
+func dirWritable(dir string) bool {
+	return unix.Access(dir, unix.W_OK) == nil
+}
 
 func denied(err error) bool {
 	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS)
@@ -112,6 +139,9 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 		writable = false
 		var roErr error
 		if f, roErr = os.Open(path); roErr != nil {
+			if dirWritable(filepath.Dir(path)) {
+				return nil, &FileError{Path: path, Err: err}
+			}
 			return nil, &UnavailableError{Path: path, Err: err}
 		}
 	} else if err != nil {
