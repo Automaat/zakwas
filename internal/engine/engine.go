@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -156,19 +157,26 @@ func (p Plan) Err() error {
 	return errors.Join(errs...)
 }
 
-// Build plans every module. A module that fails to plan is recorded and the
-// rest still plan, so one broken module (a brew network error, mise not yet
-// installed) doesn't block converging everything else.
+// Build plans every module concurrently: planning only reads state, and
+// the slowest module (brew, agents) otherwise adds to every other one. The
+// plan keeps module order, so output matches sequential planning. A module
+// that fails to plan is recorded and the rest still plan, so one broken
+// module (a brew network error, mise not yet installed) doesn't block
+// converging everything else.
 func Build(ctx context.Context, modules []Module) Plan {
-	plan := make(Plan, 0, len(modules))
-	for _, m := range modules {
-		changes, err := m.Plan(ctx)
-		mp := ModulePlan{Module: m.Name(), Changes: changes, Err: err}
-		if w, ok := m.(Warner); ok {
-			mp.Warnings = w.Warnings(ctx)
-		}
-		plan = append(plan, mp)
+	plan := make(Plan, len(modules))
+	var wg sync.WaitGroup
+	for i, m := range modules {
+		wg.Go(func() {
+			changes, err := m.Plan(ctx)
+			mp := ModulePlan{Module: m.Name(), Changes: changes, Err: err}
+			if w, ok := m.(Warner); ok {
+				mp.Warnings = w.Warnings(ctx)
+			}
+			plan[i] = mp
+		})
 	}
+	wg.Wait()
 	return plan
 }
 

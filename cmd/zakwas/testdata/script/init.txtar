@@ -25,11 +25,16 @@ cmp home/.config/mise/config.toml home-mise.golden
 
 ! zakwas init repo
 stderr 'not empty'
+cmpenv $WORK/calls $WORK/init-calls.golden
+rm $WORK/calls
 
 cd repo
 zakwas plan
 cmpenv stdout $WORK/plan.golden
-cmpenv $WORK/calls $WORK/calls.golden
+
+# Modules plan concurrently, so their queries arrive in any order.
+exec sh -c 'LC_ALL=C sort "$WORK/calls" > "$WORK/calls.sorted"'
+cmpenv $WORK/calls.sorted $WORK/calls.golden
 
 -- home/.zshrc --
 export EDITOR=vim
@@ -75,10 +80,11 @@ files
 ✓ up to date: system, links, templates, brew, mise, commands, defaults
 
 Plan: 0 to add, 4 to change, 0 to remove, 0 to run.
--- calls.golden --
+-- init-calls.golden --
 mise ls --global --current --json (in /)
 mise use --global --pin --quiet jq@1.7.1 (in /)
 brew bundle dump --tap --formula --cask --mas --file $WORK/repo/Brewfile (auto-update off: 1)
+-- calls.golden --
 brew bundle check --file $WORK/repo/Brewfile --verbose --no-upgrade (auto-update off: 1)
 mise ls --global --missing --json (in /)
 -- bin/brew --

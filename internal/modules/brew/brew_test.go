@@ -7,7 +7,9 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
@@ -236,6 +238,71 @@ func TestCleanupFailureWithoutListIsAnError(t *testing.T) {
 	_, err := m.Plan(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "No Brewfile found") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// barrierRunner holds every query until all of them are in flight, so a
+// plan that queried one at a time would never get past the first.
+type barrierRunner struct {
+	*runnertest.Fake
+	wg      *sync.WaitGroup
+	release chan struct{}
+}
+
+func (b barrierRunner) Run(ctx context.Context, c runner.Cmd) (runner.Result, error) {
+	b.wg.Done()
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return runner.Result{}, ctx.Err()
+	}
+	return b.Fake.Run(ctx, c)
+}
+
+func TestPlanRunsBrewQueriesTogether(t *testing.T) {
+	m, fake, file := newModule(t, config.Brew{Cleanup: config.CleanupZap, Upgrade: true})
+	fake.OnOK("brew trust --json=v1", `{"taps":["automaat/tap"]}`)
+	fake.On("brew bundle check --file "+file+" --verbose --no-upgrade", runner.Result{ExitCode: 1, Stdout: "→ Formula jq needs to be installed.\n"})
+	fake.OnOK("brew outdated --json=v2", `{"formulae":[{"name":"cache-buster"}],"casks":[]}`)
+	fake.On("brew bundle cleanup --file "+file, runner.Result{ExitCode: 1, Stdout: cleanupOut})
+	fake.OnOK("brew bundle install --file "+file, "")
+
+	var started sync.WaitGroup
+	started.Add(4)
+	release := make(chan struct{})
+	m.Runner = barrierRunner{Fake: fake, wg: &started, release: release}
+	go func() {
+		started.Wait()
+		close(release)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	changes, err := m.Plan(ctx)
+	if err != nil {
+		t.Fatalf("queries did not run together: %v", err)
+	}
+	want := []string{
+		"+ formula jq", "~ brew cache-buster", "! brew bundle install",
+		"- cask zoom", "- brew wget", "- tap old/tap", "! brew bundle cleanup",
+	}
+	if got := targets(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %v\nwant %v", got, want)
+	}
+}
+
+func TestPlanReportsTheFirstFailingQueryInOrder(t *testing.T) {
+	m, fake, file := newModule(t, config.Brew{Cleanup: config.CleanupZap, Upgrade: true})
+	fake.OnOK("brew trust --json=v1", `{"taps":["automaat/tap"]}`)
+	fake.On("brew bundle check --file "+file+" --verbose --no-upgrade", runner.Result{ExitCode: 1, Stderr: "Error: check failed"})
+	fake.On("brew outdated --json=v2", runner.Result{Stdout: "not json"})
+	fake.On("brew bundle cleanup --file "+file, runner.Result{ExitCode: 1, Stderr: "Error: cleanup failed"})
+
+	for range 20 {
+		_, err := m.Plan(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "check failed") || strings.Contains(err.Error(), "cleanup failed") {
+			t.Fatalf("err = %v, want only the first failing query's error", err)
+		}
 	}
 }
 

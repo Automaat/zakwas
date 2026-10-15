@@ -23,7 +23,12 @@ grep '^skin: nord-light$' home/.config/k9s/config.yaml
 
 grep 'pam_tid.so' sudo_local
 
-cmpenv calls calls.golden
+# Modules plan concurrently, so the four plan queries arrive in any order;
+# apply steps stay in module order.
+exec sh -c 'head -n 4 calls | LC_ALL=C sort > plan-calls'
+exec sh -c 'tail -n +5 calls > apply-calls'
+cmpenv plan-calls plan-calls.golden
+cmpenv apply-calls apply-calls.golden
 
 zakwas check
 stdout 'up to date: .*\blinks\b'
@@ -92,11 +97,12 @@ defaults
 ✓ up to date: commands
 
 Plan: 4 to add, 3 to change, 0 to remove, 3 to run.
--- calls.golden --
+-- plan-calls.golden --
 brew bundle check --file $WORK/Brewfile --verbose --no-upgrade
 brew bundle cleanup --file $WORK/Brewfile
-mise ls --global --missing --json
 defaults read-type com.apple.dock autohide
+mise ls --global --missing --json
+-- apply-calls.golden --
 sudo tee -a $WORK/sudo_local
 brew bundle install --file $WORK/Brewfile --no-upgrade
 mise install --yes
