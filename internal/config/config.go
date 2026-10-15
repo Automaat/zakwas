@@ -317,19 +317,33 @@ func (c *Config) Destinations(paths Paths) []Destination {
 
 // PathsOverlap reports whether two absolute paths are the same file, or one
 // is inside the other, ignoring case. Symlinks in the directories that
-// exist are followed, so two spellings of one file overlap; the last
-// element is compared as written, and the part of a path that does not
-// exist yet is compared lexically.
+// exist are followed, so two spellings of one file overlap, and so is a
+// last element that is a symlink to a directory, which a write goes
+// through. A last element that is a symlink to anything else is compared
+// as written, since a write replaces the link, and the part of a path that
+// does not exist yet is compared lexically.
 func PathsOverlap(a, b string) bool {
 	return KeysOverlap(PathKey(a), PathKey(b))
 }
 
 // PathKey is the form of an absolute path PathsOverlap compares, for a
 // caller that checks one path against many and resolves each only once.
-func PathKey(path string) string { return foldPath(resolveParents(path)) }
+func PathKey(path string) string { return foldPath(resolvePath(path)) }
 
 // KeysOverlap is PathsOverlap on two PathKey results.
 func KeysOverlap(a, b string) bool { return overlaps(a, b) }
+
+func resolvePath(path string) string {
+	resolved := resolveParents(path)
+	if info, err := os.Lstat(resolved); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		if target, err := os.Stat(resolved); err == nil && target.IsDir() {
+			if full, err := filepath.EvalSymlinks(resolved); err == nil {
+				return full
+			}
+		}
+	}
+	return resolved
+}
 
 func resolveParents(path string) string {
 	path = filepath.Clean(path)

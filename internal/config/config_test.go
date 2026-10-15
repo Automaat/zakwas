@@ -244,6 +244,7 @@ defaults:
 		{"null profile name below 17 merge keys", "agents: {profiles: " + strings.Repeat("{<<: ", 17) + "{null: {description: d}}" + strings.Repeat("}", 17) + "}", []string{"line 1:", "a profile cannot be named null"}},
 		{"null profile name below 100 merge keys in agents", "agents: " + strings.Repeat("{<<: ", 100) + "{profiles: {null: {description: d}}}" + strings.Repeat("}", 100), []string{"line 1:", "a profile cannot be named null"}},
 		{"null profile name below 40 merge sequences", "agents: {profiles: " + strings.Repeat("{<<: [", 40) + "{null: {description: d}}" + strings.Repeat("]}", 40) + "}", []string{"line 1:", "a profile cannot be named null"}},
+		{"profile named by an alias to a merge key", "agents:\n  mcp: {&m <<: {a: {command: x}}}\n  profiles:\n    *m : {description: d}", []string{"agents.profiles.<<: name may only contain"}},
 		{"profile named by an empty key", "agents:\n  profiles:\n    ? \n    : {description: d}", []string{"line 3:", "a profile cannot be named null"}},
 		{"profile name too long", "agents: {profiles: {" + strings.Repeat("a", MaxProfileName+1) + ": {description: d}}}", []string{"name is 65 characters long; at most 64 are allowed"}},
 		{"profile tool", "agents: {profiles: {r: {description: d, tools: [read, fly]}}}", []string{`agents.profiles.r: tools[1]: unknown tool "fly"`}},
@@ -752,7 +753,16 @@ func TestPathsOverlapFollowsSymlinkedDirs(t *testing.T) {
 	alias := filepath.Join(root, "alias")
 	chain := filepath.Join(root, "chain")
 	leaf := filepath.Join(real, "leaf")
-	for _, l := range [][2]string{{real, alias}, {alias, chain}, {other, leaf}} {
+	leafChain := filepath.Join(root, "leaf-chain")
+	file := filepath.Join(other, "file")
+	fileLink := filepath.Join(root, "file-link")
+	loopA := filepath.Join(root, "loop-a")
+	loopB := filepath.Join(root, "loop-b")
+	dangling := filepath.Join(root, "dangling")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range [][2]string{{real, alias}, {alias, chain}, {other, leaf}, {leaf, leafChain}, {file, fileLink}, {loopB, loopA}, {loopA, loopB}, {filepath.Join(root, "gone"), dangling}} {
 		if err := os.Symlink(l[0], l[1]); err != nil {
 			t.Fatal(err)
 		}
@@ -770,7 +780,16 @@ func TestPathsOverlapFollowsSymlinkedDirs(t *testing.T) {
 		{"differing case through a symlinked dir", filepath.Join(real, "sub", "F"), filepath.Join(alias, "SUB", "f"), true},
 		{"siblings through a symlinked dir", filepath.Join(real, "sub", "a"), filepath.Join(alias, "sub", "b"), false},
 		{"different directories", filepath.Join(real, "sub", "f"), filepath.Join(other, "f"), false},
-		{"symlinked last element is compared as written", leaf, filepath.Join(other, "x"), false},
+		{"last element symlinked to a directory", leaf, filepath.Join(other, "x"), true},
+		{"last element symlinked to a directory, same spelling", leaf, leaf, true},
+		{"file inside a last element symlinked to a directory", filepath.Join(leaf, "x"), filepath.Join(other, "x"), true},
+		{"last element symlinked to a directory through a chain", leafChain, filepath.Join(other, "x"), true},
+		{"last element symlinked to a directory, other sibling", leaf, filepath.Join(real, "sub", "x"), false},
+		{"last element symlinked to a file stays as written", fileLink, file, false},
+		{"last element symlinked to a file, same spelling", fileLink, fileLink, true},
+		{"last element in a symlink loop stays as written", loopA, filepath.Join(root, "x"), false},
+		{"last element in a symlink loop, same spelling", loopA, loopA, true},
+		{"dangling last element stays as written", dangling, filepath.Join(root, "gone"), false},
 		{"missing paths stay lexical", filepath.Join(root, "gone", "f"), filepath.Join(root, "gone", "f"), true},
 		{"missing sibling paths", filepath.Join(root, "gone", "a"), filepath.Join(root, "gone", "b"), false},
 		{"unrelated missing roots", "/zakwas-missing/a/f", "/zakwas-missing/b/f", false},

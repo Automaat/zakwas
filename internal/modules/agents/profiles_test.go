@@ -542,6 +542,76 @@ func TestAgentFilesRejectDestinationsThroughSymlinkedDirs(t *testing.T) {
 	}
 }
 
+func TestAgentFilesRejectDestinationsThatAreSymlinksToDirs(t *testing.T) {
+	tests := []struct {
+		name   string
+		agents config.Agents
+		target string
+		file   bool
+		want   string
+	}{
+		{
+			name:   "link to the profile directory",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			target: filepath.Join(".claude", "agents"),
+			want:   "is also written by files[0]",
+		},
+		{
+			name:   "link to the profile subdirectory",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			target: filepath.Join(".claude", "agents", "zakwas"),
+			want:   "is also written by files[0]",
+		},
+		{
+			name:   "link to the config directory holding instructions",
+			agents: config.Agents{Instructions: config.InstructionFiles{"AGENTS.md"}},
+			target: ".claude",
+			want:   "is also written by files[0]",
+		},
+		{
+			name:   "link to a sibling directory",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			target: filepath.Join(".claude", "commands"),
+		},
+		{
+			name:   "link to a file the write replaces",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			target: filepath.Join(".claude", "agents", "zakwas", "p.md"),
+			file:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := profileModule(t, tt.agents)
+			writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "x")
+			target := filepath.Join(m.Paths.Home, tt.target)
+			if tt.file {
+				writeFile(t, target, "x")
+			} else if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(t.TempDir(), "link")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			m.Destinations = []config.Destination{{What: "files[0]", Dst: link, Path: link}}
+			changes, err := m.Plan(context.Background())
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tt.want)
+			}
+			if len(changes) != 0 {
+				t.Errorf("planned %v despite the shared destination", groups(changes))
+			}
+		})
+	}
+}
+
 func TestAgentFilesAcceptNeighbouringDestinations(t *testing.T) {
 	m := profileModule(t, config.Agents{
 		Instructions: config.InstructionFiles{"AGENTS.md"},

@@ -951,7 +951,6 @@ func isNullKey(k *yaml.Node) bool {
 }
 
 func isMergeKey(k *yaml.Node) bool {
-	k = resolveAlias(k)
 	return k != nil && k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge"
 }
 
