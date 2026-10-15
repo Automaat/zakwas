@@ -190,16 +190,18 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 		declared string
 		settings string
 		conflict bool
+		from     string
 	}{
 		{name: "no settings file", declared: "o/sai#v2"},
 		{name: "unreadable settings", declared: "o/sai#v2", settings: `{not json`},
 		{name: "no entry for the marketplace", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"other":{"source":{"source":"github","repo":"o/x","ref":"v1"}}}}`},
-		{name: "entry without a ref, declared ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`, conflict: true},
+		{name: "entry without a ref, declared ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`, conflict: true, from: "comes from o/sai (added without a ref), but"},
 		{name: "entry without a ref, no declared ref", declared: "o/sai", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`},
-		{name: "another ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true},
+		{name: "another ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true, from: "comes from o/sai#v1, but"},
 		{name: "null entry for the marketplace", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":null}}`},
-		{name: "malformed sibling entry", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"x":{"source":"str"},"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true},
+		{name: "malformed sibling entry", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"x":{"source":"str"},"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true, from: "comes from o/sai#v1, but"},
 		{name: "same ref", declared: "o/sai#v1", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
+		{name: "empty declared ref, entry with one", declared: "o/sai#", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
 		{name: "no declared ref, entry with one", declared: "o/sai", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
 	}
 	for _, tt := range tests {
@@ -214,7 +216,7 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 			fake.OnOK(copilotPluginList, `[]`)
 			changes, err := m.Plan(t.Context())
 			if tt.conflict {
-				if err == nil || !strings.Contains(err.Error(), "declares "+tt.declared) || !strings.Contains(err.Error(), "copilot plugin marketplace remove sai") {
+				if err == nil || !strings.Contains(err.Error(), "declares "+tt.declared) || !strings.Contains(err.Error(), "copilot plugin marketplace remove sai") || !strings.Contains(err.Error(), tt.from) {
 					t.Fatalf("err = %v", err)
 				}
 				return
@@ -276,7 +278,7 @@ func TestCopilotRefreshSkipsAMarketplaceWithAnotherRef(t *testing.T) {
 	fake.OnOK(copilotMarketList, `[{"name":"sai","source":"GitHub: o/sai","isDefault":false}]`)
 	fake.OnOK(copilotPluginList, `[]`)
 	err := m.Refresh(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "not refreshing it") {
+	if err == nil || !strings.Contains(err.Error(), "not refreshing it") || !strings.Contains(err.Error(), "comes from o/sai (added without a ref), but") {
 		t.Fatalf("err = %v", err)
 	}
 	for _, l := range fake.Lines() {
