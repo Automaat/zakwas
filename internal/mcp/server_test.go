@@ -353,24 +353,59 @@ func TestServeStopsWhenInputCloses(t *testing.T) {
 	}
 }
 
-func TestClosingInputCancelsCallsInFlight(t *testing.T) {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	started := make(chan struct{})
-	stuck := Tool{Name: "stuck", Handler: func(ctx context.Context, _ *Call) (Result, error) {
-		defer wg.Done()
+func TestClosingInputLetsCallsInFlightFinish(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var finished sync.WaitGroup
+	finished.Add(1)
+	slow := Tool{Name: "slow", Handler: func(context.Context, *Call) (Result, error) {
+		defer finished.Done()
 		close(started)
-		<-ctx.Done()
-		return Result{}, ctx.Err()
+		<-release
+		return Result{Text: "done"}, nil
 	}}
-	c := start(t, stuck)
+	c := start(t, slow)
 	c.initialize("2025-06-18", map[string]any{})
-	c.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "stuck"}})
+	c.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "slow"}})
 	<-started
+	_ = c.in.Close()
+
+	select {
+	case <-c.errCh:
+		t.Fatal("Serve returned while a call was still running")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	go func() { _, _ = io.Copy(io.Discard, c.out) }()
+	finished.Wait()
+	select {
+	case err := <-c.errCh:
+		if err != nil {
+			t.Errorf("Serve returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return")
+	}
+}
+
+func TestClosingInputFailsAFormNobodyCanAnswer(t *testing.T) {
+	answers, errs := make(chan ElicitResponse, 1), make(chan error, 1)
+	c := start(t, askTool(answers, errs))
+	c.initialize("2025-06-18", map[string]any{"elicitation": map[string]any{}})
+	c.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "ask"}})
+	if req := c.read(); req["method"] != "elicitation/create" {
+		t.Fatalf("got %v", req)
+	}
 	_ = c.in.Close()
 	go func() { _, _ = io.Copy(io.Discard, c.out) }()
 
-	wg.Wait()
+	select {
+	case err := <-errs:
+		if !strings.Contains(err.Error(), "closed the connection") {
+			t.Errorf("elicitation failed with %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the form was never failed")
+	}
 	select {
 	case <-c.errCh:
 	case <-time.After(5 * time.Second):

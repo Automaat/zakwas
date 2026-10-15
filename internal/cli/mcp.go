@@ -10,11 +10,12 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
-	"unicode"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
@@ -84,12 +85,16 @@ func runMCP(ctx context.Context, env Env, args []string, out, errOut *console) i
 		ex.Stdout, ex.NoStdin = ex.Stderr, true
 		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
 	}
+	signal.Ignore(syscall.SIGPIPE)
+	defer signal.Reset(syscall.SIGPIPE)
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+	defer stop()
 	t := &mcpTools{env: env, cfgPath: o.cfgPath, enableApply: o.enableApply}
 	srv := &mcp.Server{
 		Name: "zakwas", Version: env.Version, Instructions: mcpInstructions,
 		Tools: t.tools(), In: env.Stdin, Out: env.Stdout,
 	}
-	if err := srv.Serve(ctx); err != nil && ctx.Err() == nil {
+	if err := srv.Serve(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		errOut.fail(err)
 		return ExitErr
 	}
@@ -467,11 +472,12 @@ func (t *mcpTools) confirm(c *mcp.Call, a *approval) func(context.Context, *revi
 	}
 }
 
-// plainText drops what a client could render as more than text: control
-// characters other than newline and tab.
+// plainText drops what a client could render as more than text or what
+// hides text from the reader: control and format characters other than
+// newline and tab.
 func plainText(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+		if proposal.Hidden(r) && r != '\n' && r != '\t' {
 			return -1
 		}
 		return r

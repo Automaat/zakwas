@@ -180,6 +180,10 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		return ExitErr
 	}
 
+	if _, err := store.Load(a.p.ID); err != nil {
+		a.outcome = outcomeDeclined
+		return a.fail(fmt.Errorf("proposal %s was discarded while waiting for the answer, so nothing was applied", a.p.ID))
+	}
 	if _, err := a.checkGit(ctx, checked); err != nil {
 		return a.fail(fmt.Errorf("while waiting for the answer: %w", err))
 	}

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -193,7 +194,10 @@ const brewConfig = proposeConfig + "brew: {file: Brewfile}\n"
 
 // brewRunner reports jq missing while the Brewfile names it, so a proposal
 // that adds it has a step to apply.
-type brewRunner struct{ gitRunner }
+type brewRunner struct {
+	gitRunner
+	install func(ctx context.Context)
+}
 
 func (b brewRunner) Run(ctx context.Context, c runner.Cmd) (runner.Result, error) {
 	if c.Name != "brew" {
@@ -204,13 +208,19 @@ func (b brewRunner) Run(ctx context.Context, c runner.Cmd) (runner.Result, error
 			return runner.Result{ExitCode: 1, Stdout: "→ Formula jq needs to be installed.\n"}, nil
 		}
 	}
+	if len(c.Args) > 1 && c.Args[0] == "bundle" && c.Args[1] == "install" && b.install != nil {
+		b.install(ctx)
+		if ctx.Err() != nil {
+			return runner.Result{}, ctx.Err()
+		}
+	}
 	return runner.Result{}, nil
 }
 
 func brewSetup(t *testing.T) (Env, string) {
 	t.Helper()
 	env, home := proposeSetupConfig(t, brewConfig)
-	env.Runner = brewRunner{env.Runner.(gitRunner)}
+	env.Runner = brewRunner{gitRunner: env.Runner.(gitRunner)}
 	return env, home
 }
 
@@ -645,5 +655,79 @@ func TestMCPCommitSaysWhereItWasApproved(t *testing.T) {
 func TestReasonText(t *testing.T) {
 	if got := reasonText("zakwas: one\nzakwas: two: three\n"); got != "one\ntwo: three" {
 		t.Errorf("reasonText = %q", got)
+	}
+}
+
+func TestMCPApplyStopsOnSIGTERMAndPutsTheFilesBack(t *testing.T) {
+	env, home := brewSetup(t)
+	installing := make(chan struct{})
+	env.Runner = brewRunner{gitRunner: env.Runner.(brewRunner).gitRunner, install: func(ctx context.Context) {
+		close(installing)
+		<-ctx.Done()
+	}}
+	c := startMCP(t, env, formClient, "--enable-apply")
+	id := parseJSON(t, c.tool("zakwas_propose", map[string]any{"kind": "add-brew", "name": "jq"}, nil).text)["id"].(string)
+	brewfile := readFile(t, filepath.Join(env.Cwd, "Brewfile"))
+	go func() {
+		<-installing
+		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	r := c.tool("zakwas_apply", map[string]any{"id": id}, accept)
+
+	if out := parseJSON(t, r.text); out["applied"] == true {
+		t.Errorf("outcome = %v", out)
+	}
+	if got := readFile(t, filepath.Join(env.Cwd, "Brewfile")); got != brewfile {
+		t.Errorf("Brewfile wasn't put back:\n%s", got)
+	}
+	if gitIn(t, env.Cwd, "status", "--porcelain") != "" {
+		t.Error("the repo is dirty")
+	}
+	if _, err := os.Stat(filepath.Join(proposal.Dir(home), id+".json")); err != nil {
+		t.Errorf("the proposal is gone: %v", err)
+	}
+	select {
+	case <-c.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the server ignored SIGTERM")
+	}
+}
+
+func TestMCPApplyNeverAppliesAProposalDiscardedWhileItAsks(t *testing.T) {
+	env, _ := brewSetup(t)
+	c := startMCP(t, env, formClient, "--enable-apply")
+	id := parseJSON(t, c.tool("zakwas_propose", map[string]any{"kind": "add-brew", "name": "jq"}, nil).text)["id"].(string)
+	brewfile := readFile(t, filepath.Join(env.Cwd, "Brewfile"))
+
+	r := c.tool("zakwas_apply", map[string]any{"id": id}, func(string) map[string]any {
+		if err := os.Remove(filepath.Join(proposal.Dir(env.Home), id+".json")); err != nil {
+			t.Error(err)
+		}
+		return accept("")
+	})
+
+	out := parseJSON(t, r.text)
+	if out["applied"] == true || !strings.Contains(out["reason"].(string), "discarded") {
+		t.Errorf("outcome = %v", out)
+	}
+	if readFile(t, filepath.Join(env.Cwd, "Brewfile")) != brewfile || gitIn(t, env.Cwd, "rev-list", "--count", "HEAD") != "1" {
+		t.Error("the discarded proposal changed the repo")
+	}
+}
+
+func TestMCPProposeRejectsInvisibleCharacters(t *testing.T) {
+	env, _ := proposeSetup(t)
+	c := startMCP(t, env, formClient)
+	for name, command := range map[string]string{"bidi override": "ls \u202e txt.exe", "zero width space": "ls\u200b -la"} {
+		r := c.tool("zakwas_propose", map[string]any{"kind": "add-permission", "decision": "deny", "command": command}, nil)
+		if !r.isErr || !strings.Contains(r.text, "printable text") {
+			t.Errorf("%s was accepted: %s", name, r.text)
+		}
+	}
+	if got := plainText("a\u202eb\u200bc"); got != "abc" {
+		t.Errorf("plainText = %q", got)
 	}
 }

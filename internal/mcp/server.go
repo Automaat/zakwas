@@ -90,13 +90,17 @@ type rpcError struct {
 
 func (e *rpcError) Error() string { return fmt.Sprintf("%s (code %d)", e.Message, e.Code) }
 
-// Serve reads requests until the input closes or ctx ends, then cancels the
-// calls in flight and waits for them.
+// Serve reads requests until the input closes or ctx ends. When the input
+// closes, calls in flight finish, since stopping one halfway is what leaves
+// a half-applied change; only a form waiting for the user's answer fails,
+// as nobody is left to answer it. When ctx ends, they are cancelled.
 func (s *Server) Serve(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	s.done = make(chan struct{})
-	defer close(s.done)
+	var closeOnce sync.Once
+	closeInput := func() { closeOnce.Do(func() { close(s.done) }) }
+	defer closeInput()
 
 	lines := make(chan []byte)
 	readErr := make(chan error, 1)
@@ -132,6 +136,8 @@ func (s *Server) Serve(ctx context.Context) error {
 			return ctx.Err()
 		case line, ok := <-lines:
 			if !ok {
+				closeInput()
+				wg.Wait()
 				select {
 				case err := <-readErr:
 					return err
@@ -410,6 +416,6 @@ func (c *Call) Elicit(ctx context.Context, text string, properties map[string]an
 	case <-ctx.Done():
 		return out, ctx.Err()
 	case <-c.s.done:
-		return out, errors.New("the server stopped")
+		return out, errors.New("the client closed the connection")
 	}
 }
