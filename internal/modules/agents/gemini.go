@@ -257,12 +257,23 @@ var geminiPriorities = map[string]int{
 }
 
 // geminiGuardRegex matches the command as written, after a flag, as in
-// `zakwas -c zakwas.yaml apply`, and run by path. Gemini matches a command
-// regex against `"command":"<command>"`, so it starts at the command; the
-// groups hold no quantifier, which Gemini rejects as unsafe.
+// `zakwas -c zakwas.yaml apply`, and run by path, any of them quoted.
+// Gemini matches a command regex against the JSON-encoded arguments, as
+// `"command":"<command>"`, where a quote is `\"`, so it starts at the
+// command and a quoted value is spelled out as its own alternative.
+// Gemini rejects a quantified group as unsafe, so none is used: the
+// alternatives allow up to geminiGuardQuotedValues quoted values before
+// the guarded word.
 func geminiGuardRegex(words []string) string {
-	return `(?:|\S*/)` + regexp.QuoteMeta(words[0]) + `\s(?:|[^"]*\s)` + regexp.QuoteMeta(strings.Join(words[1:], " ")) + `(?:[\s"]|\\")`
+	middle := []string{"", `[^"]*\s`}
+	for n := 1; n <= geminiGuardQuotedValues; n++ {
+		middle = append(middle, `[^"]*`+strings.Repeat(`\\"[^"]*\\"[^"]*`, n)+`\s`)
+	}
+	return `(?:|\S*/|\\"[^"]*/)` + regexp.QuoteMeta(words[0]) + `(?:|\\"|')\s(?:` + strings.Join(middle, "|") + `)(?:|\\")` +
+		regexp.QuoteMeta(strings.Join(words[1:], " ")) + `(?:[\s"]|\\")`
 }
+
+const geminiGuardQuotedValues = 3
 
 // geminiRules are the rules of zakwas.toml: the guard's, agents.permissions
 // and the decisions of the profiles.
