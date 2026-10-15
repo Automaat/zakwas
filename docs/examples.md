@@ -51,7 +51,7 @@ agents:
 
 ## Agent permissions
 
-One list of shell command permissions for Claude Code, Codex and opencode, so the agents stop asking about the same safe commands. zakwas writes Claude's `settings.json` rules and Codex's `rules/zakwas.rules`; opencode gets them through its config template. Codex runs allowed commands outside its sandbox, so test runners are allowed only for the other two.
+One list of shell command permissions for Claude Code, Codex, opencode and, once named, Gemini CLI, so the agents stop asking about the same safe commands. zakwas writes Claude's `settings.json` rules, Codex's `rules/zakwas.rules` and Gemini's `policies/zakwas.toml`; opencode gets them through its config template. Codex runs allowed commands outside its sandbox, so test runners are allowed only for the other two.
 
 ```yaml
 templates:
