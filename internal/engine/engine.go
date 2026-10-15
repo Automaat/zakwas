@@ -165,9 +165,13 @@ func (p Plan) Err() error {
 // converging everything else.
 func Build(ctx context.Context, modules []Module) Plan {
 	plan := make(Plan, len(modules))
+	panics := make([]any, len(modules))
 	var wg sync.WaitGroup
 	for i, m := range modules {
 		wg.Go(func() {
+			// Re-raised below on the caller's goroutine, where a
+			// recover (the MCP server's) can still catch it.
+			defer func() { panics[i] = recover() }()
 			changes, err := m.Plan(ctx)
 			mp := ModulePlan{Module: m.Name(), Changes: changes, Err: err}
 			if w, ok := m.(Warner); ok {
@@ -177,6 +181,11 @@ func Build(ctx context.Context, modules []Module) Plan {
 		})
 	}
 	wg.Wait()
+	for _, p := range panics {
+		if p != nil {
+			panic(p)
+		}
+	}
 	return plan
 }
 

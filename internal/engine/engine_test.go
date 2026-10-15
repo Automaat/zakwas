@@ -99,6 +99,23 @@ func TestBuildPlansModulesConcurrentlyInOrder(t *testing.T) {
 	}
 }
 
+type panicModule struct{ stubModule }
+
+func (panicModule) Plan(context.Context) ([]Change, error) { panic("boom") }
+
+func TestBuildRaisesAModulePanicOnTheCallersGoroutine(t *testing.T) {
+	defer func() {
+		if got := recover(); got != "boom" {
+			t.Errorf("recovered %v, want boom", got)
+		}
+	}()
+	Build(context.Background(), []Module{
+		stubModule{name: "ok"},
+		panicModule{stubModule{name: "bad"}},
+	})
+	t.Error("Build returned despite a panicking module")
+}
+
 type recorder struct{ events []string }
 
 func (r *recorder) Start(s Step) {
