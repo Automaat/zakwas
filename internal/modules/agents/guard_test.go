@@ -50,6 +50,7 @@ func TestGuardDeniesApplyAndEditsInClaude(t *testing.T) {
 		"Bash(zakwas apply)", "Bash(zakwas apply *)", "Bash(zakwas * apply)", "Bash(zakwas * apply *)",
 		"Bash(zakwas upgrade *)", "Bash(zakwas * upgrade *)",
 		"Bash(zakwas self-update)", "Bash(zakwas * self-update *)",
+		"Bash(zakwas mcp)", "Bash(zakwas mcp *)", "Bash(*/zakwas * mcp *)",
 		"Bash(*/zakwas apply *)", "Bash(*/zakwas * upgrade)", "Bash(*/zakwas * self-update *)",
 		"Edit(~/dotfiles/**)", "Edit(~/.local/state/zakwas/**)",
 	} {
@@ -66,7 +67,7 @@ func TestGuardDeniesApplyAndEditsInClaude(t *testing.T) {
 
 	m.Guard = false
 	changes := plan(t, m)
-	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-34 deny") {
+	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-42 deny") {
 		t.Fatalf("plan = %q", targets(changes))
 	}
 	apply(t, changes)
@@ -253,5 +254,30 @@ func TestGuardWarnsWhenTheMainCheckoutHoldsHome(t *testing.T) {
 	dirs, warning := m.guardedDirs()
 	if len(dirs) != 1 || dirs[0] != realPath(worktree) || !strings.Contains(warning, "home directory") {
 		t.Errorf("dirs = %q, warning = %q", dirs, warning)
+	}
+}
+
+func TestOpencodeIsToldToPromptByHand(t *testing.T) {
+	servers := map[string]config.MCPServer{
+		"zakwas": stdioServer("zakwas", "mcp", "--enable-apply"),
+		"plain":  stdioServer("zakwas", "mcp"),
+	}
+	m := mcpModule(t, []string{config.ProviderOpencode}, servers)
+	want := `opencode won't ask before zakwas_apply of MCP server zakwas: add "zakwas_zakwas_apply": "ask" to the permission object of its opencode.json template`
+	if got := m.Warnings(context.Background()); !slices.Equal(got, []string{want}) {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+
+	tmpl := filepath.Join(t.TempDir(), "opencode.json.tmpl")
+	writeFile(t, tmpl, `{"permission": {"zakwas_zakwas_apply": "ask"}}`)
+	m.TemplateSources = []string{tmpl}
+	if got := m.Warnings(context.Background()); len(got) != 0 {
+		t.Errorf("warnings with the permission in the template = %q", got)
+	}
+
+	m.TemplateSources = nil
+	m.Agents.Providers = []string{config.ProviderClaude}
+	if got := m.Warnings(context.Background()); len(got) != 0 {
+		t.Errorf("warnings for a server opencode doesn't get = %q", got)
 	}
 }

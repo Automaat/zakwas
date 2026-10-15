@@ -65,9 +65,12 @@ zakwas plan --only brew,defaults
 zakwas propose add-plugin foo@market   # save a config edit without applying it
 zakwas proposals                       # pending proposals
 zakwas approve ID                      # diff + plan, confirm, apply, commit (terminal only)
+zakwas mcp --enable-apply              # serve plan/propose (and confirmed low-risk apply) to agents over MCP
 ```
 
 `propose` takes a typed operation (add a plugin, add or remove a permission, add a brew package, pin a mise tool, add an MCP server), splices it into the original file bytes, and saves it with its plan and risk tier. `approve` applies only the affected modules and commits to the current branch without pushing. See [docs/commands.md](docs/commands.md#propose-proposals-approve).
+
+`zakwas mcp` serves the same to coding agents over MCP: read-only config, plan and check tools, plus propose and discard. With `--enable-apply` it also applies a low-risk proposal after you confirm a diff and plan zakwas renders in the agent; high-risk proposals and clients that can't show the confirmation get the `zakwas approve ID` command. Register it with `agents.mcp: {zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, ~/dotfiles/zakwas.yaml]}}`. See [docs/commands.md](docs/commands.md#mcp).
 
 ```
 $ zakwas plan

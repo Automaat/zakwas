@@ -15,6 +15,7 @@ Flags go before or after the command: `zakwas -y apply` and `zakwas apply -y` ar
 | [`propose`](#propose) | save a config change as a proposal, without editing anything |
 | [`proposals`](#proposals) | list pending proposals |
 | [`approve`](#approve) | show a proposal's diff and plan, confirm, apply it and commit it |
+| [`mcp`](#mcp) | serve config reads and proposals to coding agents over MCP |
 | [`init`](#init) | create a starter config repo from this Mac |
 | [`self-update`](#self-update) | replace the zakwas binary with a release |
 | [`completion`](#completion) | print a shell completion script |
@@ -127,6 +128,47 @@ It refuses, changing nothing, when:
 - it runs from an agent session while [`agents.guard`](config.md#guard) is on. The guard also denies the managed agents `zakwas approve`.
 
 If the apply fails, the files are written back as they were and the proposal stays pending; the steps that ran stay done. If only the commit fails, the change stays applied and uncommitted, and the message says so.
+
+## mcp
+
+```
+zakwas mcp [-c PATH] [--enable-apply]
+```
+
+Serves zakwas to a coding agent over [MCP](https://modelcontextprotocol.io) on stdin and stdout, so an agent gets structured JSON instead of parsing `zakwas plan`, and a low-risk change can be confirmed in the agent instead of a terminal. The agent starts it; register it with [`agents.mcp`](config.md#mcp):
+
+```yaml
+agents:
+  mcp:
+    zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, ~/dotfiles/zakwas.yaml]}
+```
+
+Pass `-c` (or set `ZAKWAS_CONFIG` in the agent's environment): an agent starts the server in whatever directory it is in, where `zakwas.yaml` isn't found. The config is read on every call, so editing it needs no restart; a missing or invalid one fails that call, not the server.
+
+| Tool | What it does |
+|---|---|
+| `zakwas_config` | the config path, repo root, modules, agent providers, MCP servers, whether the [guard](config.md#guard) is on, and the text of `zakwas.yaml` |
+| `zakwas_plan` | the plan as JSON, like `zakwas plan --json`; arguments `only` (modules) and `diff` |
+| `zakwas_check` | the same, with `drift: true` when anything would change |
+| `zakwas_propose` | saves a proposal like [`propose`](#propose); arguments are the operation's fields (`kind`, `name`, `decision`, `command`, `version`, `cask`, `providers`, `justification`, `server`). Returns the proposal and what to do next |
+| `zakwas_proposals` | pending proposals of this config |
+| `zakwas_discard` | deletes a pending proposal of this config |
+| `zakwas_apply` | only with `--enable-apply`: applies a low-risk proposal after you confirm it in the agent |
+
+Everything except `zakwas_apply` leaves the config repo and the system alone, like `plan`, `check` and `propose`. A tool failure comes back as an error result with the message, so the agent can react; the server never writes anything but JSON-RPC to stdout (tool output goes to stderr).
+
+**Applying.** `zakwas_apply` takes a proposal id and works only when all of these hold; otherwise nothing changes and the result says why and gives `zakwas approve ID` to run in a terminal:
+
+- the server started with `--enable-apply`; without it the tool does not exist;
+- the proposal is low risk when rated again now (the tier in the proposal file is not trusted), so a high-risk proposal is never applied over MCP;
+- the client declared elicitation support (MCP 2025-06-18 or later, form mode), because the confirmation is an elicitation form. A client without it, such as Gemini CLI, gets the command instead;
+- you answer yes. The form shows what zakwas rendered, never text written by the agent: the proposal, its tier and reasons, the diff, the plan and "apply N step(s) and commit FILES to BRANCH?". Decline, cancel, an error, no answer within 10 minutes, or a review over 32 KiB all apply nothing.
+
+After a yes it does what [`approve`](#approve) does: the same checks, files written only while they still hold what you reviewed, the plan made again and compared with the one you saw, the affected modules applied, the proposal deleted and the edited files committed to the current branch without pushing, with the same history entry. It reports progress (`notifications/progress`, one per step start and end) when the client sent a progress token. It takes the [run lock](#apply) before it plans and holds it until it ends, including while the form is open; a busy lock fails the call at once instead of waiting. If the client closes the connection, the apply stops before its next step.
+
+**Always asked.** `zakwas_apply` carries `_meta["anthropic/requiresUserInteraction"]`, so Claude Code prompts on every call, even in bypass mode. For a server registered through `agents.mcp` as `zakwas mcp --enable-apply`, zakwas also writes `approval_mode = "prompt"` for the tool in Codex's `config.toml`. opencode has no place zakwas can edit for this: the plan names the `permission` entry to add to your `opencode.json` template. The form comes on top of those prompts.
+
+Only people should start this server with `--enable-apply`: the [guard](config.md#guard) denies the managed agents `zakwas mcp`, since an agent that ran it in a shell would be the client that answers the form.
 
 ## init
 

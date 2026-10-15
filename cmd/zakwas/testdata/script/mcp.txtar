@@ -1,0 +1,48 @@
+stdin requests.jsonl
+zakwas mcp
+stdout -count=1 '"protocolVersion":"2025-06-18"'
+stdout '"name":"zakwas_config"'
+stdout '"name":"zakwas_propose"'
+stdout '"name":"zakwas_discard"'
+! stdout '"name":"zakwas_apply"'
+stdout 'add MCP server docs'
+stdout 'High risk: only a terminal applies it'
+stdout 'zakwas approve '
+! stderr .
+cmp zakwas.yaml zakwas.orig
+! exists home/.config/opencode/opencode.json
+
+stdin requests-apply.jsonl
+zakwas mcp --enable-apply
+stdout '"name":"zakwas_apply"'
+stdout 'requiresUserInteraction'
+stdout 'this client can.t ask the user to confirm, so nothing was applied'
+stdout 'zakwas approve deadbeef'
+cmp zakwas.yaml zakwas.orig
+
+! zakwas mcp extra
+stderr 'Usage: zakwas mcp'
+zakwas mcp -h
+stdout '--enable-apply'
+
+-- zakwas.yaml --
+agents:
+  providers: [opencode]
+  permissions:
+    deny:
+      - rm
+-- zakwas.orig --
+agents:
+  providers: [opencode]
+  permissions:
+    deny:
+      - rm
+-- requests.jsonl --
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"zakwas_propose","arguments":{"kind":"add-mcp","name":"docs","server":{"command":"npx","args":["-y","docs-mcp"]}}}}
+-- requests-apply.jsonl --
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"zakwas_apply","arguments":{"id":"deadbeef"}}}
