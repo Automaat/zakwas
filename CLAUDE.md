@@ -12,6 +12,7 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `internal/engine/` | `Module` interface, plan/apply |
 | `internal/modules/<name>/` | one package per module |
 | `internal/install/` | protected-copy writer + hash state (`~/.local/state/zakwas/files.json`) |
+| `internal/lock/` | flock that serializes `apply`/`upgrade` (`~/.local/state/zakwas/lock`) |
 | `internal/runner/` | exec abstraction; `runnertest.Fake` for tests |
 | `install.sh` | fresh-Mac installer: CLT, zakwas binary from the release, clone, apply |
 | `examples/` | example config repo; CI plans and applies it |
@@ -47,6 +48,7 @@ system → files → links → templates → brew → mise → agents → comman
 
 - `plan`/`check` must never change the system; every brew call (apply too) sets `HOMEBREW_NO_AUTO_UPDATE=1`, so only `zakwas upgrade` refreshes Homebrew. Likewise only `upgrade` refreshes agent marketplaces.
 - agents: each provider is a `backend` in `internal/modules/agents` (claude, codex, opencode). A provider that fails to plan returns its error alongside the other providers' changes, which still apply; each change's `Group` is its provider, so an apply failure stops only that provider. Codex is opt-in: converged only when `zakwas.yaml` names `codex`. Never pass `-y`/`--accept-command` to `claude plugin`; never prune project/local-scope installs. Codex prune only touches marketplaces in `$CODEX_HOME/config.toml` and their plugins. Tests that run a real `codex` must set `CODEX_HOME` to a temp dir. opencode has no plugin system: zakwas links skills into its skills dir, tracks its links in `~/.local/state/zakwas/opencode.json` and fetches git marketplaces only in apply (pulls only in `upgrade`); plugins that reach opencode only by the default providers are best effort. `agents.instructions` links one file per provider via `install.PlanLink` (shared with `links`), tracked in `~/.local/state/zakwas/instructions.json`; same strict/opt-in/best-effort rules. `agents.permissions` adds rules to Claude's `settings.json` (only the ones zakwas added are tracked, in `~/.local/state/zakwas/agent-permissions.json`, and ever removed) and owns `$CODEX_HOME/rules/zakwas.rules`; opencode gets them only through the `agentPermissions` template function, since its `opencode.json` is usually a template.
+- `apply`/`upgrade` hold the run lock (`internal/lock`) from before the plan to exit; `plan`/`check` never lock, so every state file must be written with a rename (`install.WriteAtomic`), never in place.
 - Replaced files zakwas didn't write (or that were edited) are backed up to `<file>.zakwas-bak` (`.zakwas-bak.N` if taken), never deleted or overwritten.
 - `files`/`links`/`templates` destinations must be absolute or `~/…` (no `$VAR`) and must not overlap (case-insensitive). Modes are octal: `0644`, not `644`.
 - zakwas refuses to write through a symlinked parent dir under `$HOME` or one resolving into the config repo.
