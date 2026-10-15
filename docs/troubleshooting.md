@@ -41,7 +41,7 @@ files
   ~ ~/.tmux.conf  not managed yet, back up to .tmux.conf.zakwas-bak
 ```
 
-zakwas never overwrites or deletes a file it did not write without keeping a copy:
+zakwas never overwrites or deletes a regular file it did not write without keeping a copy:
 
 - `edited in place`: zakwas wrote this file earlier (it records a hash of each one in `~/.local/state/zakwas/files.json`), and the content has changed since. `apply` backs the file up and restores the repo's version.
 - `not managed yet`: the destination exists and differs from the repo's file. `apply` backs it up, then installs the repo's version. A file that already matches is adopted as it is: `already matches, start tracking`.
@@ -78,7 +78,7 @@ Details: [security.md](security.md#tools-zakwas-bootstraps) and [security.md](se
 ✗ agents: plan failed: gemini: gemini is not installed
 ```
 
-Each provider plans on its own. When a provider's CLI is missing, its error is reported, the other providers and modules still plan and apply, and the run exits 1. Either install the CLI (the `agents` module runs after `brew` and `mise`, so one `apply` can install it and use it) or take the provider out of `agents.providers`.
+Each provider plans on its own. When a provider's CLI is missing, its error is reported, the other providers and modules still plan and apply, and the run exits 1. Either install the CLI (the `agents` module runs after `brew` and `mise`, but it plans before anything is installed, so run `apply` a second time to get the plugins) or take the provider out of `agents.providers`.
 
 - A CLI is required only for what calls it: Claude Code, Codex and Copilot CLI for plugins and marketplaces, Gemini CLI always once it is named. A Mac without Claude Code still plans `instructions`, `mcp` and `permissions` for it.
 - Codex, Gemini CLI and Copilot CLI are converged only when `zakwas.yaml` names them, so their errors appear only then.
@@ -104,7 +104,7 @@ Everything lives under `~/.local/state/zakwas/`:
 |---|---|
 | `files.json` | the hash of every file zakwas wrote, to tell an edit from a repo change |
 | `history.jsonl` | every apply with its changes and the config repo commit it ran from |
-| `lock` | serializes `apply` and `upgrade`; a crashed run leaves nothing to clean up |
+| `lock` | serializes `apply`, `upgrade` and `approve`; a crashed run leaves nothing to clean up |
 | `proposals/` | pending [proposals](commands.md#propose-proposals-approve) |
 | `launchd.json`, `agent-*.json`, `instructions.json`, `skills.json`, `opencode.json`, ... | what the `launchd` and `agents` modules added, so they remove only that |
 
@@ -114,7 +114,7 @@ The state is a record, not data: deleting `files.json` loses nothing. The next p
 
 ## Stop managing a file, or remove zakwas
 
-A file you drop from `files`, `links` or `templates` is removed by the next `apply` (backed up first if it was edited), and the plan shows it:
+A file you drop from `files` or `templates` is removed by the next `apply` (backed up first if it was edited), and the plan shows it:
 
 ```
 files
@@ -129,9 +129,9 @@ To stop using zakwas altogether:
 
 1. Empty the config (`files: []`, drop the other sections) and `zakwas plan`. Read the `-` lines, then `zakwas apply`. Copy back anything you want to keep first, as above.
 2. What a removed entry does depends on the module:
-   - `files`, `links`, `templates`: the files and links are deleted.
+   - `files`, `templates`: the copies are deleted (backed up first if edited). `links`: the symlinks stay where they are; remove them yourself.
    - `launchd`: the job is unloaded and its plist deleted, only for jobs zakwas created.
-   - `agents`: only the plugins, MCP servers, rules and links zakwas added are removed.
+   - `agents`: the MCP servers, permission rules, hooks, profiles, instruction copies and skill links zakwas recorded are removed. Installed plugins and marketplaces stay, unless `agents.prune: true` is set, which removes every undeclared one.
    - `brew` and `mise`: installed packages and tools stay. Only `brew.cleanup` (`uninstall` or `zap`) and `mise.prune` remove what a Brewfile or mise config no longer lists, and they run only while their section exists. Run `brew uninstall` yourself for the rest.
    - `system`, `defaults`, `commands`: not reverted. Directories, the SSH key, Touch ID for `sudo` and `defaults write` values stay as they are.
 3. Delete the binary (`rm ~/.local/bin/zakwas` for the installer, `brew uninstall zakwas` for Homebrew, or drop the pin from your mise config), `~/.local/state/zakwas/` and `~/.local/share/zakwas/`.

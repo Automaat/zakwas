@@ -43,7 +43,7 @@ The `agents` entry under [Rules](CLAUDE.md#rules) lists what every provider must
 - the provider name in `internal/config/agents.go` (`Providers`, and `OptIn` for a provider that must not change what existing configs mean);
 - a `backend` in `internal/modules/agents` (`plan` and `refresh`), registered in `backends()`. Gemini CLI is the one provider without a `backend`: it is rendered as one extension (`gemini.go`), which suits a tool that rewrites its own settings files;
 - support for each feature in the other `agents` files: instructions, MCP servers, skills, hooks, permissions, profiles, guard, capture;
-- a unit test file next to it that runs every CLI call through `runnertest.Fake`, and an end-to-end script `cmd/zakwas/testdata/script/agents-<name>.txtar` with a fake binary on `PATH`;
+- a unit test file next to it that runs every CLI call through `runnertest.Fake`, and an end-to-end script like the existing `cmd/zakwas/testdata/script/agents-*.txtar` ones, with a fake binary on `PATH`;
 - the support matrix in `docs/agents.md`, the keys in `docs/config.md` and a recipe in `docs/examples.md`.
 
 A test must never touch a provider's real state: set its home variable (`CODEX_HOME`, `COPILOT_HOME` and `HOME`, `GEMINI_CLI_HOME`, `CLAUDE_CONFIG_DIR`) to a temp dir.
@@ -73,8 +73,8 @@ Add it to `commandList` in `internal/cli/cli.go`, which feeds usage and shell co
 - Conventional commits with a scope: `feat(brew): …`, `fix(install): …`, `docs(docs): …`. Keep the title at 50 characters or fewer and body lines at 72 or fewer.
 - Sign off every commit (`git commit -s`) to certify the [Developer Certificate of Origin](https://developercertificate.org).
 - PRs are squash-merged and the PR title becomes the commit subject, so write it as a conventional commit that reads well.
-- Release notes are generated from those subjects (`changelog` in `.goreleaser.yaml`): `feat`, `fix`, `perf` and `docs` get a section; `chore`, `ci`, `test`, `style` and `build` are left out. Pick the type by what a user sees.
-- Fill in [the PR template](.github/pull_request_template.md): Motivation (with the `> Changelog:` line), Implementation information, Supporting documentation (how you tested it).
+- Release notes are generated from those subjects (`changelog` in `.goreleaser.yaml`): `feat`, `fix`, `perf` and `docs` get a section; `chore`, `ci`, `test`, `style` and `build` are left out; any other type lands under Other. Pick the type by what a user sees.
+- Fill in [the PR template](.github/pull_request_template.md): Motivation (starting with the `> Changelog: type(scope): description` line, which repeats the PR title), Implementation information, Supporting documentation (how you tested it).
 - CI must pass. Four checks gate a merge: `test` (lint, shellcheck, actionlint, the GoReleaser snapshot build, unit, e2e and integration tests), `e2e on a fresh Mac`, `install.sh on a fresh Mac` and `installs mise on a Mac without it`. They run on macOS runners; see `.github/workflows/ci.yml`.
 
 If you work with a coding agent, it reads CLAUDE.md. You are still the author: read the diff, run the checks above, and say in the PR what you ran.

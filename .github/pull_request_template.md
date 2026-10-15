@@ -2,7 +2,7 @@
 
 > Changelog: type(scope): description
 
-<!-- Why this change. The PR title is the squash commit subject: type(scope): description, 50 characters or fewer. Use `> Changelog: skip` when users should not see it in the release notes. -->
+<!-- Why this change. The PR title is the squash commit subject: type(scope): description, 50 characters or fewer. Repeat the PR title, or write `skip`. Release notes come from the squash commit subject: `feat`, `fix`, `perf` and `docs` are listed; `chore`, `ci`, `test`, `style` and `build` are left out. -->
 
 ## Implementation information
 

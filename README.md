@@ -8,7 +8,7 @@ zakwas sets up a Mac from one YAML file. You list what the machine should have (
 
 What it manages:
 
-- **files / templates**: dotfiles installed as read-only, immutable copies (like the Nix store); edits go through the repo
+- **files / templates**: dotfiles installed as read-only copies, immutable with `protect.immutable: true` (like the Nix store); edits go through the repo
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: GUI apps and formulae from a `Brewfile` (`brew bundle`, optional zap cleanup)
 - **mise**: CLI tools pinned in a global mise config
@@ -39,7 +39,7 @@ Not a fit:
 
 ## Status
 
-- **Pre-1.0.** The config format can change between minor versions until 1.0; breaking changes are called out in the [release notes](https://github.com/Automaat/zakwas/releases). Machine-readable output (`--json`, apply history) carries its own `format_version`.
+- **Pre-1.0.** The config format can change between minor versions until 1.0; check the [release notes](https://github.com/Automaat/zakwas/releases) before upgrading. Machine-readable output (`--json`, apply history) carries its own `format_version`.
 - **macOS only.** Release binaries are darwin arm64 and amd64. CI runs on macOS 26; older macOS versions are not tested.
 - **One maintainer.** Issues and PRs get answered when there is time; see [.github/SUPPORT.md](.github/SUPPORT.md).
 - **Agents.** Claude Code and opencode are converged by default; Codex, Gemini CLI and Copilot CLI only when you name them. What each supports, and where the guard has gaps, is in [docs/agents.md](docs/agents.md) and [docs/security.md](docs/security.md#coding-agents).
@@ -57,12 +57,12 @@ git clone https://github.com/Automaat/zakwas.git && cd zakwas
 export PATH="$HOME/.local/bin:$PATH"
 zakwas init ~/dotfiles --add ~/.zshrc      # writes a starter repo in ~/dotfiles, nothing else
 cd ~/dotfiles && zakwas plan               # read-only
-zakwas apply --only files                  # confirm, then ~/.zshrc becomes a protected copy
+zakwas apply --only files                  # confirm, then ~/.zshrc and a mise config are installed
 ```
 
 - On a Mac without the Xcode Command Line Tools, run `xcode-select --install` first and wait for it to finish; `git` comes with them.
 - `init` writes `zakwas.yaml`, a `Brewfile` from what Homebrew has installed, your global mise tools pinned to their current versions, and a copy of each file you `--add`. It does not apply anything.
-- `plan` lists every change, one line each; read it before you apply. `apply --only files` limits the run to the `files` module.
+- `plan` lists every change, one line each; read it before you apply. `apply --only files` limits the run to the `files` module: your `~/.zshrc`, plus `~/.config/mise/config.toml` when `init` found mise (an existing one is backed up first).
 - After `apply`, `~/.zshrc` is read-only and immutable: edit `~/dotfiles/dotfiles/zshrc` and apply again. A warning about uncommitted changes is expected until you commit the new repo. To undo, see [Stop managing a file](docs/troubleshooting.md#stop-managing-a-file-or-remove-zakwas).
 - Already on Homebrew or mise, or want Go? See [Install](#install). Push `~/dotfiles` to GitHub and any other Mac is one command away: [New Mac](#new-mac).
 
@@ -265,8 +265,8 @@ zakwas runs as your user and changes what your config declares. What to know bef
 - Your config repo is code that runs as you: `commands`, templates and agent hooks execute what it says. Apply only a config you trust, and read `zakwas plan` first.
 - `sudo` is used in two places, both during `apply`: the Touch ID line in `/etc/pam.d/sudo_local` (`system.sudoTouchID`) and, when Homebrew is missing, its installer. `plan` and `check` never call it. Scripts in your own `commands` run as written.
 - The binaries zakwas installs are verified: release archives against `checksums.txt` and, with a logged-in `gh`, against GitHub build provenance; a mise it installs is a pinned release checked against its SHA256; the Homebrew installer comes from a pinned commit.
-- A file zakwas did not write, or one that was edited after zakwas wrote it, is backed up to `<file>.zakwas-bak` before it is replaced or removed.
-- Coding agents cannot run `apply` through zakwas: with an `agents` section the guard denies them the command, and zakwas refuses to apply from an agent session. They can read the plan and `propose` changes, which a person approves in a terminal. The guard is a set of deny rules in each agent, not a sandbox; its limits are in [docs/security.md](docs/security.md#coding-agents).
+- A regular file zakwas did not write, or one that was edited after zakwas wrote it, is backed up to `<file>.zakwas-bak` before it is replaced or removed.
+- Coding agents cannot run `apply` through zakwas: with an `agents` section the guard denies them the command (as deny rules for Claude Code, Codex and Gemini CLI; for opencode once a template renders them; Copilot CLI has only the refusal) and zakwas refuses to apply from an agent session. They can read the plan and `propose` changes, which a person approves in a terminal. The guard is a set of deny rules in each agent, not a sandbox; its limits are in [docs/security.md](docs/security.md#coding-agents).
 
 Report a vulnerability through [SECURITY.md](SECURITY.md), not a public issue.
 
