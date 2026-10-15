@@ -43,7 +43,7 @@ An agent that can run `zakwas apply` can write the agent config files it may not
 
 ### What the guard does
 
-- **Denies commands.** Every managed agent is denied `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`, also with a flag before the command and, where the agent can express it, when run by path.
+- **Denies commands.** Every managed agent is denied `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`. Claude Code, Gemini CLI and opencode also match a flag before the command (`zakwas -c zakwas.yaml apply`) and a path (`~/.local/bin/zakwas apply`); Codex matches the command as written.
 - **Denies edits.** Claude Code is denied edits to the config repo's main checkout (and the linked worktree zakwas runs from) and to `~/.local/state/zakwas`. Worktrees an agent creates elsewhere stay editable, so an agent can still propose a change as a branch.
 - **Refuses sessions.** `zakwas apply`, `upgrade` and `approve` exit 1 before changing anything when they start inside an agent session.
 - **Leaves reading and proposing open.** `plan`, `check`, `capture` and `propose` change nothing outside a saved proposal, so agents keep them.
@@ -64,7 +64,7 @@ The deny rules are the boundary, because the agent's own runtime enforces them. 
 | Gemini CLI | `deny` rules in `policies/zakwas.toml` | Match an unquoted flag before the command and an unquoted path; a quoted flag value or binary path is not matched. No edit rules. |
 | Copilot CLI | none | Copilot keeps user-level deny rules only in root-owned managed settings, so only the refusal covers it, and an agent that unsets its marker variable gets past it. The plan warns. |
 
-Codex, Gemini CLI and Copilot CLI are guarded only when `zakwas.yaml` names them, like their other settings. A guard that can't cover a managed provider is a warning in `plan`, not a change, so `check` stays clean.
+Codex, Gemini CLI and Copilot CLI are guarded only when `agents.providers`, a marketplace's or a plugin's `providers` names them. Naming one only in an `mcp`, `skills`, `profiles`, `permissions` or `hooks` entry converges it but leaves it unguarded. A guard that can't cover a managed provider is a warning in `plan`, not a change, so `check` stays clean.
 
 ### Proposals and who may approve
 
@@ -74,7 +74,7 @@ Each proposal has one of two tiers, decided by zakwas from what it does, never f
 
 | Tier | What it covers |
 |---|---|
-| low | tightens rules or adds something from a source the config already trusts: a plugin from a declared marketplace, a `deny` or `review` rule, removing an `allow` rule, a core Homebrew formula, a mise pin from the registry |
+| low | adds something from a source the config already trusts: a plugin from a declared marketplace, a core Homebrew formula, a mise pin from the registry; by operation a `deny` or `review` rule or removing an `allow` rule is low too, but its plan writes agent config files, which makes it high |
 | high | everything else: an `allow` rule, removing a `deny` or `review` rule, an MCP server, a marketplace, a cask or tap formula, a mise tool from a backend such as `npm:` or `github:` |
 
 A proposal is also high when the plan it will run touches agent config (`~/.claude`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `~/.gemini`, `~/.copilot`), a shell rc file, `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The tier stored in the proposal file is not trusted: it is rated again when used.

@@ -144,7 +144,7 @@ Edits splice the original bytes: every line outside the added or removed entries
 | low | add a plugin from a declared marketplace; add a `deny` or `review` rule; remove an `allow` rule; add a core Homebrew formula (not a cask, not from a tap); pin a mise tool (without a backend prefix such as `npm:` or `github:`) |
 | high | everything else: an `allow` rule, removing a `deny` or `review` rule, a cask or tap formula, a tool from a mise backend, an MCP server, a marketplace |
 
-Whatever the operations, a proposal is high when the plan it will run touches agent config (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `~/.gemini`, `~/.copilot`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$GEMINI_CLI_HOME`), shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, …), `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The plan is the whole plan of those modules, including drift that was already there, since that is what `approve` runs.
+A permission edit therefore ends up high for any provider that writes a file for it (Codex and Gemini always; Claude Code for `allow` and `deny`), whatever its row above says. Whatever the operations, a proposal is high when the plan it will run touches agent config (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `~/.gemini`, `~/.copilot`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$GEMINI_CLI_HOME`, `$COPILOT_HOME`), shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, …), `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The plan is the whole plan of those modules, including drift that was already there, since that is what `approve` runs.
 
 ### proposals
 
@@ -219,7 +219,7 @@ Serves zakwas to a coding agent over [MCP](https://modelcontextprotocol.io) on s
 ```yaml
 agents:
   mcp:
-    zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, ~/dotfiles/zakwas.yaml]}
+    zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, /Users/you/dotfiles/zakwas.yaml]}
 ```
 
 Pass `-c` (or set `ZAKWAS_CONFIG` in the agent's environment): an agent starts the server in whatever directory it is in, where `zakwas.yaml` isn't found. The config is read on every call, so editing it needs no restart; a missing or invalid one fails that call, not the server.

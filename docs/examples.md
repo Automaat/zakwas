@@ -83,7 +83,7 @@ agents:
 
 ## One MCP server for several agents
 
-Declare each MCP server once, as a stdio `command` or an HTTP `url`. zakwas registers it at user scope in Claude Code, Codex and Copilot CLI (and in Gemini CLI once you name it), each in its own format. Secrets stay environment references: you name the variable, and each agent reads it from its own environment, so nothing secret reaches the config repo or the agents' files.
+Declare each MCP server once, as a stdio `command` or an HTTP `url`. zakwas registers it at user scope in Claude Code, Codex and Copilot CLI (and in Gemini CLI once you name it), each in its own format. Secrets stay environment references: you name the variable, and each agent reads it from its own environment, so a secret declared this way reaches neither the config repo nor the agents' files; `env`, `headers`, `args` and `url` are written as they are, so keep tokens out of them.
 
 ```yaml
 agents:
@@ -218,7 +218,7 @@ agents:
 ```
 
 - Gemini CLI needs `gemini` on `PATH`: zakwas renders one extension under `~/.gemini/zakwas` (instructions, MCP servers, hooks, subagents) and links it with `gemini extensions link`, plus a policy file for permissions. It never writes `~/.gemini/settings.json` or `GEMINI.md`. Gemini has no plugin marketplaces, so `plugins` never reach it.
-- Copilot CLI needs no CLI for these keys, only for plugins and marketplaces. It gets `instructions/zakwas.instructions.md`, `mcp-config.json` servers, skills and profile files in `~/.copilot`, and never `config.json`. It has no user-level shell rules, so `permissions` that reach it are reported in the plan as unsupported, and the guard covers it only by the refusal.
+- Copilot CLI needs no CLI for these keys, only for plugins and marketplaces. It gets `instructions/zakwas.instructions.md`, `mcp-config.json` servers, profile files in `~/.copilot`, and skills in `~/.agents/skills` (`$COPILOT_HOME/skills` once that variable is set), and never `config.json`. It has no user-level shell rules, so `permissions` that reach it are reported in the plan as unsupported, and the guard covers it only by the refusal.
 - `GEMINI_CLI_HOME` and `COPILOT_HOME` move their directories, and zakwas follows them.
 
 The [provider table](agents.md#providers) lists the rest.

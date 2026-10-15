@@ -191,9 +191,9 @@ agents:
     review: {description: Read-only change review, edit: deny, shell: ask}
 ```
 
-- Secrets stay environment references (`envVars`, `bearerTokenEnv`); nothing secret reaches the config repo or the agents' files.
-- zakwas removes only what it added. A server or rule it didn't add is adopted when identical and fails the plan when it differs.
-- With an `agents` section the guard is on: the managed agents are denied `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`, and `apply` refuses to run from an agent session, so a prompt injection can't widen an agent's own permissions. Agents keep `plan`, `check`, `capture` and `propose`. Set `agents.guard: false` to turn it off.
+- Secrets stay environment references (`envVars`, `bearerTokenEnv`); a secret declared that way reaches neither the config repo nor the agents' files. `env`, `headers`, `args` and `url` are written as they are, so keep tokens out of them.
+- zakwas removes only what it added. An MCP server it didn't add is adopted when identical and fails the plan when it differs; rules you wrote stay untouched.
+- With an `agents` section the guard is on: the managed agents are denied `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`, and `apply`, `upgrade` and `approve` refuse to run from an agent session, so a prompt injection can't widen an agent's own permissions. Agents keep `plan`, `check`, `capture` and `propose`. Set `agents.guard: false` to turn it off.
 - When you change an agent by hand, `zakwas capture` finds it, an agent or you `propose` a change, and you `zakwas approve` it in a terminal.
 
 The [agents guide](docs/agents.md) has the provider support matrix and the day-to-day flow, [docs/examples.md](docs/examples.md) a tested recipe per feature, [docs/config.md](docs/config.md#agents) every key, and [docs/security.md](docs/security.md#coding-agents) the protection model.

@@ -31,7 +31,7 @@ Each provider plans on its own. When one fails, for example because its CLI is m
 | | Claude Code | Codex | opencode | Gemini CLI | Copilot CLI |
 |---|---|---|---|---|---|
 | Converged | by default | opt-in | by default, best effort | opt-in | opt-in |
-| CLI on `PATH` | for plugins | for plugins | for plugins | always | for plugins |
+| CLI on `PATH` | for plugins | for plugins | by default, for anything; when named, for plugins and hooks | always | for plugins |
 | Plugins, marketplaces | yes | yes | no plugin system: the skills of declared plugins are linked | no | yes |
 | MCP servers | `.claude.json` | `config.toml` | `agentMCP` in an `opencode.json` template | extension manifest | `mcp-config.json` |
 | Instructions | `CLAUDE.md` | `AGENTS.md` (32 KiB limit) | `AGENTS.md` | extension context file | `instructions/zakwas.instructions.md` |
@@ -96,15 +96,15 @@ zakwas propose add-mcp docs --command npx --arg -y --arg @example/docs-mcp --env
 zakwas proposals
 ```
 
-From an agent, over MCP. Register the server once, and the agent gets read-only tools for the config, the plan, the drift check and capture, plus `zakwas_propose`:
+From an agent, over MCP. Register the server once, and the agent gets read-only tools for the config, the plan, the drift check and capture, plus `zakwas_propose` (and `zakwas_proposals` and `zakwas_discard` to list and delete pending proposals):
 
 ```yaml
 agents:
   mcp:
-    zakwas: {command: zakwas, args: [mcp, -c, ~/dotfiles/zakwas.yaml]}
+    zakwas: {command: zakwas, args: [mcp, -c, /Users/you/dotfiles/zakwas.yaml]}
 ```
 
-Pass `-c`: an agent starts the server in whatever directory it is in. With the `zakwas` plugin installed (`agents.marketplaces: {zakwas: Automaat/zakwas}`, `agents.plugins: [zakwas@zakwas]`), the agent also knows to propose changes instead of editing agent config or `zakwas.yaml`. See [mcp](commands.md#mcp) and [teach agents the flow](commands.md#teach-agents-the-flow).
+Pass `-c` with an absolute path (zakwas does not expand `~` there, and the agent starts the server in whatever directory it is in). With the `zakwas` plugin installed (`agents.marketplaces: {zakwas: Automaat/zakwas}`, `agents.plugins: [zakwas@zakwas]`), the agent also knows to propose changes instead of editing agent config or `zakwas.yaml`. See [mcp](commands.md#mcp) and [teach agents the flow](commands.md#teach-agents-the-flow).
 
 The agent cannot apply anything through this. The [guard](config.md#guard) denies it `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`.
 
@@ -116,7 +116,7 @@ zakwas approve 3f9a1c2b
 
 `approve` shows the diff and plan again, computed from the current files, asks, applies only the modules the proposal affects, and commits the edited files to the current branch of the config repo. It never pushes. It needs a terminal on stdin and has no `-y`. A proposal expires after 7 days, and `approve` refuses one whose files changed since.
 
-Every proposal has a tier. A low-risk one (a plugin from a declared marketplace, a new `deny` rule, a core Homebrew formula, a mise pin) can optionally be applied from inside the agent: start the server as `zakwas mcp --enable-apply` and the agent gets `zakwas_apply`, which applies only after you answer yes to a diff and plan that zakwas renders in the agent. A high-risk one (an `allow` rule, an MCP server, a marketplace, a cask, or anything whose plan touches agent config, shell rc files, `~/.ssh` or `/etc`) always goes to `zakwas approve`. Why the split, and what `--enable-apply` leaves open, is in [security.md](security.md#proposals-and-who-may-approve).
+Every proposal has a tier. Permission rules are rated high in practice, since writing them changes agent config files. A low-risk one (a plugin from a declared marketplace, a core Homebrew formula, a mise pin) can optionally be applied from inside the agent: start the server as `zakwas mcp --enable-apply` and the agent gets `zakwas_apply`, which applies only after you answer yes to a diff and plan that zakwas renders in the agent. A high-risk one (an `allow` rule, an MCP server, a marketplace, a cask, or anything whose plan touches agent config, shell rc files, `~/.ssh` or `/etc`) always goes to `zakwas approve`. Why the split, and what `--enable-apply` leaves open, is in [security.md](security.md#proposals-and-who-may-approve).
 
 ### Apply, then keep checking
 

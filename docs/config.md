@@ -619,7 +619,7 @@ An agent that can run `zakwas apply`, or edit the config repo or zakwas state, c
 - **Refusal.** `zakwas apply`, `zakwas upgrade` and `zakwas approve` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, `COPILOT_AGENT_SESSION_ID`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and, with `zakwas propose`, save a change for you to [approve](commands.md#approve) in a terminal.
 - **Providers that can't be protected.** The plan lists a managed provider the guard can't cover, under `agents`: opencode when no template renders `agentPermissions "opencode"` into its `opencode.json`, and Copilot CLI, which has no user-level deny rules, so only the refusal covers it. Such a warning doesn't count as a change, so `check` stays clean.
 
-Codex, Gemini and Copilot are guarded only when `zakwas.yaml` names them, like their other settings. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
+Codex, Gemini and Copilot are guarded only when `agents.providers`, a marketplace's or a plugin's `providers` names them; naming one only in an `mcp`, `skills`, `profiles`, `permissions` or `hooks` entry converges it but does not guard it. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
 
 ### Gemini CLI
 
