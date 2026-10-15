@@ -183,6 +183,26 @@ Find a macOS preference key: `defaults read > a`, toggle it in System Settings, 
 
 See [docs/config.md](docs/config.md#permissions).
 
+### Agent MCP servers
+
+`agents.mcp` declares each MCP server once, as a stdio `command` or an HTTP `url`, and zakwas registers it at user scope in Claude Code (`~/.claude.json`) and Codex (`config.toml`):
+
+```yaml
+agents:
+  mcp:
+    docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
+    search: {url: https://mcp.example.com/mcp, bearerTokenEnv: SEARCH_TOKEN}
+    linear: {url: https://mcp.linear.app/mcp, oauth: true, providers: [claude, codex]}
+```
+
+- Secrets stay environment references: `${X}` for Claude, `env_vars` and `bearer_token_env_var` for Codex, `{env:X}` for opencode.
+- Codex tables are edited in place, so the rest of `config.toml`, comments included, stays byte-identical.
+- A same-named server zakwas didn't add is adopted when identical and fails the plan when it differs; removing a server, or the whole `agents` section, removes only what zakwas added.
+- `plan` and `check` start no server and open no browser; OAuth servers show how to log in.
+- In an opencode template, write `"mcp": {{ agentMCP "opencode" }}`.
+
+See [docs/config.md](docs/config.md#mcp).
+
 ## Protected dotfiles
 
 `files` and `templates` write copies with write bits stripped; `protect.immutable` adds the macOS `uchg` flag (blocks `:w!`, `chmod`, `rm`). To change one, edit it in the repo and `zakwas apply`.

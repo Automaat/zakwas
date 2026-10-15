@@ -51,7 +51,7 @@ type Link struct {
 
 type Templates struct {
 	Vars  map[string]string `yaml:"vars" jsonschema_description:"Values available to every template as '{{ .Vars.<name> }}'. A template referencing a missing var fails."`
-	Files []TemplateFile    `yaml:"files" jsonschema_description:"Templates to render. Each template also sees '{{ .Home }}', your home directory, and can call the agentPermissions function to render agents.permissions as opencode's permission.bash object."`
+	Files []TemplateFile    `yaml:"files" jsonschema_description:"Templates to render. Each template also sees '{{ .Home }}', your home directory, and can call the agentPermissions function to render agents.permissions as opencode's permission.bash object and the agentMCP function to render agents.mcp as its mcp object."`
 }
 
 type TemplateFile struct {

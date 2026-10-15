@@ -167,6 +167,29 @@ defaults:
 		{"command hook outside providers", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check, providers: [codex]}]}}", []string{`agents.hooks.commands[0].providers: provider "codex" is not in agents.providers`}},
 		{"duplicate command hook", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check}, {event: stop, command: check}]}}", []string{"agents.hooks.commands[1]: duplicates agents.hooks.commands[0]"}},
 		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"field dir not found"}},
+		{"mcp server without command or url", "agents: {mcp: {docs: {}}}", []string{"agents.mcp.docs: set command for a stdio server or url for an HTTP server"}},
+		{"mcp server with command and url", "agents: {mcp: {docs: {command: x, url: 'https://e.com'}}}", []string{"agents.mcp.docs: set either command or url, not both"}},
+		{"mcp name with a space", "agents: {mcp: {'my server': {command: x}}}", []string{"agents.mcp.my server: name may only contain"}},
+		{"mcp names differing in case", "agents: {mcp: {Foo: {command: x}, foo: {command: x}}}", []string{"agents.mcp.foo: differs from Foo only in case"}},
+		{"mcp stdio with headers", "agents: {mcp: {a: {command: x, headers: {A: b}}}}", []string{"agents.mcp.a: headers only applies to a server with a url"}},
+		{"mcp stdio with bearer token", "agents: {mcp: {a: {command: x, bearerTokenEnv: T}}}", []string{"agents.mcp.a: bearerTokenEnv only applies to a server with a url"}},
+		{"mcp http with args", "agents: {mcp: {a: {url: 'https://e.com', args: [x]}}}", []string{"agents.mcp.a: args only applies to a server with a command"}},
+		{"mcp http with env vars", "agents: {mcp: {a: {url: 'https://e.com', envVars: [X]}}}", []string{"agents.mcp.a: envVars only applies to a server with a command"}},
+		{"mcp url scheme", "agents: {mcp: {a: {url: 'ftp://e.com'}}}", []string{`agents.mcp.a: url "ftp://e.com" must be an http:// or https:// URL`}},
+		{"mcp url without host", "agents: {mcp: {a: {url: 'https://'}}}", []string{"must be an http:// or https:// URL"}},
+		{"mcp env name", "agents: {mcp: {a: {command: x, env: {'A B': c}}}}", []string{`agents.mcp.a: env name "A B" is not a valid environment variable name`}},
+		{"mcp env var name", "agents: {mcp: {a: {command: x, envVars: ['1X']}}}", []string{`agents.mcp.a: envVars[0] "1X" is not a valid environment variable name`}},
+		{"mcp duplicate env var", "agents: {mcp: {a: {command: x, envVars: [X, X]}}}", []string{`agents.mcp.a: envVars lists "X" twice`}},
+		{"mcp env var also in env", "agents: {mcp: {a: {command: x, env: {X: '1'}, envVars: [X]}}}", []string{`agents.mcp.a: "X" is in both env and envVars`}},
+		{"mcp bearer token env name", "agents: {mcp: {a: {url: 'https://e.com', bearerTokenEnv: 'a-b'}}}", []string{`agents.mcp.a: bearerTokenEnv "a-b" is not a valid environment variable name`}},
+		{"mcp header env name", "agents: {mcp: {a: {url: 'https://e.com', headerEnv: {X-Key: 'a b'}}}}", []string{`agents.mcp.a: headerEnv "X-Key": "a b" is not a valid environment variable name`}},
+		{"mcp header name", "agents: {mcp: {a: {url: 'https://e.com', headers: {'X Key': v}}}}", []string{`agents.mcp.a: headers name "X Key" is not a valid HTTP header name`}},
+		{"mcp header set twice", "agents: {mcp: {a: {url: 'https://e.com', headers: {x-key: v}, headerEnv: {X-Key: K}}}}", []string{`agents.mcp.a: header "X-Key" is set in both headers and headerEnv`}},
+		{"mcp bearer token and authorization header", "agents: {mcp: {a: {url: 'https://e.com', headers: {authorization: v}, bearerTokenEnv: T}}}", []string{`agents.mcp.a: header "Authorization" is set in both headers and bearerTokenEnv`}},
+		{"mcp oauth and bearer token", "agents: {mcp: {a: {url: 'https://e.com', oauth: true, bearerTokenEnv: T}}}", []string{"agents.mcp.a: oauth can't be combined with an Authorization header (bearerTokenEnv)"}},
+		{"mcp control character", "agents: {mcp: {a: {command: x, args: [\"a\\nb\"]}}}", []string{"agents.mcp.a: values may not hold control characters"}},
+		{"mcp provider not managed", "agents: {providers: [claude], mcp: {a: {command: x, providers: [codex]}}}", []string{`agents.mcp.a.providers: provider "codex" is not in agents.providers`}},
+		{"mcp unknown field", "agents: {mcp: {a: {command: x, cmd: y}}}", []string{"field cmd not found"}},
 		{"empty permission", "agents: {permissions: {allow: ['  ']}}", []string{"agents.permissions.allow[0]: command is required"}},
 		{"null permission command", "agents: {permissions: {deny: [{providers: [claude]}]}}", []string{"agents.permissions.deny[0]: command is required"}},
 		{"permission with a glob", "agents: {permissions: {allow: ['git *']}}", []string{`agents.permissions.allow[0]: "git *" contains '*'`}},
@@ -241,6 +264,14 @@ agents:
     allow: [git status, sed -n, {command: peekaboo see, providers: [codex]}, /usr/bin/env -i]
     review: [git push, {command: peekaboo see, providers: [claude]}]
     deny: [{command: git push --force, justification: 'use "git push --force-with-lease"'}, npm run lint:fix]`},
+		{"mcp servers", `
+agents:
+  providers: [claude, codex, opencode]
+  mcp:
+    docs: {command: npx, args: [-y, docs-mcp], env: {LANG: C}, envVars: [DOCS_TOKEN]}
+    web: {url: 'https://e.com/mcp', bearerTokenEnv: WEB_TOKEN, headers: {X-Org: acme}, headerEnv: {X-Key: KEY}, providers: [claude, codex]}
+    linear: {url: 'https://mcp.linear.app/mcp', oauth: true}`},
+		{"empty mcp", "agents: {mcp: {}}"},
 		{"empty permissions", "agents: {permissions: {}}"},
 		{"codex decision differs while codex is not named", "agents: {permissions: {allow: [git push], deny: [{command: git push, providers: [codex]}]}}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
@@ -395,5 +426,37 @@ agents:
 	var none *Agents
 	if got := none.PermissionsFor(ProviderClaude); got != nil {
 		t.Errorf("nil agents = %v", got)
+	}
+}
+
+func TestAgentsMCPFor(t *testing.T) {
+	c, err := Load(writeConfig(t, `
+agents:
+  mcp:
+    b: {command: b}
+    a: {command: a, providers: [codex, opencode]}
+    c: {url: 'https://e.com', providers: [claude]}
+`), "/h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := func(provider string) []string {
+		var out []string
+		for _, s := range c.Agents.MCPFor(provider) {
+			out = append(out, s.Name)
+		}
+		return out
+	}
+	for provider, want := range map[string][]string{
+		ProviderClaude:   {"b", "c"},
+		ProviderCodex:    {"a"},
+		ProviderOpencode: {"a", "b"},
+	} {
+		if got := names(provider); !slices.Equal(got, want) {
+			t.Errorf("%s servers = %v, want %v", provider, got, want)
+		}
+	}
+	if got := (*Agents)(nil).MCPFor(ProviderClaude); got != nil {
+		t.Errorf("nil agents servers = %v", got)
 	}
 }

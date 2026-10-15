@@ -184,6 +184,8 @@ Templates see `{{ .Home }}` (your home directory) and `{{ .Vars.x }}`. Referenci
 
 Templates can also call `{{ agentPermissions "opencode" }}` or `{{ agentPermissions "opencode" "<default>" }}`, where the default is `allow`, `ask` or `deny`. It returns [`agents.permissions`](#permissions) as one line of JSON for opencode's `permission.bash`, holding only the entries that target opencode. The catch-all `"*": "<default>"` comes first when given, then `"<cmd>"` and `"<cmd> *"` for each `allow`, `review` (as `ask`) and `deny` entry, in that order. For example, `"bash": {{ agentPermissions "opencode" "ask" }}` renders as `"bash": {"*": "ask", "git status": "allow", "git status *": "allow", "git push --force": "deny", "git push --force *": "deny"}`. Without an `agents.permissions` section the output is only the catch-all, or `{}`. Any other provider fails the template.
 
+`{{ agentMCP "opencode" }}` returns [`agents.mcp`](#mcp) as one line of JSON for opencode's `mcp` key, holding the servers that target opencode, sorted by name. Any other provider fails the template.
+
 ```yaml
 templates:
   vars:
@@ -265,6 +267,7 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `hooks.commands` | list | no | | Shared command hooks, each with `event`, `command`, and optional `providers`. See below. |
 | `hooks.klaudiush` | bool | no | `false` | Register klaudiush's enabled providers. See below. |
 | `permissions.allow`, `permissions.review`, `permissions.deny` | list | no | | Shell command prefixes the agents may run without asking, must have reviewed, or must never run. Each is a command string, or `{command, providers, justification}`. See [permissions](#permissions). |
+| `mcp` | map | no | | MCP server name → `{command, args, env, envVars}` for a stdio server or `{url, headers, headerEnv, bearerTokenEnv, oauth}` for an HTTP one, each with optional `providers`. See [mcp](#mcp). |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 
 A marketplace `source` is a GitHub `owner/repo` or a git URL (either optionally with `#ref`), or a local path starting with `./`, `../`, `~/` or `/` (relative paths resolve from the directory holding `zakwas.yaml`). A marketplace targets `agents.providers` unless it lists its own `providers`; a plugin targets its marketplace's providers unless it lists its own, which must be a subset.
@@ -370,6 +373,69 @@ If you edit `zakwas.rules` by hand, zakwas backs it up to `zakwas.rules.zakwas-b
 opencode applies the last pattern that matches. The function therefore writes the optional catch-all `"*"` first, then the `allow`, `review` (`ask`) and `deny` entries in that order, so a deny always wins. Each entry becomes two patterns, `"<cmd>"` and `"<cmd> *"`. opencode merges its built-in defaults, the global `permission`, then each agent's own `permission`. An agent block that declares its own `bash`, for example `{"*": "allow"}`, overrides the global rules for that agent, so call the function in every agent block that declares `bash` too.
 
 `zakwas plan` lists the added and removed rules per file (`--diff` shows them), and `zakwas check` reports drift when `settings.json`, `zakwas.rules` or the rendered `opencode.json` no longer match. Removing `permissions`, or the whole `agents` section, removes the Claude rules and the Codex file zakwas wrote. Don't also manage `zakwas.rules` with `files`, `links` or `templates`.
+
+### mcp
+
+`agents.mcp` declares each MCP server once, under a name (letters, digits, `_` and `-`), and zakwas registers it at user scope in Claude Code and Codex. A server has either a `command` (stdio) or a `url` (HTTP); `providers` defaults to `agents.providers`, with Codex opt-in as for plugins.
+
+| Key | For | Description |
+|---|---|---|
+| `command`, `args` | stdio | The command that starts the server, and its arguments. |
+| `env` | stdio | Environment variables with their values. Written to the agents' config as is. |
+| `envVars` | stdio | Names of environment variables passed through from the agent's own environment. |
+| `url` | HTTP | `http://` or `https://` URL of the server. |
+| `headers` | HTTP | Header names with their values. Written to the agents' config as is. |
+| `headerEnv` | HTTP | Header name → name of the environment variable holding its value. |
+| `bearerTokenEnv` | HTTP | Name of the environment variable holding a bearer token, sent as `Authorization: Bearer <token>`. |
+| `oauth` | HTTP | The server signs in with OAuth; `plan` and `apply` show the login command. Not combined with `bearerTokenEnv` or an `Authorization` header. |
+| `providers` | both | Providers to register the server with; must be in `agents.providers`. |
+
+Secrets never go into the config zakwas writes: `envVars`, `headerEnv` and `bearerTokenEnv` name the environment variable and each agent reads it in its own way. `env`, `headers` and `args` are written as they are, so keep tokens out of them.
+
+```yaml
+agents:
+  providers: [claude, codex, opencode]
+  mcp:
+    docs:
+      command: npx
+      args: [-y, "@example/docs-mcp"]
+      envVars: [DOCS_TOKEN]
+    search:
+      url: https://mcp.example.com/mcp
+      bearerTokenEnv: SEARCH_TOKEN
+    linear:
+      url: https://mcp.linear.app/mcp
+      oauth: true
+      providers: [claude, codex]
+```
+
+| Provider | Where | A secret variable `X` becomes |
+|---|---|---|
+| Claude Code | `mcpServers` in `.claude.json`: `${CLAUDE_CONFIG_DIR}/.claude.json`, or `~/.claude.json` | `${X}` in `env` or `headers` |
+| Codex | `[mcp_servers.<name>]` in `${CODEX_HOME:-~/.codex}/config.toml` | `env_vars`, `bearer_token_env_var`, `env_http_headers` |
+| opencode | the `agentMCP` template function (below) | `{env:X}` in `environment` or `headers` |
+
+**Claude Code.** `claude mcp get` starts the server it reports on, so zakwas reads `.claude.json` instead and edits only the entry of the server it changes. The rest of the file keeps its key order and values. If Claude Code saves the file while zakwas edits it, zakwas redoes its edit on the new content, and gives up after three tries.
+
+**Codex.** `codex mcp add` rewrites every `[mcp_servers.*]` table and drops their comments, and it opens a browser for OAuth servers. zakwas edits the server's own tables in `config.toml` as text instead: a changed or removed server rewrites only the lines from its `[mcp_servers.<name>]` header to its last key, subtables included. Everything else, comments included, stays byte-identical, and a new server is appended at the end of the file. Comments directly above a server's header are not part of it and stay. A server written as an inline table (`[mcp_servers]` with `name = { … }`) can't be edited in place: if it differs from `zakwas.yaml`, or has to change or go, the plan fails and says to do it by hand.
+
+**opencode.** zakwas doesn't edit `opencode.json`, which is usually a [template](#templates). Render the servers into its `mcp` key with `agentMCP`:
+
+```json
+{
+  "mcp": {{ agentMCP "opencode" }}
+}
+```
+
+A server targets opencode through its `providers` or, without them, `agents.providers`. A stdio server renders as `{"type": "local", "command": [command, args…], "environment": {…}, "enabled": true}` and an HTTP one as `{"type": "remote", "url": …, "headers": {…}, "enabled": true}`; a server with headers also gets `"oauth": false`, so opencode doesn't start a login for it.
+
+**Ownership.** zakwas records the servers it registered, with a hash of each entry, in `~/.local/state/zakwas/agent-mcp.json`:
+
+- A server of the same name that zakwas did not add is adopted, without rewriting its file, when it is identical to the declaration. When it differs, the provider's plan fails and names the differing keys, never their values; remove the server or make `zakwas.yaml` match.
+- Changing a declared server changes only that server. Removing it, removing `mcp`, or removing the whole `agents` section removes only servers zakwas registered, shown as destructive in the plan. A server edited since zakwas wrote it is left in place and only forgotten.
+- When the config dir moves (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the servers zakwas registered in the old file are removed there.
+
+`plan` and `check` only read the two files: they start no MCP server and open no browser. A server with `oauth: true` shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
 
 ## system
 

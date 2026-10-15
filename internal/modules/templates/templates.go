@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,7 +30,7 @@ type Data struct {
 }
 
 // Module renders templates. Agents, which may be nil, feeds the
-// agentPermissions function.
+// agentPermissions and agentMCP functions.
 type Module struct {
 	Templates config.Templates
 	Agents    *config.Agents
@@ -85,6 +86,9 @@ func Funcs(agents *config.Agents) template.FuncMap {
 		"agentPermissions": func(provider string, catchAll ...string) (string, error) {
 			return agentPermissions(agents, provider, catchAll...)
 		},
+		"agentMCP": func(provider string) (string, error) {
+			return agentMCP(agents, provider)
+		},
 	}
 }
 
@@ -138,6 +142,76 @@ func agentPermissions(agents *config.Agents, provider string, catchAll ...string
 		if err := errors.Join(add(p.Command(), action), add(p.Command()+" *", action)); err != nil {
 			return "", err
 		}
+	}
+	b.WriteByte('}')
+	return b.String(), nil
+}
+
+// opencodeMCP is one entry of opencode's mcp object.
+type opencodeMCP struct {
+	Type        string            `json:"type"`
+	Command     []string          `json:"command,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	OAuth       *bool             `json:"oauth,omitempty"`
+	Enabled     bool              `json:"enabled"`
+}
+
+func opencodeServer(s config.MCPServer) opencodeMCP {
+	if !s.IsHTTP() {
+		env := maps.Clone(s.Env)
+		if env == nil {
+			env = map[string]string{}
+		}
+		for _, name := range s.EnvVars {
+			env[name] = "{env:" + name + "}"
+		}
+		return opencodeMCP{Type: "local", Command: append([]string{s.Command}, s.Args...), Environment: env, Enabled: true}
+	}
+	headers := maps.Clone(s.Headers)
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	for h, name := range s.HeaderEnv {
+		headers[h] = "{env:" + name + "}"
+	}
+	if s.BearerTokenEnv != "" {
+		headers["Authorization"] = "Bearer {env:" + s.BearerTokenEnv + "}"
+	}
+	out := opencodeMCP{Type: "remote", URL: s.URL, Headers: headers, Enabled: true}
+	if len(headers) > 0 {
+		off := false
+		out.OAuth = &off
+	}
+	return out
+}
+
+// agentMCP renders agents.mcp as opencode's mcp object, one line of JSON
+// holding the servers that target opencode.
+func agentMCP(agents *config.Agents, provider string) (string, error) {
+	if provider != config.ProviderOpencode {
+		return "", fmt.Errorf("agentMCP: provider %q is not supported, only %s", provider, config.ProviderOpencode)
+	}
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, s := range agents.MCPFor(provider) {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		key, err := json.Marshal(s.Name)
+		if err != nil {
+			return "", err
+		}
+		var value bytes.Buffer
+		enc := json.NewEncoder(&value)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(opencodeServer(s.MCPServer)); err != nil {
+			return "", err
+		}
+		b.Write(key)
+		b.WriteString(": ")
+		b.Write(bytes.TrimRight(value.Bytes(), "\n"))
 	}
 	b.WriteByte('}')
 	return b.String(), nil

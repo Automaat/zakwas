@@ -172,6 +172,11 @@ func writeObjectIf(path string, o object, read []byte) error {
 	if err != nil {
 		return err
 	}
+	return writeBytesIf(path, out, read)
+}
+
+// writeBytesIf replaces path with out, as writeObjectIf does for an object.
+func writeBytesIf(path string, out, read []byte) error {
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		path = real
 	}
@@ -219,6 +224,11 @@ func createObject(path string, o object, perm fs.FileMode) error {
 	if err != nil {
 		return err
 	}
+	return createBytes(path, out, perm)
+}
+
+// createBytes is createObject for rendered content.
+func createBytes(path string, out []byte, perm fs.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

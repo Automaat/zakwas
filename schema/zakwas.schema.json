@@ -121,7 +121,7 @@
               "dst"
             ]
           },
-          "description": "Templates to render. Each template also sees '{{ .Home }}', your home directory, and can call the agentPermissions function to render agents.permissions as opencode's permission.bash object.",
+          "description": "Templates to render. Each template also sees '{{ .Home }}', your home directory, and can call the agentPermissions function to render agents.permissions as opencode's permission.bash object and the agentMCP function to render agents.mcp as its mcp object.",
           "type": [
             "array",
             "null"
@@ -716,6 +716,134 @@
           },
           "additionalProperties": false,
           "description": "Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "mcp": {
+          "additionalProperties": {
+            "properties": {
+              "command": {
+                "minLength": 1,
+                "description": "Command that starts a stdio server. Set either 'command' or 'url'.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "args": {
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments of the command. Written to the agents' config as is, so keep secrets out of them.",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "env": {
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "description": "Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "envVars": {
+                "items": {
+                  "type": "string"
+                },
+                "uniqueItems": true,
+                "description": "Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, opencode environment NAME={env:NAME}.",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "url": {
+                "minLength": 1,
+                "description": "URL of an HTTP (streamable) server, http:// or https://. Set either 'command' or 'url'.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "description": "HTTP headers with their values. Written to the agents' config as is, so use 'headerEnv' or 'bearerTokenEnv' for secrets.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "headerEnv": {
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "description": "HTTP headers whose value is read from an environment variable: header name to variable name.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "bearerTokenEnv": {
+                "minLength": 1,
+                "description": "Name of the environment variable holding a bearer token, sent as 'Authorization: Bearer <token>'.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "oauth": {
+                "description": "The server signs in with OAuth. Nothing is registered differently; plan and apply show how to log in, because zakwas never opens a browser. Not combined with bearerTokenEnv or an Authorization header. Default false.",
+                "default": false,
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "providers": {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "opencode"
+                  ]
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Providers to register this server with; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins.",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "type": "object"
+          },
+          "description": "MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added.",
           "type": [
             "object",
             "null"
