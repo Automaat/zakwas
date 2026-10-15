@@ -1,0 +1,41 @@
+mkdir other
+cd other
+
+zakwas apply -y -c $HOME/dotfiles/zakwas.yaml --only files,links
+
+exec sh $WORK/hook.sh
+! stdout .
+! stderr .
+
+chmod 644 $HOME/.config/git/config
+exec sh -c 'echo "[core] editor = nano" >> $HOME/.config/git/config'
+exec sh $WORK/hook.sh
+stdout 'this Mac drifted from its config'
+stdout 'edited in place'
+
+! zakwas check --offline
+stderr 'zakwas.yaml not found'
+
+mv $HOME/dotfiles/zakwas.yaml $HOME/dotfiles/zakwas.yaml.off
+exec sh $WORK/hook.sh
+stdout 'zakwas: could not check drift: .*no such file'
+
+-- hook.sh --
+#!/bin/sh
+out=$(zakwas check --offline -c "$HOME/dotfiles/zakwas.yaml" 2>&1)
+case $? in
+  0|127) ;;
+  2) printf 'zakwas: this Mac drifted from its config. Pending changes:\n%s\n' "$out" ;;
+  *) printf 'zakwas: could not check drift: %s\n' "$out" ;;
+esac
+exit 0
+-- home/dotfiles/zakwas.yaml --
+files:
+  - {src: gitconfig, dst: ~/.config/git/config}
+links:
+  - {src: zshrc, dst: ~/.zshrc}
+-- home/dotfiles/gitconfig --
+[user]
+	name = Test
+-- home/dotfiles/zshrc --
+export EDITOR=vim
