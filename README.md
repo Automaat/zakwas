@@ -10,7 +10,7 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: GUI apps and formulae from a `Brewfile` (`brew bundle`, optional zap cleanup)
 - **mise**: CLI tools pinned in a global mise config
-- **agents**: coding-agent plugins and marketplaces (Claude Code and Codex; skills for opencode), MCP servers, skills, permissions and profiles for Claude Code, Codex, opencode and, opt-in, Gemini CLI, global instructions rendered per provider from one or more files, and shared command hooks
+- **agents**: coding-agent plugins and marketplaces (Claude Code and Codex; skills for opencode), MCP servers, skills, permissions and profiles for Claude Code, Codex, opencode and, opt-in, Gemini CLI, global instructions rendered per provider from one or more files, shared command hooks, and selected global Codex settings
 - **defaults**: macOS preferences (`defaults write`, restarts Dock/Finder when needed)
 - **system**: Touch ID for sudo, directories, SSH key
 - **commands**: guarded one-off steps (`run` only while `check` fails)

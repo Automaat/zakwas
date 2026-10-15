@@ -23,6 +23,11 @@ mise:
 
 # agents:
 #   providers: [claude, codex, opencode]  # codex and gemini are opt-in: name them to converge them
+#   codex:
+#     settings:  # global config.toml values, independent of profiles
+#       agents:
+#         enabled: true
+#         max_concurrent_threads_per_session: 8
 #   instructions: [dotfiles/AGENTS.md]  # one rendered copy per agent
 #   hooks:
 #     commands:

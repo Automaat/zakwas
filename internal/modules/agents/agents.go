@@ -139,6 +139,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	errs = append(errs, permErr)
 	mcp, mcpFailed, mcpErr := m.planMCP()
 	errs = append(errs, mcpErr)
+	settings, settingsErr := m.planCodexSettings()
 	profiles, profileFailed, profileErr := m.planProfiles()
 	errs = append(errs, profileErr)
 	skills, skillFailed, skillErr := m.planSkills()
@@ -160,7 +161,11 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			delete(skills, p)
 			continue
 		}
-		failure := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p], profileFailed[p], skillFailed[p])
+		var providerSettingsErr error
+		if p == config.ProviderCodex {
+			providerSettingsErr = settingsErr
+		}
+		failure := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p], profileFailed[p], skillFailed[p], providerSettingsErr)
 		if p == config.ProviderGemini {
 			failure = errors.Join(failure, geminiErr)
 		}
@@ -176,6 +181,9 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		changes = append(changes, commandHooks[p]...)
 		changes = append(changes, permissions[p]...)
 		changes = append(changes, mcp[p]...)
+		if p == config.ProviderCodex {
+			changes = append(changes, settings...)
+		}
 		changes = append(changes, profiles[p]...)
 		delete(profiles, p)
 		changes = append(changes, skills[p]...)
