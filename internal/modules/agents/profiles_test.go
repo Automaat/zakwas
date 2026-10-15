@@ -475,6 +475,73 @@ func TestAgentFilesRejectSharedDestinations(t *testing.T) {
 	}
 }
 
+func TestAgentFilesRejectDestinationsThroughSymlinkedDirs(t *testing.T) {
+	tests := []struct {
+		name   string
+		agents config.Agents
+		dst    func(alias string) string
+		want   string
+	}{
+		{
+			name:   "profile file reached through a symlinked config dir",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			dst:    func(alias string) string { return filepath.Join(alias, "agents", "zakwas", "p.md") },
+			want:   "is also written by files[0]",
+		},
+		{
+			name:   "profile file under a directory that does not exist yet",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			dst:    func(alias string) string { return filepath.Join(alias, "agents", "zakwas", "new", "p.md") },
+		},
+		{
+			name:   "managed directory reached through a symlinked config dir",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			dst:    func(alias string) string { return filepath.Join(alias, "agents") },
+			want:   "is also written by files[0]",
+		},
+		{
+			name:   "instructions file reached through a symlinked config dir",
+			agents: config.Agents{Instructions: config.InstructionFiles{"AGENTS.md"}},
+			dst:    func(alias string) string { return filepath.Join(alias, "CLAUDE.md") },
+			want:   "is also written by files[0]",
+		},
+		{
+			name:   "neighbour reached through a symlinked config dir",
+			agents: config.Agents{Profiles: map[string]config.Profile{"p": {Description: "d"}}},
+			dst:    func(alias string) string { return filepath.Join(alias, "settings.json") },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := profileModule(t, tt.agents)
+			writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "x")
+			claudeDir := filepath.Join(m.Paths.Home, ".claude")
+			if err := os.MkdirAll(filepath.Join(claudeDir, "agents", "zakwas"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(t.TempDir(), "alias")
+			if err := os.Symlink(claudeDir, alias); err != nil {
+				t.Fatal(err)
+			}
+			dst := tt.dst(alias)
+			m.Destinations = []config.Destination{{What: "files[0]", Dst: dst, Path: dst}}
+			changes, err := m.Plan(context.Background())
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tt.want)
+			}
+			if len(changes) != 0 {
+				t.Errorf("planned %v despite the shared destination", groups(changes))
+			}
+		})
+	}
+}
+
 func TestAgentFilesAcceptNeighbouringDestinations(t *testing.T) {
 	m := profileModule(t, config.Agents{
 		Instructions: config.InstructionFiles{"AGENTS.md"},

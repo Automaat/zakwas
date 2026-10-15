@@ -233,6 +233,15 @@ defaults:
 		{"profile map reached through an alias", "agents: {mcp: &m {null: {command: x}}, profiles: *m}", []string{"agents.profiles: a profile cannot be named null"}},
 		{"profile map reached through a merge key", "agents: {profiles: {<<: {null: {description: d}}}}", []string{"agents.profiles: a profile cannot be named null"}},
 		{"profile map merged from a list of aliases", "agents: {mcp: &a {null: {command: x}}, profiles: {<<: [*a]}}", []string{"agents.profiles: a profile cannot be named null"}},
+		{"agents reached through a merge key", "agents:\n  <<: {profiles: {null: {description: d}}}", []string{"line 2:", "agents.profiles: a profile cannot be named null"}},
+		{"profiles reached through a merge key in agents", "agents:\n  providers: [claude]\n  <<: {profiles: {ok: {description: d}, null: {description: d}}}", []string{"line 3:", "a profile cannot be named null"}},
+		{"agents reached through a root merge key", "<<: {agents: {profiles: {null: {description: d}}}}", []string{"line 1:", "a profile cannot be named null"}},
+		{"agents nested two merge keys deep", "agents: {<<: [{<<: {profiles: {null: {description: d}}}}]}", []string{"line 1:", "a profile cannot be named null"}},
+		{"profile named by an alias to null", "agents:\n  mcp: {&k null: {command: x}}\n  profiles:\n    ok: {description: d}\n    *k : {description: d}", []string{"line 5:", "a profile cannot be named null"}},
+		{"profile named by an alias to a tilde", "agents:\n  mcp: {&k ~: {command: x}}\n  profiles:\n    *k : {description: d}", []string{"line 4:", "a profile cannot be named null"}},
+		{"profile named by an alias in a merged map", "agents:\n  mcp: {&k null: {command: x}}\n  profiles:\n    <<: {*k : {description: d}}", []string{"line 4:", "a profile cannot be named null"}},
+		{"profile named by an alias reached through a merge key", "agents:\n  mcp: {&k null: {command: x}}\n  <<: {profiles: {*k : {description: d}}}", []string{"line 3:", "a profile cannot be named null"}},
+		{"profile named by an empty key", "agents:\n  profiles:\n    ? \n    : {description: d}", []string{"line 3:", "a profile cannot be named null"}},
 		{"profile name too long", "agents: {profiles: {" + strings.Repeat("a", MaxProfileName+1) + ": {description: d}}}", []string{"name is 65 characters long; at most 64 are allowed"}},
 		{"profile tool", "agents: {profiles: {r: {description: d, tools: [read, fly]}}}", []string{`agents.profiles.r: tools[1]: unknown tool "fly"`}},
 		{"profile edit without edit tool", "agents: {profiles: {r: {description: d, tools: [read], edit: allow}}}", []string{"agents.profiles.r: edit is allow but tools leaves out edit"}},
@@ -303,6 +312,12 @@ commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
 func TestLoadAccepts(t *testing.T) {
 	tests := []struct{ name, body string }{
 		{"profile named with a quoted null", `agents: {profiles: {"null": {description: d}}}`},
+		{"profile reached through a merge key", "agents: {<<: {profiles: {ok: {description: d}}}}"},
+		{"profile map overriding a null name in a merged one", "agents:\n  profiles: {ok: {description: d}}\n  <<: {profiles: {null: {description: d}}}"},
+		{"mcp server named null", "agents: {mcp: {null: {command: x}}}"},
+		{"mcp reached through a merge key with a null name", "agents: {<<: {mcp: {~: {command: x}}}}"},
+		{"profile named by an alias to a string", "agents: {mcp: {&k ok: {command: x}}, profiles: {*k : {description: d}}}"},
+		{"mcp server named by an alias to null", "agents: {mcp: {&k null: {command: x}, b: {command: x}}, providers: [claude]}"},
 		{"profile name at the length limit", "agents: {profiles: {" + strings.Repeat("a", MaxProfileName) + ": {description: d}}}"},
 		{"launchd jobs", `
 launchd:
@@ -717,6 +732,53 @@ func TestMCPPromptTools(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.s.PromptTools(); !slices.Equal(got, tc.want) {
 				t.Errorf("PromptTools() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPathsOverlapFollowsSymlinkedDirs(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	other := filepath.Join(root, "other")
+	for _, d := range []string{filepath.Join(real, "sub"), other} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias := filepath.Join(root, "alias")
+	chain := filepath.Join(root, "chain")
+	leaf := filepath.Join(real, "leaf")
+	for _, l := range [][2]string{{real, alias}, {alias, chain}, {other, leaf}} {
+		if err := os.Symlink(l[0], l[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"same spelling", filepath.Join(real, "sub", "f"), filepath.Join(real, "sub", "f"), true},
+		{"file through a symlinked dir", filepath.Join(real, "sub", "f"), filepath.Join(alias, "sub", "f"), true},
+		{"file through a chain of symlinks", filepath.Join(real, "sub", "f"), filepath.Join(chain, "sub", "f"), true},
+		{"directory and a file inside it through a symlink", filepath.Join(real, "sub"), filepath.Join(alias, "sub", "f"), true},
+		{"missing tail below a symlinked dir", filepath.Join(real, "sub", "new", "f"), filepath.Join(alias, "sub", "new", "f"), true},
+		{"differing case through a symlinked dir", filepath.Join(real, "sub", "F"), filepath.Join(alias, "SUB", "f"), true},
+		{"siblings through a symlinked dir", filepath.Join(real, "sub", "a"), filepath.Join(alias, "sub", "b"), false},
+		{"different directories", filepath.Join(real, "sub", "f"), filepath.Join(other, "f"), false},
+		{"symlinked last element is compared as written", leaf, filepath.Join(other, "x"), false},
+		{"missing paths stay lexical", filepath.Join(root, "gone", "f"), filepath.Join(root, "gone", "f"), true},
+		{"missing sibling paths", filepath.Join(root, "gone", "a"), filepath.Join(root, "gone", "b"), false},
+		{"unrelated missing roots", "/zakwas-missing/a/f", "/zakwas-missing/b/f", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PathsOverlap(tt.a, tt.b); got != tt.want {
+				t.Errorf("PathsOverlap(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+			if got := PathsOverlap(tt.b, tt.a); got != tt.want {
+				t.Errorf("PathsOverlap(%q, %q) = %v, want %v", tt.b, tt.a, got, tt.want)
 			}
 		})
 	}

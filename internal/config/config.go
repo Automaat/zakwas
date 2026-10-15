@@ -316,8 +316,29 @@ func (c *Config) Destinations(paths Paths) []Destination {
 }
 
 // PathsOverlap reports whether two absolute paths are the same file, or one
-// is inside the other, ignoring case.
-func PathsOverlap(a, b string) bool { return overlaps(foldPath(a), foldPath(b)) }
+// is inside the other, ignoring case. Symlinks in the directories that
+// exist are followed, so two spellings of one file overlap; the last
+// element is compared as written, and the part of a path that does not
+// exist yet is compared lexically.
+func PathsOverlap(a, b string) bool {
+	return overlaps(foldPath(resolveParents(a)), foldPath(resolveParents(b)))
+}
+
+func resolveParents(path string) string {
+	path = filepath.Clean(path)
+	orig := path
+	rest := filepath.Base(path)
+	dir := filepath.Dir(path)
+	for dir != path {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		path = dir
+		dir = filepath.Dir(dir)
+	}
+	return orig
+}
 
 func foldPath(path string) string { return strings.ToLower(filepath.Clean(path)) }
 

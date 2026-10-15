@@ -935,10 +935,28 @@ func rejectNullProfileNames(data []byte) error {
 
 const maxMergeDepth = 16
 
-func nullKeyLine(n *yaml.Node, depth int) int {
-	for n != nil && n.Kind == yaml.AliasNode {
+func resolveAlias(n *yaml.Node) *yaml.Node {
+	for depth := 0; n != nil && n.Kind == yaml.AliasNode && depth <= maxMergeDepth; depth++ {
 		n = n.Alias
 	}
+	if n != nil && n.Kind == yaml.AliasNode {
+		return nil
+	}
+	return n
+}
+
+func isNullKey(k *yaml.Node) bool {
+	k = resolveAlias(k)
+	return k != nil && k.Kind == yaml.ScalarNode && k.ShortTag() == "!!null"
+}
+
+func isMergeKey(k *yaml.Node) bool {
+	k = resolveAlias(k)
+	return k != nil && k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge"
+}
+
+func nullKeyLine(n *yaml.Node, depth int) int {
+	n = resolveAlias(n)
 	if n == nil || depth > maxMergeDepth {
 		return 0
 	}
@@ -953,9 +971,9 @@ func nullKeyLine(n *yaml.Node, depth int) int {
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k := n.Content[i]
 			switch {
-			case k.Kind == yaml.ScalarNode && k.Tag == "!!null":
+			case isNullKey(k):
 				return k.Line
-			case k.Tag == "!!merge":
+			case isMergeKey(k):
 				if line := nullKeyLine(n.Content[i+1], depth+1); line > 0 {
 					return line
 				}
@@ -966,15 +984,36 @@ func nullKeyLine(n *yaml.Node, depth int) int {
 }
 
 func mappingValue(n *yaml.Node, key string) *yaml.Node {
-	for n != nil && n.Kind == yaml.AliasNode {
-		n = n.Alias
-	}
-	if n == nil || n.Kind != yaml.MappingNode {
+	return lookupKey(n, key, 0)
+}
+
+func lookupKey(n *yaml.Node, key string, depth int) *yaml.Node {
+	n = resolveAlias(n)
+	if n == nil || n.Kind != yaml.MappingNode || depth > maxMergeDepth {
 		return nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == key {
+		k := resolveAlias(n.Content[i])
+		if k != nil && k.Kind == yaml.ScalarNode && k.Value == key && !isMergeKey(k) {
 			return n.Content[i+1]
+		}
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if !isMergeKey(n.Content[i]) {
+			continue
+		}
+		merged := resolveAlias(n.Content[i+1])
+		if merged == nil {
+			continue
+		}
+		sources := []*yaml.Node{merged}
+		if merged.Kind == yaml.SequenceNode {
+			sources = merged.Content
+		}
+		for _, src := range sources {
+			if v := lookupKey(src, key, depth+1); v != nil {
+				return v
+			}
 		}
 	}
 	return nil
