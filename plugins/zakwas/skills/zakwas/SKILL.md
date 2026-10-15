@@ -33,7 +33,7 @@ zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent set
 | pin a mise tool | `pin-mise`, `name`, `version` | `zakwas propose pin-mise TOOL VERSION` |
 | add an MCP server | `add-mcp`, `name`, `server` | `zakwas propose add-mcp NAME --command CMD [--arg A] \| --url URL` |
 
-`providers` limits an entry to some of `claude`, `codex` and `opencode`; leave it out unless the user names one. In the shell form, put every flag of zakwas (`-json`, `-c PATH`, `--providers`) before `--`, and every dash-prefixed word of a command after it: `zakwas propose -json add-permission review -- git log --oneline`.
+`providers` limits an entry to some of `claude`, `codex`, `opencode`, `gemini` and `copilot`; leave it out unless the user names one. In the shell form, put every flag of zakwas (`-json`, `-c PATH`, `--providers`) before `--`, and every dash-prefixed word of a command after it: `zakwas propose -json add-permission review -- git log --oneline`.
 
 ## Tiers
 

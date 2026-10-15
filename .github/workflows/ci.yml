@@ -67,7 +67,7 @@ jobs:
         run: mise run test:integration
 
       - name: example config resolves on a real Mac
-        run: go run ./cmd/zakwas -c examples/zakwas.yaml plan --only system,files,links,templates,commands,defaults
+        run: go run ./cmd/zakwas -c examples/zakwas.yaml plan --only system,files,links,templates,agents,commands,defaults
 
       # The brew module parses undocumented `brew bundle` output. The runner
       # ships formulae the example Brewfile doesn't list, so a working cleanup
