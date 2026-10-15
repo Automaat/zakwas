@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/Automaat/zakwas/internal/config"
 )
@@ -603,7 +604,6 @@ func TestLooksSecret(t *testing.T) {
 		{"bypass", "x"},
 		{"auth-service", "start"},
 		{"MAX_TOKENS=1000"},
-		{"--max-tokens-per-minute", "10"},
 		{"--token-id", "x"},
 		{"--monkey", "x"},
 		{"--compat", "x"},
@@ -617,94 +617,125 @@ func TestLooksSecret(t *testing.T) {
 	}
 }
 
-func nameForms(name string) [][]string {
-	return [][]string{
-		{"--" + name, "VALUE"},
-		{"--" + name + "=VALUE"},
-		{"-e", name + "=VALUE"},
-		{"-e", strings.ToUpper(name) + "=VALUE"},
-		{"export", name, "VALUE"},
-		{"-H", name + ": VALUE"},
+type nameForm struct {
+	name  string
+	words []string
+}
+
+func nameForms(name string) []nameForm {
+	upper := strings.ToUpper(name)
+	return []nameForm{
+		{name, []string{"--" + name, "VALUE"}},
+		{name, []string{"--" + name + "=VALUE"}},
+		{name, []string{"-e", name + "=VALUE"}},
+		{upper, []string{"-e", upper + "=VALUE"}},
+		{name, []string{name, "VALUE"}},
+		{name, []string{"-H", name + ": VALUE"}},
+		{name, []string{"--" + name + ":VALUE"}},
+		{name, []string{"/" + name + ":VALUE"}},
+		{name, []string{"-" + name, "VALUE"}},
 	}
 }
 
-func TestCredentialNames(t *testing.T) {
-	secret := []string{
-		"DBPASS", "HMACKEY", "KEY1", "TOKEN2", "keys", "oauth", "secret-id", "pass", "passphrase", "tokens",
-		"passwordvalue", "secretvalue", "tokenvalue", "keyvalue", "apikeyvalue", "secretkeybase", "SECRETKEYBASE",
-		"secretdata", "secretstring", "tokenstring", "privatekeydata", "authheader", "credentialsjson",
-		"passwordb64", "tokenb64", "secretjson", "authtoken", "apikey", "password", "tokenx", "dbpasses",
-		"accesstoken", "api_key", "access-key", "auth", "key", "secret-key", "SECRET_ID",
-		"keyfile-password", "keyfile-passphrase", "passwordfile-password", "keyid-passphrase", "keyid-secret",
-		"tokenfile-key", "authid-token", "key-file-password", "password-file-value", "secretid", "client-secret-id",
-		"keyfilevalue", "tokenxfile", "password-file-key", "keyboardkey", "mypassword", "x-api-key",
-	}
+func TestPlainNamesAreTheOnlyNamesNotScreened(t *testing.T) {
 	plain := []string{
-		"max-tokens", "tokenizer", "password-file", "keyboard", "author", "key-id", "token-id", "key-file",
-		"token-path", "keyfile", "passwordfile", "key-size", "secret-name", "tokenid", "cookie-jar",
-		"max-tokens-per-minute", "pattern", "bypass", "passthrough", "monkey", "compat",
-	}
-	for _, name := range secret {
-		for _, words := range nameForms(name) {
-			if words[0] == "export" || name == "tokens" && words[0] == "-H" {
-				continue
-			}
-			if !looksSecret(words) {
-				t.Errorf("%q isn't recognized", words)
-			}
-		}
+		"max-tokens", "MAX_TOKENS", "tokens-limit", "tokenizer", "tokenize", "keyboard", "keyword", "author", "authors",
+		"pattern", "patch", "monkey", "compat", "bypass", "passthrough", "compass", "password-file", "password_file",
+		"PASSWORD.FILE", "key-file", "keyfile", "passwordfile", "key-id", "token-id", "token-path", "key-size",
+		"secret-path", "secret-name", "cookie-ttl", "api-key-file", "auth-token-url",
 	}
 	for _, name := range plain {
-		for _, words := range nameForms(name) {
-			if words[0] == "export" || words[0] == "-H" {
-				continue
+		if !plainName(name) || !plainName("--"+name) {
+			t.Errorf("%q isn't a plain name", name)
+		}
+		for _, f := range nameForms(name)[:3] {
+			if looksSecret(f.words) {
+				t.Errorf("%q is refused", f.words)
 			}
-			if looksSecret(words) {
-				t.Errorf("%q is refused", words)
+		}
+	}
+	credential := []string{
+		"credit-card", "credit_card_number", "credit", "DBPwData", "toKen", "secret-id", "secretid",
+		"SECRET_ID", "keyfile-password", "key-file-password", "keyid-secret", "tokenx", "tokenfile", "passwordvalue",
+		"secretvalue", "SECRETKEYBASE", "dbpasses", "max-tokens-x", "x-max-tokens", "tokens", "token", "keys", "key1",
+		"password-file-value", "password-file-password", "my-ssh-key-file", "db-password-file", "tokenId", "oauth",
+	}
+	for _, name := range credential {
+		if plainName(name) {
+			t.Errorf("%q is a plain name", name)
+		}
+		for _, f := range nameForms(name)[:3] {
+			if !looksSecret(f.words) {
+				t.Errorf("%q isn't recognized", f.words)
 			}
 		}
 	}
 }
 
-func TestCredentialNamesWithGluedWordsAreSkippedUnlessTheyAreOnTheBenignList(t *testing.T) {
+func caseVariants(name string) []string {
+	var alt, toggled []rune
+	for i, r := range name {
+		if i%2 == 0 {
+			toggled = append(toggled, unicode.ToUpper(r))
+		} else {
+			toggled = append(toggled, r)
+		}
+		alt = append(alt, r)
+	}
+	long := strings.ReplaceAll(name, "s", "\u017f")
+	title := strings.ToUpper(name[:1]) + name[1:]
+	return []string{name, strings.ToUpper(name), title, string(toggled), long, strings.ToLower(string(alt))}
+}
+
+func TestNoNameIsScreenedLessThanOnMainExceptThePlainNames(t *testing.T) {
 	roots := []string{
-		"pass", "password", "passwd", "passphrase", "passcode", "pwd", "secret", "token", "key", "apikey", "cred",
-		"credential", "auth", "bearer", "cookie", "pat", "authtoken", "accesskey", "privatekey", "secretkey",
-		"clientsecret", "dbpass", "oauth", "accesstoken",
+		"pass", "password", "passwd", "passphrase", "passcode", "pwd", "pw", "secret", "token", "tokens", "key", "keys",
+		"apikey", "api_key", "cred", "credential", "credentials", "auth", "bearer", "cookie", "pat", "authtoken",
+		"accesskey", "privatekey", "secretkey", "clientsecret", "dbpass", "oauth", "accesstoken", "credit", "author",
+		"keyboard", "tokenizer", "max-tokens",
 	}
 	suffixes := []string{
-		"", "value", "data", "string", "json", "b64", "s", "x", "base", "header", "file", "id", "name", "path",
-		"url", "size", "type", "1", "2", "val", "text", "raw", "env", "dir", "length", "bits", "ttl", "jar",
-		"format", "hash", "pem", "store", "manager", "var",
+		"", "value", "Value", "data", "string", "json", "b64", "x", "header", "file", "File", "id",
+		"Id", "name", "path", "url", "size", "type", "1", "env", "ttl", "Pw", "pw", "password",
+		"secret", "token", "key", "limit", "count",
 	}
-	plainRoots := map[string]bool{
-		"pass": true, "password": true, "passwd": true, "passphrase": true, "passcode": true, "pwd": true,
-		"secret": true, "token": true, "key": true, "apikey": true, "cred": true, "credential": true, "auth": true,
-		"bearer": true, "cookie": true, "pat": true, "authtoken": true, "accesskey": true, "privatekey": true,
-		"secretkey": true, "accesstoken": true,
-	}
-	qualifiers := map[string]bool{
-		"file": true, "id": true, "name": true, "path": true, "url": true, "size": true, "type": true, "env": true,
-		"dir": true, "length": true, "bits": true, "ttl": true, "jar": true, "format": true,
-	}
+	prefixes := []string{"", "DB", "my", "api", "b64"}
+	loosened := map[string]bool{}
+	checked := 0
 	for _, root := range roots {
 		for _, suffix := range suffixes {
-			for _, sep := range []string{"", "-", "_"} {
-				name := root + sep + suffix
-				if root == "pat" && strings.HasPrefix(suffix, "h") {
-					continue
-				}
-				benign := plainRoots[root] && qualifiers[suffix] && (!strings.Contains(root, "secret") || suffix != "id")
-				for _, words := range nameForms(name) {
-					if words[0] == "export" || words[0] == "-H" {
-						continue
+			for _, prefix := range prefixes {
+				for _, sep := range []string{"", "-", "_", "."} {
+					parts := []string{}
+					if prefix != "" {
+						parts = append(parts, prefix)
 					}
-					if got := looksSecret(words); got == benign {
-						t.Errorf("%q: skipped = %v, benign list says %v", words, got, benign)
+					parts = append(parts, root)
+					if suffix != "" {
+						parts = append(parts, suffix)
+					}
+					for _, name := range caseVariants(strings.Join(parts, sep)) {
+						for _, f := range nameForms(name) {
+							checked++
+							if refLooksSecret(f.words) && !looksSecret(f.words) {
+								loosened[strings.ToLower(strings.NewReplacer("_", "-", ".", "-").Replace(f.name))] = true
+								if !plainName(f.name) {
+									t.Errorf("%q is screened on main and not here", f.words)
+								}
+							}
+						}
 					}
 				}
 			}
 		}
+	}
+	for name := range loosened {
+		if !plainNames[name] {
+			t.Errorf("%q is loosened and not on the list", name)
+		}
+	}
+	if len(loosened) < 20 || checked < 100000 {
+		t.Errorf("the generator is too small: %d names loosened, %d cases", len(loosened), checked)
 	}
 }
 

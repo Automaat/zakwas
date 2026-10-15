@@ -28,168 +28,9 @@ var (
 	shortPass   = regexp.MustCompile(`^-p[^-\s]\S{3,}$`)
 	envIdent    = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 	plainSeg    = regexp.MustCompile(`^([a-z][a-z_.-]*|v[0-9]+)$`)
+	credName    = regexp.MustCompile(`(?i)(pass|pwd|pat([^h]|$)|key|token|secret|cred|auth|bearer|cookie)`)
+	bareName    = regexp.MustCompile(`(?i)(pass|pwd|secret|token|cred|cookie|[-_.]key|key[-_.]|^key$|apikey|bearer)`)
 )
-
-// credRoots mark a word as a credential name wherever they sit in it, so
-// DBPASS, secretvalue and tokenb64 count; ordinary words that hold one are
-// listed in notCred.
-var credRoots = []string{"pass", "pwd", "secret", "token", "key", "cred", "auth", "bearer", "cookie", "pat"}
-
-var notCred = map[string]bool{
-	"bypass": true, "compass": true, "surpass": true, "trespass": true, "overpass": true, "underpass": true,
-	"passthrough": true, "passthru": true, "passenger": true, "compat": true, "pattern": true, "patch": true,
-	"monkey": true, "turkey": true, "hockey": true, "donkey": true, "jockey": true, "whiskey": true,
-	"keyboard": true, "keyword": true, "keymap": true, "keystroke": true, "tokenizer": true, "tokenize": true,
-	"tokenized": true, "tokenization": true, "author": true, "authored": true, "credit": true,
-}
-
-// countWords make a plural tokens a number: --max-tokens.
-var countWords = map[string]bool{
-	"max": true, "min": true, "num": true, "total": true, "limit": true, "count": true, "budget": true,
-	"context": true, "output": true, "input": true, "prompt": true, "thinking": true, "per": true,
-}
-
-// qualifiers follow a credential name to say where its value is or what it
-// measures instead of being it: --password-file, --key-size, --token-id.
-var qualifiers = map[string]bool{
-	"file": true, "path": true, "dir": true, "directory": true, "name": true, "url": true, "uri": true, "env": true,
-	"limit": true, "count": true, "size": true, "length": true, "bits": true, "type": true, "ttl": true,
-	"timeout": true, "jar": true, "fd": true, "stdin": true, "format": true, "algorithm": true, "id": true,
-}
-
-// credWord reports a word that holds a credential name. Digits at its end
-// and a plural s don't hide it. A bare word is a credential only for its
-// stronger roots: auth and pat are commands and abbreviations there, and key
-// is one only as a word of its own.
-func credWord(w string, count, bare bool) bool {
-	w = strings.TrimRight(w, "0123456789")
-	switch {
-	case w == "pw" || w == "pws":
-		return true
-	case w == "tokens" && count, notCred[w], notCred[strings.TrimSuffix(w, "s")]:
-		return false
-	}
-	if bare && strings.Contains(w, "apikey") {
-		return true
-	}
-	for _, root := range credRoots {
-		switch {
-		case !strings.Contains(w, root):
-		case root == "pat" && !patRoot(w):
-		case bare && (root == "auth" || root == "pat"):
-		case bare && root == "key" && w != "keys" && !strings.HasSuffix(w, "key"):
-		default:
-			return true
-		}
-	}
-	return false
-}
-
-// patRoot reports a pat that isn't the start of path, as an abbreviation
-// for a personal access token.
-func patRoot(w string) bool {
-	for i := 0; i+3 <= len(w); i++ {
-		if w[i:i+3] == "pat" && (i+3 == len(w) || w[i+3] != 'h') {
-			return true
-		}
-	}
-	return false
-}
-
-// nameWords splits a flag or variable name into lower-case words at
-// separators and case changes.
-func nameWords(name string) []string {
-	var words []string
-	var cur []rune
-	flush := func() {
-		if len(cur) > 0 {
-			words = append(words, string(cur))
-			cur = nil
-		}
-	}
-	var prev rune
-	for _, r := range name {
-		switch {
-		case !unicode.IsLetter(r) && !unicode.IsDigit(r):
-			flush()
-		case unicode.IsUpper(r) && unicode.IsLower(prev):
-			flush()
-			cur = append(cur, unicode.ToLower(r))
-		default:
-			cur = append(cur, unicode.ToLower(r))
-		}
-		prev = r
-	}
-	flush()
-	return words
-}
-
-// plainCred are the names a qualifier clears: only these, so a root glued to
-// anything else, such as tokenx, stays a credential.
-var plainCred = map[string]bool{
-	"pass": true, "password": true, "passwd": true, "passphrase": true, "passcode": true, "pwd": true, "pw": true,
-	"secret": true, "token": true, "key": true, "cred": true, "credential": true, "auth": true, "bearer": true,
-	"cookie": true, "pat": true, "apikey": true, "accesskey": true, "secretkey": true, "privatekey": true,
-	"sshkey": true, "authtoken": true, "accesstoken": true, "signingkey": true,
-}
-
-func plain(w string) bool {
-	w = strings.TrimRight(w, "0123456789")
-	return plainCred[w] || plainCred[strings.TrimSuffix(w, "s")]
-}
-
-// qualified reports a plain credential word followed only by words that say
-// where its credential is or what it measures. An id is no such thing for a
-// secret.
-func qualified(w string, tail []string) bool {
-	if len(tail) == 0 || !plain(w) {
-		return false
-	}
-	for _, q := range tail {
-		if !qualifiers[q] || q == "id" && strings.Contains(w, "secret") {
-			return false
-		}
-	}
-	return true
-}
-
-// glued splits a word that is a credential name followed by a qualifier:
-// keyfile, tokenid.
-func glued(w string) (rest, qualifier string, ok bool) {
-	for q := range qualifiers {
-		if rest, ok = strings.CutSuffix(w, q); ok && rest != "" {
-			return rest, q, true
-		}
-	}
-	return "", "", false
-}
-
-// credentialName reports a name that takes a credential as its value. A
-// credential root anywhere in a word counts, so DBPASS and secretvalue do;
-// so does any one word of the name, whatever follows another. Only a
-// qualifier right after a credential word, such as file in --password-file,
-// clears that word; --max-tokens, --tokenizer and --keyboard aren't
-// credential names at all.
-func credentialName(name string, bare bool) bool {
-	words := nameWords(name)
-	count := false
-	for _, w := range words {
-		count = count || countWords[w]
-	}
-	for i, w := range words {
-		if bare && i > 0 && strings.HasPrefix(w, "key") && !notCred[w] && !qualified("key", append([]string{strings.TrimPrefix(w, "key")}, words[i+1:]...)) {
-			return true
-		}
-		if !credWord(w, count, bare) || qualified(w, words[i+1:]) {
-			continue
-		}
-		if rest, q, ok := glued(w); ok && credWord(rest, count, bare) && qualified(rest, append([]string{q}, words[i+1:]...)) {
-			continue
-		}
-		return true
-	}
-	return false
-}
 
 // credentialFlags take their value as the next word.
 var credentialFlags = map[string]bool{
@@ -223,7 +64,7 @@ func looksSecret(words []string) bool {
 		if tokenLike(t) || shortPass.MatchString(t) || strings.Contains(strings.ToLower(t), "authorization") {
 			return true
 		}
-		if m := assignment.FindStringSubmatch(t); m != nil && m[2] != "" && credentialName(m[1], false) {
+		if m := assignment.FindStringSubmatch(t); m != nil && m[2] != "" && credName.MatchString(m[1]) && !strings.EqualFold(m[1], "path") && !plainName(m[1]) {
 			return true
 		}
 		switch {
@@ -231,17 +72,58 @@ func looksSecret(words []string) bool {
 			return true
 		case userFlags[t] && strings.Contains(next, ":"):
 			return true
-		case (t == "-H" || t == "--header" || t == "--headers") && credentialName(next, false):
+		case (t == "-H" || t == "--header" || t == "--headers") && credName.MatchString(next):
 			return true
-		case strings.HasPrefix(t, "-") && !strings.Contains(t, "=") && credentialName(t, false) && next != "" && !strings.HasPrefix(next, "-"):
+		case strings.HasPrefix(t, "-") && !strings.Contains(t, "=") && credName.MatchString(t) && !strings.HasSuffix(t, "-path") && !plainName(t) && next != "" && !strings.HasPrefix(next, "-"):
 			return true
-		case !strings.HasPrefix(t, "-") && credentialName(t, true) && next != "" && !strings.HasPrefix(next, "-"):
+		case !strings.HasPrefix(t, "-") && bareName.MatchString(t) && !plainName(t) && next != "" && !strings.HasPrefix(next, "-") && t != "auth":
 			return true
 		case strings.EqualFold(t, "login") && next != "" && !strings.HasPrefix(next, "-"):
 			return true
 		}
 	}
 	return false
+}
+
+var plainNames = buildPlainNames()
+
+func buildPlainNames() map[string]bool {
+	names := map[string]bool{}
+	for _, w := range []string{
+		"tokenizer", "tokenize", "tokenized", "tokenization", "keyboard", "keyword", "keymap", "keystroke",
+		"author", "authors", "authored", "pattern", "patch", "monkey", "compat", "bypass", "passthrough",
+		"passthru", "compass", "keyfile", "passwordfile",
+	} {
+		names[w] = true
+	}
+	for _, c := range []string{"max", "min", "num", "total", "budget", "context", "output", "input", "prompt", "thinking", "completion", "max-output", "max-input", "max-prompt", "max-completion", "max-thinking", "max-context"} {
+		names[c+"-tokens"] = true
+	}
+	for _, c := range []string{"limit", "count", "budget", "per-minute", "used"} {
+		names["tokens-"+c] = true
+	}
+	roots := []string{
+		"pass", "password", "passwd", "passphrase", "passcode", "pwd", "secret", "token", "key", "cred", "credential",
+		"auth", "bearer", "cookie", "pat", "api-key", "access-key", "secret-key", "private-key", "ssh-key", "signing-key",
+		"auth-token", "access-token",
+	}
+	for _, root := range roots {
+		for _, q := range []string{"file", "path", "dir", "name", "url", "uri", "env", "size", "length", "type", "limit", "count", "ttl", "timeout", "id"} {
+			if q != "id" || !strings.Contains(root, "secret") {
+				names[root+"-"+q] = true
+			}
+		}
+	}
+	return names
+}
+
+// plainName reports a flag or variable name that holds no credential though
+// it contains a credential word: it must equal, whole and with - _ or . as
+// separators, one of plainNames. Anything else, glued or camel-cased
+// included, keeps the substring screen.
+func plainName(name string) bool {
+	name = strings.TrimLeft(name, "-/$")
+	return plainNames[strings.ToLower(strings.NewReplacer("_", "-", ".", "-").Replace(name))]
 }
 
 // tokenLike reports a word that looks like a generated secret rather than a
