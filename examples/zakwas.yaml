@@ -23,6 +23,7 @@ mise:
 
 # agents:
 #   providers: [claude, codex, opencode]
+#   instructions: [dotfiles/AGENTS.md]  # one rendered copy per agent
 #   hooks:
 #     commands:
 #       - {event: beforeTool, command: /path/to/check-tool}

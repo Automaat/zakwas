@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,13 +11,12 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
-	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
 
 func newInstructions(t *testing.T, providers ...string) (*Module, *runnertest.Fake, string) {
 	t.Helper()
-	m, fake := newModule(t, config.Agents{Providers: providers, Instructions: "AGENTS.md"})
+	m, fake := newModule(t, config.Agents{Providers: providers, Instructions: config.InstructionFiles{"AGENTS.md"}})
 	src := filepath.Join(m.Paths.Root, "AGENTS.md")
 	writeFile(t, src, "be terse\n")
 	return m, fake, src
@@ -30,8 +30,34 @@ func groups(changes []engine.Change) []string {
 	return out
 }
 
-func TestInstructionsLinkEveryProvider(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderClaude, config.ProviderCodex, config.ProviderOpencode)
+func assertCopy(t *testing.T, path, want string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Errorf("%s: %v", path, err)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("%s is %v, want a regular file", path, info.Mode())
+		return
+	}
+	if info.Mode().Perm() != 0o444 {
+		t.Errorf("%s mode = %o, want 444", path, info.Mode().Perm())
+	}
+	if got := readFile(t, path); got != want {
+		t.Errorf("%s = %q, want %q", path, got, want)
+	}
+}
+
+func assertGone(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Errorf("%s still there: %v", path, err)
+	}
+}
+
+func TestInstructionsCopyEveryProvider(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex, config.ProviderOpencode)
 	m.ClaudeConfigDir = filepath.Join(m.Paths.Home, "claude-dir")
 	m.CodexHome = filepath.Join(m.Paths.Home, "codex-home")
 
@@ -47,26 +73,24 @@ func TestInstructionsLinkEveryProvider(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(m.Paths.Home, "claude-dir")); err == nil {
 		t.Error("plan created the claude dir")
 	}
-	if _, err := os.Lstat(m.instructionsStatePath()); err == nil {
-		t.Error("plan wrote the state file")
-	}
+	assertGone(t, m.instructionFilesStatePath())
 	apply(t, changes)
-	assertLink(t, filepath.Join(m.Paths.Home, "claude-dir", "CLAUDE.md"), src)
-	assertLink(t, filepath.Join(m.Paths.Home, "codex-home", "AGENTS.md"), src)
-	assertLink(t, filepath.Join(m.Paths.Home, ".config", "opencode", "AGENTS.md"), src)
+	assertCopy(t, filepath.Join(m.Paths.Home, "claude-dir", "CLAUDE.md"), "be terse\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, "codex-home", "AGENTS.md"), "be terse\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, ".config", "opencode", "AGENTS.md"), "be terse\n")
 	assertConverged(t, m)
 }
 
 func TestInstructionsDefaultPaths(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
 	apply(t, plan(t, m))
-	assertLink(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), src)
-	assertLink(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), src)
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "be terse\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), "be terse\n")
 	assertConverged(t, m)
 }
 
 func TestInstructionsBackUpExistingFile(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderClaude)
+	m, _, _ := newInstructions(t, config.ProviderClaude)
 	dst := filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")
 	writeFile(t, dst, "mine\n")
 	changes := plan(t, m)
@@ -74,63 +98,114 @@ func TestInstructionsBackUpExistingFile(t *testing.T) {
 		t.Fatalf("plan = %v", got)
 	}
 	apply(t, changes)
-	assertLink(t, dst, src)
+	assertCopy(t, dst, "be terse\n")
 	if got := readFile(t, dst+".zakwas-bak"); got != "mine\n" {
 		t.Errorf("backup = %q", got)
 	}
 	assertConverged(t, m)
 }
 
+func TestInstructionsFollowSourceChange(t *testing.T) {
+	m, _, src := newInstructions(t, config.ProviderClaude)
+	apply(t, plan(t, m))
+	writeFile(t, src, "be terser\n")
+	changes := plan(t, m)
+	if len(changes) != 1 || changes[0].Action != engine.Update || strings.Contains(changes[0].Detail, "back up") {
+		t.Fatalf("plan = %v", targets(changes))
+	}
+	apply(t, changes)
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "be terser\n")
+	assertConverged(t, m)
+}
+
+func TestInstructionsEditedCopyBackedUp(t *testing.T) {
+	m, _, src := newInstructions(t, config.ProviderClaude)
+	apply(t, plan(t, m))
+	dst := filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")
+	if err := os.Chmod(dst, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dst, "edited\n")
+	writeFile(t, src, "be terser\n")
+	changes := plan(t, m)
+	if got := targets(changes); len(got) != 1 || !strings.Contains(got[0], "edited in place, back up to CLAUDE.md.zakwas-bak") {
+		t.Fatalf("plan = %v", got)
+	}
+	apply(t, changes)
+	if got := readFile(t, dst+".zakwas-bak"); got != "edited\n" {
+		t.Errorf("backup = %q", got)
+	}
+	assertCopy(t, dst, "be terser\n")
+}
+
 func TestInstructionsRemovedWithProvider(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
 	apply(t, plan(t, m))
 
 	m.Agents.Providers = []string{config.ProviderClaude}
 	changes := plan(t, m)
-	if got := groups(changes); !reflect.DeepEqual(got, []string{"codex: - ~/.codex/AGENTS.md"}) {
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"instructions: - ~/.codex/AGENTS.md"}) {
 		t.Fatalf("plan = %v", got)
 	}
 	if !changes[0].Destructive {
 		t.Error("removal not destructive")
 	}
 	apply(t, changes)
-	if _, err := os.Lstat(filepath.Join(m.Paths.Home, ".codex", "AGENTS.md")); !os.IsNotExist(err) {
-		t.Errorf("codex link still there: %v", err)
-	}
-	assertLink(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), src)
+	assertGone(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"))
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "be terse\n")
 	assertConverged(t, m)
 }
 
-func TestInstructionsUnsetRemovesOwnLinksOnly(t *testing.T) {
+func TestInstructionsUnsetRemovesOwnCopiesOnly(t *testing.T) {
 	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
 	apply(t, plan(t, m))
-	codexLink := filepath.Join(m.Paths.Home, ".codex", "AGENTS.md")
-	if err := os.Remove(codexLink); err != nil {
+	codexCopy := filepath.Join(m.Paths.Home, ".codex", "AGENTS.md")
+	if err := os.Remove(codexCopy); err != nil {
 		t.Fatal(err)
 	}
 	other := filepath.Join(m.Paths.Root, "other.md")
 	writeFile(t, other, "x")
-	if err := os.Symlink(other, codexLink); err != nil {
+	if err := os.Symlink(other, codexCopy); err != nil {
 		t.Fatal(err)
 	}
 
-	m.Agents.Instructions = ""
+	m.Agents.Instructions = nil
 	changes := plan(t, m)
 	want := []string{
-		"- ~/.claude/CLAUDE.md (claude instructions)",
-		"- ~/.codex/AGENTS.md (no longer zakwas's link, forget it)",
+		"- ~/.claude/CLAUDE.md (instructions no longer managed)",
+		"- ~/.codex/AGENTS.md (no longer zakwas's file, forget it)",
 	}
 	if got := targets(changes); !reflect.DeepEqual(got, want) {
 		t.Fatalf("plan = %v, want %v", got, want)
 	}
 	if changes[1].Destructive {
-		t.Error("forgetting a changed link is destructive")
+		t.Error("forgetting a replaced file is destructive")
 	}
 	apply(t, changes)
-	if _, err := os.Lstat(filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Errorf("claude link still there: %v", err)
+	assertGone(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"))
+	assertLink(t, codexCopy, other)
+	assertGone(t, m.instructionFilesStatePath())
+	assertConverged(t, m)
+}
+
+func TestInstructionsUnsetBacksUpEditedCopy(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude)
+	apply(t, plan(t, m))
+	dst := filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")
+	if err := os.Chmod(dst, 0o644); err != nil {
+		t.Fatal(err)
 	}
-	assertLink(t, codexLink, other)
+	writeFile(t, dst, "edited\n")
+	m.Agents.Instructions = nil
+	changes := plan(t, m)
+	if got := targets(changes); len(got) != 1 || !strings.Contains(got[0], "edited: back up to CLAUDE.md.zakwas-bak") || changes[0].Destructive {
+		t.Fatalf("plan = %v", got)
+	}
+	apply(t, changes)
+	assertGone(t, dst)
+	if got := readFile(t, dst+".zakwas-bak"); got != "edited\n" {
+		t.Errorf("backup = %q", got)
+	}
 	assertConverged(t, m)
 }
 
@@ -139,66 +214,26 @@ func TestInstructionsAbsentChangesNothing(t *testing.T) {
 	if got := plan(t, m); len(got) != 0 {
 		t.Errorf("plan = %v", targets(got))
 	}
-	if _, err := os.Lstat(filepath.Join(m.Paths.Home, ".local")); !os.IsNotExist(err) {
-		t.Errorf("plan touched ~/.local: %v", err)
-	}
-}
-
-func TestInstructionsUsersLinkLeftAlone(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
-	codexLink := filepath.Join(m.Paths.Home, ".codex", "AGENTS.md")
-	if err := os.MkdirAll(filepath.Dir(codexLink), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(src, codexLink); err != nil {
-		t.Fatal(err)
-	}
-	apply(t, plan(t, m))
-	m.Agents.Providers = []string{config.ProviderClaude}
-	if got := plan(t, m); len(got) != 0 {
-		t.Errorf("plan removes the user's link: %v", targets(got))
-	}
+	assertGone(t, filepath.Join(m.Paths.Home, ".local"))
 }
 
 func TestInstructionsFollowConfigDirChange(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderClaude)
+	m, _, _ := newInstructions(t, config.ProviderClaude)
 	apply(t, plan(t, m))
 	m.ClaudeConfigDir = filepath.Join(m.Paths.Home, "claude-dir")
-	want := []string{"+ ~/claude-dir/CLAUDE.md", "- ~/.claude/CLAUDE.md"}
+	want := []string{"claude: + ~/claude-dir/CLAUDE.md", "instructions: - ~/.claude/CLAUDE.md"}
 	changes := plan(t, m)
-	var got []string
-	for _, c := range changes {
-		got = append(got, string(c.Action)+" "+c.Target)
-	}
-	if !reflect.DeepEqual(got, want) {
+	if got := groups(changes); !reflect.DeepEqual(got, want) {
 		t.Fatalf("plan = %v, want %v", got, want)
 	}
 	apply(t, changes)
-	assertLink(t, filepath.Join(m.ClaudeConfigDir, "CLAUDE.md"), src)
+	assertCopy(t, filepath.Join(m.ClaudeConfigDir, "CLAUDE.md"), "be terse\n")
+	assertGone(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"))
 	assertConverged(t, m)
-}
-
-func TestInstructionsRelinkOnSourceChange(t *testing.T) {
-	m, _, _ := newInstructions(t, config.ProviderClaude)
-	apply(t, plan(t, m))
-	writeFile(t, filepath.Join(m.Paths.Root, "CLAUDE.md"), "y")
-	m.Agents.Instructions = "CLAUDE.md"
-	changes := plan(t, m)
-	if len(changes) != 1 || changes[0].Action != engine.Update {
-		t.Fatalf("plan = %v", targets(changes))
-	}
-	apply(t, changes)
-	assertLink(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), filepath.Join(m.Paths.Root, "CLAUDE.md"))
-	assertConverged(t, m)
-	m.Agents.Instructions = ""
-	apply(t, plan(t, m))
-	if _, err := os.Lstat(filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Errorf("relinked link not removed: %v", err)
-	}
 }
 
 func TestInstructionsOptInAndBestEffort(t *testing.T) {
-	m, fake, src := newInstructions(t)
+	m, fake, _ := newInstructions(t)
 	m.Agents.Providers = nil
 	fake.Missing("opencode")
 	fake.OnOK(marketList, "[]").OnOK(pluginList, `{"installed":[],"available":[]}`)
@@ -222,15 +257,15 @@ func TestInstructionsOptInAndBestEffort(t *testing.T) {
 	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "opencode: instructions:") {
 		t.Errorf("named opencode conflict: err = %v", err)
 	}
-	assertLink(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), src)
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "be terse\n")
 }
 
 func TestInstructionsKeptWhileOpencodeMissing(t *testing.T) {
-	m, fake, src := newInstructions(t)
+	m, fake, _ := newInstructions(t)
 	m.Agents.Providers = nil
 	fake.OnOK(marketList, "[]").OnOK(pluginList, `{"installed":[],"available":[]}`)
 	apply(t, plan(t, m))
-	assertLink(t, filepath.Join(m.Paths.Home, ".config", "opencode", "AGENTS.md"), src)
+	assertCopy(t, filepath.Join(m.Paths.Home, ".config", "opencode", "AGENTS.md"), "be terse\n")
 	fake.Missing("opencode")
 	if got := plan(t, m); len(got) != 0 {
 		t.Errorf("plan = %v", targets(got))
@@ -239,16 +274,16 @@ func TestInstructionsKeptWhileOpencodeMissing(t *testing.T) {
 
 func TestInstructionsPlanErrors(t *testing.T) {
 	m, _, _ := newInstructions(t, config.ProviderClaude)
-	m.Agents.Instructions = "missing.md"
+	m.Agents.Instructions = config.InstructionFiles{"missing.md"}
 	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "agents.instructions:") || !strings.Contains(err.Error(), "missing.md") {
 		t.Errorf("missing source: err = %v", err)
 	}
-	m.Agents.Instructions = "."
+	m.Agents.Instructions = config.InstructionFiles{"AGENTS.md", "."}
 	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "is a directory") {
 		t.Errorf("directory source: err = %v", err)
 	}
 
-	m.Agents.Instructions = "AGENTS.md"
+	m.Agents.Instructions = config.InstructionFiles{"AGENTS.md"}
 	if err := os.Symlink(m.Paths.Root, filepath.Join(m.Paths.Home, ".claude")); err != nil {
 		t.Fatal(err)
 	}
@@ -268,20 +303,20 @@ func TestInstructionsRefuseSymlinkedState(t *testing.T) {
 	}
 }
 
-func TestInstructionsSharedPathLinkedOnce(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderCodex, config.ProviderOpencode)
+func TestInstructionsSharedPathWrittenOnce(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderCodex, config.ProviderOpencode)
 	m.CodexHome = filepath.Join(m.Paths.Home, ".config", "opencode")
 	changes := plan(t, m)
 	if got := groups(changes); !reflect.DeepEqual(got, []string{"codex: + ~/.config/opencode/AGENTS.md"}) {
 		t.Fatalf("plan = %v", got)
 	}
 	apply(t, changes)
-	assertLink(t, filepath.Join(m.CodexHome, "AGENTS.md"), src)
+	assertCopy(t, filepath.Join(m.CodexHome, "AGENTS.md"), "be terse\n")
 	assertConverged(t, m)
 }
 
 func TestInstructionsConfigDirAlias(t *testing.T) {
-	m, _, src := newInstructions(t, config.ProviderClaude)
+	m, _, _ := newInstructions(t, config.ProviderClaude)
 	real := filepath.Join(m.Paths.Home, "cc")
 	m.ClaudeConfigDir = real
 	apply(t, plan(t, m))
@@ -291,26 +326,7 @@ func TestInstructionsConfigDirAlias(t *testing.T) {
 	}
 	m.ClaudeConfigDir = alias
 	assertConverged(t, m)
-	assertLink(t, filepath.Join(real, "CLAUDE.md"), src)
-}
-
-func TestInstructionsNeverLinkUntracked(t *testing.T) {
-	m, _, _ := newInstructions(t, config.ProviderClaude)
-	stateDir := filepath.Dir(m.instructionsStatePath())
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(stateDir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(stateDir, 0o755) })
-	changes := plan(t, m)
-	if err := enginetest.Apply(context.Background(), engine.Plan{{Module: "agents", Changes: changes}}); err == nil {
-		t.Fatal("apply succeeded without a writable state dir")
-	}
-	if _, err := os.Lstat(filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Errorf("link made without recording it: %v", err)
-	}
+	assertCopy(t, filepath.Join(real, "CLAUDE.md"), "be terse\n")
 }
 
 func TestInstructionsFailureSkipsProvider(t *testing.T) {
@@ -331,22 +347,353 @@ func TestInstructionsFailureSkipsProvider(t *testing.T) {
 	}
 }
 
-func TestInstructionsSharedPathChangesOwner(t *testing.T) {
-	m, fake, src := newInstructions(t, config.ProviderCodex, config.ProviderOpencode)
-	m.CodexHome = filepath.Join(m.Paths.Home, ".config", "opencode")
+func TestInstructionsJoinFilesPerProvider(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	m.Vars = map[string]string{"team": "core"}
+	m.Agents.Instructions = config.InstructionFiles{"base.md", "claude.md", "codex.md"}
+	writeFile(t, filepath.Join(m.Paths.Root, "base.md"), "# Base\nhome {{ .Home }} team {{ .Vars.team }}\n\n")
+	writeFile(t, filepath.Join(m.Paths.Root, "claude.md"), "{{ if eq .Provider \"claude\" }}use the Skill tool{{ end }}\n")
+	writeFile(t, filepath.Join(m.Paths.Root, "codex.md"), "{{ if eq .Provider \"codex\" }}no skills here\n{{ end }}")
+
 	apply(t, plan(t, m))
-	m.Agents.Providers = []string{config.ProviderOpencode}
-	fake.Install("opencode")
-	if got := targets(plan(t, m)); !reflect.DeepEqual(got, []string{"~ ~/.config/opencode/AGENTS.md (track as opencode instructions)"}) {
+	base := "# Base\nhome " + m.Paths.Home + " team core"
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), base+"\n\nuse the Skill tool\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), base+"\n\nno skills here\n")
+	assertConverged(t, m)
+}
+
+func TestInstructionsTemplateErrorFailsPlan(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude)
+	for name, body := range map[string]string{
+		"unknown variable": "{{ .Nope }}\n",
+		"bad syntax":       "{{ if }}\n",
+	} {
+		writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), body)
+		if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "claude: instructions: render") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestInstructionsImports(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	root := m.Paths.Root
+	writeFile(t, filepath.Join(root, "AGENTS.md"), strings.Join([]string{
+		"intro",
+		"@docs/git.md",
+		"see @docs/style.md, then `@docs/skipped.md` and @claude",
+		"```",
+		"@docs/skipped.md",
+		"```",
+		"",
+	}, "\n"))
+	writeFile(t, filepath.Join(root, "docs", "git.md"), "git rules\n@style.md\n")
+	writeFile(t, filepath.Join(root, "docs", "style.md"), "{{ .Provider }} style\n")
+
+	apply(t, plan(t, m))
+	claude := "intro\n@" + filepath.Join(root, "docs", "git.md") + "\nsee @" + filepath.Join(root, "docs", "style.md") +
+		", then `@docs/skipped.md` and @claude\n```\n@docs/skipped.md\n```\n"
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), claude)
+	codex := "intro\ngit rules\n{{ .Provider }} style\nsee {{ .Provider }} style, then `@docs/skipped.md` and @claude\n```\n@docs/skipped.md\n```\n"
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), codex)
+	assertConverged(t, m)
+}
+
+func TestInstructionsHomeImportKept(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	writeFile(t, filepath.Join(m.Paths.Home, "notes", "me.md"), "about me\n")
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "@~/notes/me.md\n")
+	apply(t, plan(t, m))
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "@~/notes/me.md\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), "about me\n")
+}
+
+func TestInstructionsImportErrors(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderCodex)
+	root := m.Paths.Root
+	writeFile(t, filepath.Join(root, "a.md"), "@b.md\n")
+	writeFile(t, filepath.Join(root, "b.md"), "@a.md\n")
+	writeFile(t, filepath.Join(root, "d1.md"), "@d2.md\n")
+	writeFile(t, filepath.Join(root, "d2.md"), "@d3.md\n")
+	writeFile(t, filepath.Join(root, "d3.md"), "@d4.md\n")
+	writeFile(t, filepath.Join(root, "d4.md"), "@d5.md\n")
+	writeFile(t, filepath.Join(root, "d5.md"), "deep\n")
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ name, body, want string }{
+		{"missing", "@nope/missing.md\n", "import @nope/missing.md"},
+		{"missing nested", "@a.md and @gone.md\n", "gone.md"},
+		{"cycle", "@a.md\n", "imports itself"},
+		{"too deep", "@d1.md\n", "nest more than 4 files deep"},
+		{"directory", "@docs/\n", "docs"},
+		{"four hops", "@d2.md\n", ""},
+		{"plain mention", "ping @someone\n", ""},
+	} {
+		for _, provider := range []string{config.ProviderClaude, config.ProviderCodex} {
+			m.Agents.Providers = []string{provider}
+			writeFile(t, filepath.Join(root, "AGENTS.md"), tc.body)
+			_, err := m.Plan(context.Background())
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("%s/%s: err = %v", tc.name, provider, err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Errorf("%s/%s: err = %v, want %q", tc.name, provider, err, tc.want)
+			}
+		}
+	}
+}
+
+func TestInstructionsNestedFencesHideImports(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	for name, body := range map[string]string{
+		"longer outer fence":   "````md\n```\n@missing/example.md\n```\n````\nafter\n",
+		"tilde with backticks": "~~~md\n```\n@missing/example.md\n```\n~~~\nafter\n",
+		"unclosed fence":       "```\n@missing/example.md\n",
+		"info string":          "```md\n@missing/example.md\n```\n",
+	} {
+		writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), body)
+		if _, err := m.Plan(context.Background()); err != nil {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "```\ncode\n```md\n@missing/example.md\n```\n@missing/after.md\n")
+	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "@missing/after.md") || strings.Contains(err.Error(), "example.md") {
+		t.Errorf("a fence closes only on its own marker: err = %v", err)
+	}
+}
+
+func TestInstructionsProseMentionsAreNotImports(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "types from @types/node and @scope/pkg, not @docs/x.md\n")
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "import @docs/x.md") {
+		t.Fatalf("a .md path that is missing must fail: err = %v", err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("plan = %v", targets(changes))
+	}
+
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "types from @types/node and @scope/pkg.\n")
+	apply(t, plan(t, m))
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "types from @types/node and @scope/pkg.\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), "types from @types/node and @scope/pkg.\n")
+	assertConverged(t, m)
+
+	writeFile(t, filepath.Join(m.Paths.Root, "types", "node"), "node types\n")
+	apply(t, plan(t, m))
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), "types from node types and @scope/pkg.\n")
+}
+
+func TestInstructionsImportPathWithSpaceFailsForClaude(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	m.Paths.Root = filepath.Join(t.TempDir(), "my repo")
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "@docs/git.md\n")
+	writeFile(t, filepath.Join(m.Paths.Root, "docs", "git.md"), "git rules\n")
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "claude: instructions:") || !strings.Contains(err.Error(), "whitespace") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"codex: + ~/.codex/AGENTS.md"}) {
+		t.Errorf("plan = %v", got)
+	}
+}
+
+func TestInstructionsBestEffortProviderRenderErrorSkipped(t *testing.T) {
+	m, fake, _ := newInstructions(t)
+	m.Agents.Providers = nil
+	fake.OnOK(marketList, "[]").OnOK(pluginList, `{"installed":[],"available":[]}`)
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "{{ if eq .Provider \"opencode\" }}{{ .Nope }}{{ end }}hi\n")
+	changes := plan(t, m)
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"claude: + ~/.claude/CLAUDE.md"}) {
 		t.Fatalf("plan = %v", got)
 	}
-	apply(t, plan(t, m))
-	assertConverged(t, m)
-	m.Agents.Providers = []string{config.ProviderCodex}
+}
+
+func TestInstructionsSizeLimit(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), strings.Repeat("x", 32768))
+	if got := groups(plan(t, m)); len(got) != 2 {
+		t.Fatalf("at the limit: plan = %v", got)
+	}
+
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), strings.Repeat("x", 32769))
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "codex: instructions: rendered instructions are 32769 bytes, over codex's 32768 byte limit") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"claude: + ~/.claude/CLAUDE.md"}) {
+		t.Errorf("plan = %v", got)
+	}
+}
+
+func TestInstructionsSizeLimitCountsInlinedImports(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "@big.md\n")
+	writeFile(t, filepath.Join(m.Paths.Root, "big.md"), strings.Repeat("x", 40000))
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "codex") || !strings.Contains(err.Error(), "bytes") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"claude: + ~/.claude/CLAUDE.md"}) {
+		t.Errorf("plan = %v", got)
+	}
+}
+
+func TestInstructionsShared(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude)
+	m.Agents.SharedInstructions = true
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "{{ .Provider }}\n")
 	changes := plan(t, m)
-	if got := groups(changes); !reflect.DeepEqual(got, []string{"codex: ~ ~/.config/opencode/AGENTS.md"}) {
+	want := []string{"claude: + ~/.claude/CLAUDE.md", "shared: + ~/.agents/AGENTS.md"}
+	if got := groups(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan = %v, want %v", got, want)
+	}
+	apply(t, changes)
+	assertCopy(t, filepath.Join(m.Paths.Home, ".agents", "AGENTS.md"), "shared\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "claude\n")
+	assertConverged(t, m)
+
+	m.Agents.SharedInstructions = false
+	changes = plan(t, m)
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"instructions: - ~/.agents/AGENTS.md"}) {
 		t.Fatalf("plan = %v", got)
 	}
 	apply(t, changes)
-	assertLink(t, filepath.Join(m.CodexHome, "AGENTS.md"), src)
+	assertGone(t, filepath.Join(m.Paths.Home, ".agents", "AGENTS.md"))
+}
+
+func TestInstructionsSharedFailureIsReported(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude)
+	m.Agents.SharedInstructions = true
+	if err := os.MkdirAll(filepath.Join(m.Paths.Home, ".agents", "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "shared: instructions:") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"claude: + ~/.claude/CLAUDE.md"}) {
+		t.Errorf("plan = %v", got)
+	}
+}
+
+func legacyLink(t *testing.T, m *Module, provider, dst, src string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	st := instructionsState{Links: map[string]instructionsLink{}}
+	if data, err := os.ReadFile(m.instructionsStatePath()); err == nil {
+		if err := json.Unmarshal(data, &st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st.Links[dst] = instructionsLink{Provider: provider, Target: src}
+	if err := saveState(m.instructionsStatePath(), st); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstructionsReplaceEarlierLinks(t *testing.T) {
+	m, _, src := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	claude := filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")
+	codex := filepath.Join(m.Paths.Home, ".codex", "AGENTS.md")
+	legacyLink(t, m, config.ProviderClaude, claude, src)
+	legacyLink(t, m, config.ProviderCodex, codex, src)
+
+	changes := plan(t, m)
+	want := []string{"claude: ~ ~/.claude/CLAUDE.md", "codex: ~ ~/.codex/AGENTS.md"}
+	if got := groups(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan = %v, want %v", got, want)
+	}
+	for _, c := range changes {
+		if strings.Contains(c.Detail, "back up") {
+			t.Errorf("%s backs up zakwas's own link: %s", c.Target, c.Detail)
+		}
+	}
+	apply(t, changes)
+	assertCopy(t, claude, "be terse\n")
+	assertCopy(t, codex, "be terse\n")
+	for _, path := range []string{claude, codex} {
+		assertGone(t, path+".zakwas-bak")
+	}
+	assertGone(t, m.instructionsStatePath())
+	assertConverged(t, m)
+	if got := readFile(t, src); got != "be terse\n" {
+		t.Errorf("source = %q", got)
+	}
+}
+
+func TestInstructionsEarlierLinkOfDroppedProviderRemoved(t *testing.T) {
+	m, _, src := newInstructions(t, config.ProviderClaude)
+	codex := filepath.Join(m.Paths.Home, ".codex", "AGENTS.md")
+	legacyLink(t, m, config.ProviderCodex, codex, src)
+	changes := plan(t, m)
+	want := []string{"claude: + ~/.claude/CLAUDE.md", "codex: - ~/.codex/AGENTS.md"}
+	if got := groups(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("plan = %v, want %v", got, want)
+	}
+	apply(t, changes)
+	assertGone(t, codex)
+	assertGone(t, m.instructionsStatePath())
+	assertConverged(t, m)
+}
+
+func TestInstructionsUsersLinkLeftAlone(t *testing.T) {
+	m, _, src := newInstructions(t, config.ProviderClaude)
+	codex := filepath.Join(m.Paths.Home, ".codex", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(codex), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(src, codex); err != nil {
+		t.Fatal(err)
+	}
+	apply(t, plan(t, m))
+	assertLink(t, codex, src)
+	assertConverged(t, m)
+}
+
+func TestInstructionsEarlierLinkNoLongerALink(t *testing.T) {
+	m, _, src := newInstructions(t, config.ProviderClaude)
+	claude := filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")
+	apply(t, plan(t, m))
+	legacy := instructionsState{Links: map[string]instructionsLink{claude: {Provider: config.ProviderClaude, Target: src}}}
+	if err := saveState(m.instructionsStatePath(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	changes := plan(t, m)
+	if got := targets(changes); len(got) != 1 || !strings.Contains(got[0], "stop tracking it as one") {
+		t.Fatalf("plan = %v", got)
+	}
+	apply(t, changes)
+	assertGone(t, m.instructionsStatePath())
+	assertConverged(t, m)
+}
+
+func TestInstructionsImmutableCopy(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude)
+	m.Immutable = true
+	apply(t, plan(t, m))
+	assertConverged(t, m)
+	m.Agents.Instructions = nil
+	apply(t, plan(t, m))
+	assertGone(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"))
+}
+
+func TestInstructionsStateFileHoldsHashes(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude)
+	apply(t, plan(t, m))
+	var st struct{ Files map[string]string }
+	if err := json.Unmarshal([]byte(readFile(t, m.instructionFilesStatePath())), &st); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Files[filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md")]; !ok {
+		t.Errorf("state = %v", st.Files)
+	}
+	assertGone(t, m.instructionsStatePath())
 }

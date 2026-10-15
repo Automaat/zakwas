@@ -7,15 +7,15 @@ zakwas plan --only agents
 cmpenv stdout plan.golden
 ! exists codex
 ! exists home/.config/opencode
-! exists home/.local/state/zakwas/instructions.json
+! exists home/.local/state/zakwas/instruction-files.json
 
 zakwas apply -y --only agents
 stdout 'Applied 3 of 3 steps'
-linkto claude/CLAUDE.md AGENTS.md
-linkto codex/AGENTS.md AGENTS.md
-linkto home/.config/opencode/AGENTS.md AGENTS.md
+cmp claude/CLAUDE.md AGENTS.md
+cmp codex/AGENTS.md AGENTS.md
+cmp home/.config/opencode/AGENTS.md AGENTS.md
 cmp claude/CLAUDE.md.zakwas-bak mine.md
-exists home/.local/state/zakwas/instructions.json
+exists home/.local/state/zakwas/instruction-files.json
 
 zakwas check --only agents
 stdout 'up to date: agents'
@@ -26,34 +26,34 @@ cmpenv stdout drop.golden
 zakwas apply -y --only agents
 ! exists codex/AGENTS.md
 ! exists home/.config/opencode/AGENTS.md
-linkto claude/CLAUDE.md AGENTS.md
+cmp claude/CLAUDE.md AGENTS.md
 zakwas check --only agents
 stdout 'up to date: agents'
 
 cp zakwas-missing.yaml zakwas.yaml
 ! zakwas plan --only agents
 stdout 'agents.instructions: source .*/nope.md: no such file or directory'
-linkto claude/CLAUDE.md AGENTS.md
+cmp claude/CLAUDE.md AGENTS.md
 
 cp zakwas-none.yaml zakwas.yaml
 zakwas plan --only agents
-stdout 'claude instructions; your earlier file stays at CLAUDE.md.zakwas-bak'
+stdout 'instructions no longer managed'
 zakwas apply -y --only agents
 ! exists claude/CLAUDE.md
 exists claude/CLAUDE.md.zakwas-bak
-! exists home/.local/state/zakwas/instructions.json
+! exists home/.local/state/zakwas/instruction-files.json
 zakwas check --only agents
 stdout 'up to date: agents'
 
 cp zakwas-claude.yaml zakwas.yaml
 zakwas apply -y --only agents
-linkto claude/CLAUDE.md AGENTS.md
+cmp claude/CLAUDE.md AGENTS.md
 cp zakwas-empty.yaml zakwas.yaml
 zakwas plan
-stdout 'claude instructions'
+stdout 'instructions no longer managed'
 zakwas apply -y
 ! exists claude/CLAUDE.md
-! exists home/.local/state/zakwas/instructions.json
+! exists home/.local/state/zakwas/instruction-files.json
 zakwas check
 ! stdout agents
 
@@ -84,15 +84,15 @@ agents:
 links: []
 -- plan.golden --
 agents
-  ~ $WORK/claude/CLAUDE.md  back up to CLAUDE.md.zakwas-bak, link → $WORK/AGENTS.md
-  + $WORK/codex/AGENTS.md  → $WORK/AGENTS.md
-  + ~/.config/opencode/AGENTS.md              → $WORK/AGENTS.md
+  ~ $WORK/claude/CLAUDE.md  not managed yet, back up to CLAUDE.md.zakwas-bak
+  + $WORK/codex/AGENTS.md
+  + ~/.config/opencode/AGENTS.md
 
 Plan: 2 to add, 1 to change, 0 to remove, 0 to run.
 -- drop.golden --
 agents
-  - $WORK/codex/AGENTS.md  codex instructions
-  - ~/.config/opencode/AGENTS.md              opencode instructions
+  - $WORK/codex/AGENTS.md  instructions no longer managed
+  - ~/.config/opencode/AGENTS.md              instructions no longer managed
 
 ⚠ destructive: $WORK/codex/AGENTS.md, ~/.config/opencode/AGENTS.md
 

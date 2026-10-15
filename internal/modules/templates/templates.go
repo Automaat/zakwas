@@ -68,7 +68,13 @@ func Render(path string, data Data, funcs template.FuncMap) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	t, err := template.New(filepath.Base(path)).Option("missingkey=error").Funcs(funcs).Parse(string(raw))
+	return RenderText(filepath.Base(path), string(raw), data, funcs)
+}
+
+// RenderText executes the template text, failing on unknown variables. The
+// data may be any value the text references, e.g. Data.
+func RenderText(name, text string, data any, funcs template.FuncMap) ([]byte, error) {
+	t, err := template.New(name).Option("missingkey=error").Funcs(funcs).Parse(text)
 	if err != nil {
 		return nil, err
 	}

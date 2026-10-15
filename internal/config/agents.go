@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"net/url"
@@ -28,17 +29,45 @@ var Providers = []string{ProviderClaude, ProviderCodex, ProviderOpencode}
 // Agents declares agent plugin marketplaces and plugins once, for every
 // provider they target.
 type Agents struct {
-	Providers    []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three."`
-	Upgrade      bool                   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Update installed plugins to the version their marketplace offers on apply. Run 'zakwas upgrade' to refresh the marketplaces first. Default false."`
-	Prune        bool                   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false."`
-	Marketplaces map[string]Marketplace `yaml:"marketplaces" jsonschema_description:"Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'."`
-	Plugins      []Plugin               `yaml:"plugins" jsonschema_description:"Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own."`
-	Instructions string                 `yaml:"instructions" jsonschema:"minLength=1" jsonschema_description:"Global instructions file in the config repo, relative to the directory holding zakwas.yaml (or absolute), linked to each managed provider's global instructions: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). A file already there is backed up; links zakwas made for providers no longer managed are removed."`
-	Hooks        *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration."`
-	Permissions  *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
-	MCP          map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
-	Opencode     *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
-	Guard        *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
+	Providers          []string               `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers zakwas manages: claude, codex, opencode. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex is converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: all three."`
+	Upgrade            bool                   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Update installed plugins to the version their marketplace offers on apply. Run 'zakwas upgrade' to refresh the marketplaces first. Default false."`
+	Prune              bool                   `yaml:"prune" jsonschema:"default=false" jsonschema_description:"Remove user-scope plugins and marketplaces that are not declared here, for the managed providers. Plugins installed for a single project, marketplaces they still use, and marketplaces not declared in the provider's user settings are never touched. Removals are shown in 'zakwas plan' first. Default false."`
+	Marketplaces       map[string]Marketplace `yaml:"marketplaces" jsonschema_description:"Marketplaces by name: the name must match the one in the marketplace's own manifest. The value is the source (GitHub 'owner/repo', a git URL, or a local path starting with './', '../', '~/' or '/'; relative paths resolve from the directory holding zakwas.yaml), or an object with 'source' and 'providers'."`
+	Plugins            []Plugin               `yaml:"plugins" jsonschema_description:"Plugins to install and enable, each 'name@marketplace' with the marketplace declared under 'marketplaces', or an object with 'id' and 'providers'. A plugin targets its marketplace's providers unless it sets its own."`
+	Instructions       InstructionFiles       `yaml:"instructions" jsonschema_description:"Global instructions: one file in the config repo, or a list joined in order, each relative to the directory holding zakwas.yaml (or absolute). Every file is a template that sees '{{ .Provider }}' (claude, codex, opencode or shared), '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Each managed provider gets its own rendered, protected copy: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named). Claude keeps its '@path' imports, the others get them inlined; a missing import fails the plan, as does a copy over the provider's size limit (codex: 32768 bytes). A file already there is backed up, a link zakwas made is replaced; copies of providers no longer managed are removed."`
+	SharedInstructions bool                   `yaml:"sharedInstructions" jsonschema:"default=false" jsonschema_description:"Also write the rendered instructions, as provider 'shared', to ~/.agents/AGENTS.md, which Warp, Cline and Factory Droid read, and which Claude, Codex and opencode don't. Needs 'instructions'. Default false."`
+	Hooks              *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration."`
+	Permissions        *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
+	MCP                map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
+	Opencode           *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
+	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
+}
+
+// InstructionFiles is agents.instructions. In YAML it is either one file or
+// a list of files.
+type InstructionFiles []string
+
+func (f *InstructionFiles) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		var one string
+		if err := n.Decode(&one); err != nil {
+			return err
+		}
+		*f = nil
+		if one != "" {
+			*f = InstructionFiles{one}
+		}
+		return nil
+	case yaml.SequenceNode:
+		var list []string
+		if err := n.Decode(&list); err != nil {
+			return err
+		}
+		*f = list
+		return nil
+	}
+	return fmt.Errorf("line %d: instructions must be a file or a list of files", n.Line)
 }
 
 // AgentHooks declares global command hooks and optional integrations.
@@ -407,8 +436,18 @@ func (a *Agents) validate() []error {
 		}
 		checkProviders(what+".providers", m.Providers, a.DefaultProviders(), "agents.providers")
 	}
-	if a.Instructions == "~" || strings.HasPrefix(a.Instructions, "~/") {
-		errs = append(errs, fmt.Errorf("agents.instructions: %q must be relative to the directory holding zakwas.yaml, or absolute", a.Instructions))
+	for i, f := range a.Instructions {
+		switch {
+		case strings.TrimSpace(f) == "":
+			errs = append(errs, fmt.Errorf("agents.instructions[%d]: file is required", i))
+		case f == "~" || strings.HasPrefix(f, "~/"):
+			errs = append(errs, fmt.Errorf("agents.instructions: %q must be relative to the directory holding zakwas.yaml, or absolute", f))
+		case slices.Contains(a.Instructions[:i], f):
+			errs = append(errs, fmt.Errorf("agents.instructions[%d]: %q is already listed", i, f))
+		}
+	}
+	if a.SharedInstructions && len(a.Instructions) == 0 {
+		errs = append(errs, errors.New("agents.sharedInstructions: needs agents.instructions"))
 	}
 	if a.Opencode != nil {
 		dir := a.Opencode.SkillsDir
