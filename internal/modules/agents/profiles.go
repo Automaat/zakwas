@@ -95,6 +95,15 @@ func (m *Module) planProfiles() (map[string][]engine.Change, map[string]error, e
 			continue
 		}
 		var errs []error
+		for _, prof := range list {
+			if err := m.sharedDestination(m.profilePath(p, prof.Name)); err != nil {
+				errs = append(errs, fmt.Errorf("profile %q: %w", prof.Name, err))
+			}
+		}
+		if err := errors.Join(errs...); err != nil {
+			failed[p] = fmt.Errorf("%s: profiles: %w", p, err)
+			continue
+		}
 		var conflicts map[string]string
 		if p == config.ProviderOpencode {
 			var err error
@@ -151,6 +160,18 @@ func (m *Module) planProfiles() (map[string][]engine.Change, map[string]error, e
 		byProvider[orphanProfiles] = append(byProvider[orphanProfiles], c)
 	}
 	return byProvider, failed, nil
+}
+
+// sharedDestination fails a file zakwas writes for agents when a files,
+// links or templates entry writes the same path, or one inside it, which
+// would make both rewrite it on every apply.
+func (m *Module) sharedDestination(path string) error {
+	for _, d := range m.Destinations {
+		if config.PathsOverlap(path, d.Path) {
+			return fmt.Errorf("%s is also written by %s (%s)", m.Paths.Pretty(path), d.What, d.Dst)
+		}
+	}
+	return nil
 }
 
 // opencodeTemplateAgents maps the agent names the templates that render an

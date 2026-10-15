@@ -1,6 +1,6 @@
 # Examples
 
-Complete, working config: [`examples/`](../examples). A real-world one: [Automaat/environment-as-code](https://github.com/Automaat/environment-as-code) (~65 CLI tools, casks, dotfiles, macOS defaults, a daily drift check).
+Complete, working config: [`examples/`](../examples).
 
 ## Minimal: dotfiles only
 

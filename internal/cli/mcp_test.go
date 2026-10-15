@@ -541,6 +541,45 @@ func TestMCPApplyRefusesWhenTheLockIsBusy(t *testing.T) {
 	}
 }
 
+func TestMCPApplyDeclinedWithoutARunLockStillSaysSo(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file modes")
+	}
+	env, home := brewSetup(t)
+	c := startMCP(t, env, formClient, "--enable-apply")
+	id := parseJSON(t, c.tool("zakwas_propose", map[string]any{"kind": "add-brew", "name": "jq"}, nil).text)["id"].(string)
+	stateDir := filepath.Dir(lock.Path(home))
+	if err := os.Chmod(stateDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stateDir, 0o755) })
+
+	r := c.tool("zakwas_apply", map[string]any{"id": id}, decline)
+
+	out := parseJSON(t, r.text)
+	if out["applied"] == true || out["reason"] != "the user declined" || out["command"] != "zakwas approve "+id {
+		t.Errorf("outcome = %v", out)
+	}
+}
+
+func TestMCPApplyRefusesAnUnopenableLockFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file modes")
+	}
+	env, home := brewSetup(t)
+	c := startMCP(t, env, formClient, "--enable-apply")
+	id := parseJSON(t, c.tool("zakwas_propose", map[string]any{"kind": "add-brew", "name": "jq"}, nil).text)["id"].(string)
+	if err := os.WriteFile(lock.Path(home), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	r := c.tool("zakwas_apply", map[string]any{"id": id}, accept)
+
+	if !r.isErr || !strings.Contains(r.text, "can't open the run lock") || len(r.elicited) != 0 {
+		t.Errorf("unopenable lock gave (error %v) %q, asked %q", r.isErr, r.text, r.elicited)
+	}
+}
+
 func TestMCPApplyKeepsAnEditSavedWhileItAsks(t *testing.T) {
 	env, _ := brewSetup(t)
 	c := startMCP(t, env, formClient, "--enable-apply")

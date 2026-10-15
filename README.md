@@ -4,9 +4,11 @@
 [![release](https://img.shields.io/github/v/release/Automaat/zakwas)](https://github.com/Automaat/zakwas/releases/latest)
 [![license](https://img.shields.io/github/license/Automaat/zakwas)](LICENSE)
 
-Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git repo, and `zakwas apply` converges any Mac to it: a fresh one or the one you already use.
+zakwas sets up a Mac from one YAML file. You list what the machine should have (dotfiles, Homebrew apps, CLI tool versions, macOS preferences, launchd jobs and the setup of your coding agents) and keep the file in a git repo. `zakwas plan` shows what would change, `zakwas apply` makes it so, and `zakwas check` tells you when the Mac drifted. It works on a fresh Mac and on the one you already use.
 
-- **files / templates**: dotfiles installed as read-only, immutable copies (like the Nix store); edits go through the repo
+What it manages:
+
+- **files / templates**: dotfiles installed as read-only copies, immutable with `protect.immutable: true` (like the Nix store); edits go through the repo
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: GUI apps and formulae from a `Brewfile` (`brew bundle`, optional zap cleanup)
 - **mise**: CLI tools pinned in a global mise config
@@ -20,16 +22,49 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 
 *Zakwas* is Polish for sourdough starter: keep it, feed it, and every new loaf comes out the same.
 
-> **Status:** pre-1.0 and macOS only. The config format may change between minor versions until 1.0; changes are called out in the [release notes](https://github.com/Automaat/zakwas/releases).
+## Who it is for
 
-## Start from the Mac you have
+Good fit:
+
+- You keep dotfiles in git and want Homebrew, pinned CLI tool versions, macOS preferences and agent config declared in the same place, with a plan before anything changes.
+- You use more than one coding agent (Claude Code, Codex, opencode, Gemini CLI, Copilot CLI) and want MCP servers, instructions, skills and permissions declared once. See [docs/agents.md](docs/agents.md).
+- You set up Macs now and then and want to know when one drifted from the config.
+
+Not a fit:
+
+- Linux or Windows. zakwas is macOS only; the installer refuses to run elsewhere.
+- Many machines from a server. zakwas has no server or inventory: it converges the Mac it runs on, as your user.
+- Building packages. It hands that to Homebrew and mise (see [Compared to](#compared-to) for Nix).
+- Keeping secrets. Keep them out of the config repo; agent MCP secrets are environment references, not values.
+
+## Status
+
+- **Pre-1.0.** The config format can change between minor versions until 1.0; check the [release notes](https://github.com/Automaat/zakwas/releases) before upgrading. Machine-readable output (`--json`, apply history) carries its own `format_version`.
+- **macOS only.** Release binaries are darwin arm64 and amd64. CI runs on macOS 26; older macOS versions are not tested.
+- **One maintainer.** Issues and PRs get answered when there is time; see [.github/SUPPORT.md](.github/SUPPORT.md).
+- **Agents.** Claude Code and opencode are converged by default; Codex, Gemini CLI and Copilot CLI only when you name them. What each supports, and where the guard has gaps, is in [docs/agents.md](docs/agents.md) and [docs/security.md](docs/security.md#coding-agents).
+- **Release binaries are not notarized.** `install.sh` and `zakwas self-update` verify checksums (and build provenance when a logged-in `gh` is available); see [Security model](#security-model).
+
+Full documentation is listed [below](#documentation). If something breaks on first use, start with [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Try it in two minutes
+
+Nothing on your Mac changes until the last command, and that one shows its plan and asks first.
 
 ```bash
-zakwas init ~/dotfiles --add ~/.zshrc --add ~/.config/git
-cd ~/dotfiles && zakwas plan
+git clone https://github.com/Automaat/zakwas.git && cd zakwas
+./install.sh --dir examples --no-apply     # installs only zakwas, to ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
+zakwas init ~/dotfiles --add ~/.zshrc      # writes a starter repo in ~/dotfiles, nothing else
+cd ~/dotfiles && zakwas plan               # read-only
+zakwas apply --only files                  # confirm, then ~/.zshrc and a mise config are installed
 ```
 
-`init` writes a starter repo: `zakwas.yaml`, a `Brewfile` from what Homebrew has installed, your global mise tools pinned to their current versions, and copies of the dotfiles you `--add`. Push it to GitHub and any other Mac is one command away.
+- On a Mac without the Xcode Command Line Tools, run `xcode-select --install` first and wait for it to finish; `git` comes with them.
+- `init` writes `zakwas.yaml`, a `Brewfile` from what Homebrew has installed, your global mise tools pinned to their current versions, and a copy of each file you `--add`. It does not apply anything.
+- `plan` lists every change, one line each; read it before you apply. `apply --only files` limits the run to the `files` module: your `~/.zshrc`, plus `~/.config/mise/config.toml` when `init` found mise (an existing one is backed up first).
+- After `apply`, `~/.zshrc` is read-only and immutable: edit `~/dotfiles/dotfiles/zshrc` and apply again. A warning about uncommitted changes is expected until you commit the new repo. To undo, see [Stop managing a file](docs/troubleshooting.md#stop-managing-a-file-or-remove-zakwas).
+- Already on Homebrew or mise, or want Go? See [Install](#install). Push `~/dotfiles` to GitHub and any other Mac is one command away: [New Mac](#new-mac).
 
 ## New Mac
 
@@ -58,6 +93,7 @@ Shell completion: `zakwas completion zsh|bash|fish` ([docs/commands.md](docs/com
 ## Usage
 
 ```bash
+zakwas init ~/dotfiles --add ~/.zshrc  # starter config repo from this Mac
 zakwas plan            # what would change (--diff shows file contents)
 zakwas apply           # show plan, confirm, apply (-y skips the prompt)
 zakwas upgrade         # brew update + refresh agent marketplaces, then apply
@@ -222,6 +258,18 @@ Every apply is logged to `~/.local/state/zakwas/history.jsonl` with the config r
 - Every third-party `tap` in the Brewfile needs `trusted: true`: `brew bundle cleanup --force` resets Homebrew's trust store to the Brewfile.
 - Destinations must be absolute or `~/…` and must not overlap. zakwas refuses to write through a symlinked parent dir under `$HOME` or one resolving into the repo.
 
+## Security model
+
+zakwas runs as your user and changes what your config declares. What to know before you run it:
+
+- Your config repo is code that runs as you: `commands`, templates and agent hooks execute what it says. Apply only a config you trust, and read `zakwas plan` first.
+- `sudo` is used in two places, both during `apply`: the Touch ID line in `/etc/pam.d/sudo_local` (`system.sudoTouchID`) and, when Homebrew is missing, its installer. `plan` and `check` never call it. Scripts in your own `commands` run as written.
+- The binaries zakwas installs are verified: release archives against `checksums.txt` and, with a logged-in `gh`, against GitHub build provenance; a mise it installs is a pinned release checked against its SHA256; the Homebrew installer comes from a pinned commit.
+- A regular file zakwas did not write, or one that was edited after zakwas wrote it, is backed up to `<file>.zakwas-bak` before it is replaced or removed.
+- Coding agents cannot run `apply` through zakwas: with an `agents` section the guard denies them the command (as deny rules for Claude Code, Codex and Gemini CLI; for opencode once a template renders them; Copilot CLI has only the refusal) and zakwas refuses to apply from an agent session. They can read the plan and `propose` changes, which a person approves in a terminal. The guard is a set of deny rules in each agent, not a sandbox; its limits are in [docs/security.md](docs/security.md#coding-agents).
+
+Report a vulnerability through [SECURITY.md](SECURITY.md), not a public issue.
+
 ## Compared to
 
 - **nix-darwin / home-manager**: the same "machine = repo" model and read-only dotfiles, without learning Nix. zakwas delegates packages to Homebrew and mise instead of building them, so there's no store, no evaluation, and upgrades are whatever `brew` and Renovate-bumped mise pins give you.
@@ -230,22 +278,17 @@ Every apply is logged to `~/.local/state/zakwas/history.jsonl` with the config r
 
 ## Documentation
 
+- [docs/troubleshooting.md](docs/troubleshooting.md): first-use failures, backups, immutable files, state files, how to stop managing a file or remove zakwas
 - [docs/config.md](docs/config.md): every key in `zakwas.yaml`
 - [docs/commands.md](docs/commands.md): commands, flags, exit codes, environment
 - [docs/examples.md](docs/examples.md): snippets for common setups
 - [docs/agents.md](docs/agents.md): coding agents: what each supports and the capture, propose, approve flow
 - [docs/security.md](docs/security.md): what zakwas verifies, how coding agents are kept from applying the config, when it uses sudo
-- [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md), [.github/SUPPORT.md](.github/SUPPORT.md)
 
-## Development
+## Contributing
 
-```bash
-mise run test               # unit + e2e with fake brew/mise/defaults
-mise run test:integration   # adds real `defaults` and mise round-trips
-mise run lint
-```
-
-Releases: set `version` in `plugins/zakwas/.claude-plugin/plugin.json` to `X.Y.Z` in a PR, merge it, then push the `vX.Y.Z` tag on that commit; the release workflow refuses a tag that differs from the plugin version, and GoReleaser publishes darwin arm64/amd64 binaries. See [CLAUDE.md](CLAUDE.md) for layout and conventions.
+Issues and PRs are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) covers setup (`mise run test`, `mise run lint`), how to add a module or an agent provider, and the commit and PR format. [CLAUDE.md](CLAUDE.md) has the layout and conventions. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

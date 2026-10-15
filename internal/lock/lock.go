@@ -16,6 +16,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // The holder writes its identity right after locking, so a blocked run waits
@@ -31,6 +33,10 @@ func Path(home string) string {
 }
 
 // Holder identifies the run that owns the lock. Both fields are best effort.
+// A run that can't write the lock file records nothing, and the file may
+// still name an earlier run. A run that can't write it either reports the
+// zero Holder instead of reading it, and one that can reports it only while
+// the recorded pid is alive.
 type Holder struct {
 	PID     int
 	Command string
@@ -53,7 +59,56 @@ func (e *BusyError) Error() string {
 	return "another run is in progress: " + e.Holder.String() + "; not waiting (--no-wait)"
 }
 
-// Lock is a held lock; Release it when the run is done.
+// UnavailableError reports that the lock file can't be created because the
+// state dir can't be written or created, so there is no shared state to
+// protect. Err is the original error, not the one from the read-only retry.
+type UnavailableError struct {
+	Path string
+	Err  error
+}
+
+func (e *UnavailableError) Error() string {
+	reason := e.Err
+	var pe *fs.PathError
+	if errors.As(e.Err, &pe) {
+		reason = pe.Err
+	}
+	return "can't take the run lock " + e.Path + ": " + reason.Error()
+}
+
+func (e *UnavailableError) Unwrap() error { return e.Err }
+
+// FileError reports that the lock file exists in a state dir that can be
+// written, but this user can't open it, typically because another user
+// (root, from sudo zakwas apply) created it. Running anyway would let two
+// runs execute at once, so it fails the run.
+type FileError struct {
+	Path string
+	Err  error
+}
+
+func (e *FileError) Error() string {
+	reason := e.Err
+	var pe *fs.PathError
+	if errors.As(e.Err, &pe) {
+		reason = pe.Err
+	}
+	return "can't open the run lock " + e.Path + ": " + reason.Error() +
+		"; it was probably created by another user, such as root from sudo zakwas apply: remove it or chmod it so this user can read it"
+}
+
+func (e *FileError) Unwrap() error { return e.Err }
+
+func dirWritable(dir string) bool {
+	return unix.Access(dir, unix.W_OK) == nil
+}
+
+func denied(err error) bool {
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS)
+}
+
+// Lock is a held lock; Release it when the run is done. Releasing a nil
+// Lock is a no-op.
 type Lock struct {
 	f        *os.File
 	writable bool
@@ -73,15 +128,23 @@ type Options struct {
 func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, error) {
 	path := Path(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if denied(err) {
+			return nil, &UnavailableError{Path: path, Err: err}
+		}
 		return nil, err
 	}
 	writable := true
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
-	if errors.Is(err, fs.ErrPermission) {
+	if denied(err) {
 		writable = false
-		f, err = os.Open(path)
-	}
-	if err != nil {
+		var roErr error
+		if f, roErr = os.Open(path); roErr != nil {
+			if dirWritable(filepath.Dir(path)) {
+				return nil, &FileError{Path: path, Err: err}
+			}
+			return nil, &UnavailableError{Path: path, Err: err}
+		}
+	} else if err != nil {
 		return nil, err
 	}
 	poll := opts.Poll
@@ -98,7 +161,10 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 			return nil, errors.Join(err, f.Close())
 		}
 		if !waited {
-			h := settledHolder(path)
+			var h Holder
+			if writable {
+				h = settledHolder(path)
+			}
 			if opts.NoWait {
 				return nil, errors.Join(&BusyError{h}, f.Close())
 			}
@@ -133,6 +199,9 @@ func (l *Lock) writeHolder(command string) error {
 
 // Release drops the lock; closing the file does it.
 func (l *Lock) Release() error {
+	if l == nil {
+		return nil
+	}
 	return l.f.Close()
 }
 
@@ -147,6 +216,11 @@ func settledHolder(path string) Holder {
 	return h
 }
 
+func alive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
 func readHolder(path string) Holder {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -155,6 +229,9 @@ func readHolder(path string) Holder {
 	pid, command, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
 	n, err := strconv.Atoi(pid)
 	if err != nil {
+		return Holder{}
+	}
+	if !alive(n) {
 		return Holder{}
 	}
 	return Holder{PID: n, Command: strings.TrimSpace(command)}

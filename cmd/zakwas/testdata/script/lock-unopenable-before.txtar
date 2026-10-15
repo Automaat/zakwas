@@ -1,0 +1,16 @@
+[root] skip 'root ignores file modes'
+
+chmod 0000 home/.local/state/zakwas/lock
+! zakwas apply -y
+stderr 'zakwas: can.t open the run lock .*/zakwas/lock: permission denied'
+stderr 'another user'
+! stdout .
+! exists home/ran
+chmod 0644 home/.local/state/zakwas/lock
+
+-- zakwas.yaml --
+commands:
+  - name: hi
+    check: test -e ran
+    run: touch ran
+-- home/.local/state/zakwas/lock --

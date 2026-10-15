@@ -228,6 +228,12 @@ defaults:
 		{"profile mcp decision", "agents: {mcp: {docs: {command: x}}, profiles: {r: {description: d, mcp: {docs: maybe}}}}", []string{`agents.profiles.r: mcp.docs "maybe" is not one of allow, ask, deny`}},
 		{"profile without description", "agents: {profiles: {r: {edit: deny}}}", []string{"agents.profiles.r: description is required"}},
 		{"profile name", "agents: {profiles: {Review: {description: d}}}", []string{"agents.profiles.Review: name may only contain lowercase letters"}},
+		{"profile named null", "agents: {profiles: {null: {description: d}}}", []string{"agents.profiles: a profile cannot be named null"}},
+		{"profile named with a tilde", "agents: {profiles: {~: {description: d}, r: {description: d}}}", []string{"agents.profiles: a profile cannot be named null"}},
+		{"profile map reached through an alias", "agents: {mcp: &m {null: {command: x}}, profiles: *m}", []string{"agents.profiles: a profile cannot be named null"}},
+		{"profile map reached through a merge key", "agents: {profiles: {<<: {null: {description: d}}}}", []string{"agents.profiles: a profile cannot be named null"}},
+		{"profile map merged from a list of aliases", "agents: {mcp: &a {null: {command: x}}, profiles: {<<: [*a]}}", []string{"agents.profiles: a profile cannot be named null"}},
+		{"profile name too long", "agents: {profiles: {" + strings.Repeat("a", MaxProfileName+1) + ": {description: d}}}", []string{"name is 65 characters long; at most 64 are allowed"}},
 		{"profile tool", "agents: {profiles: {r: {description: d, tools: [read, fly]}}}", []string{`agents.profiles.r: tools[1]: unknown tool "fly"`}},
 		{"profile edit without edit tool", "agents: {profiles: {r: {description: d, tools: [read], edit: allow}}}", []string{"agents.profiles.r: edit is allow but tools leaves out edit"}},
 		{"profile shell decision", "agents: {profiles: {r: {description: d, shell: sometimes}}}", []string{`agents.profiles.r: shell "sometimes" is not one of allow, ask, deny`}},
@@ -296,6 +302,8 @@ commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
 
 func TestLoadAccepts(t *testing.T) {
 	tests := []struct{ name, body string }{
+		{"profile named with a quoted null", `agents: {profiles: {"null": {description: d}}}`},
+		{"profile name at the length limit", "agents: {profiles: {" + strings.Repeat("a", MaxProfileName) + ": {description: d}}}"},
 		{"launchd jobs", `
 launchd:
   - label: com.example.daily

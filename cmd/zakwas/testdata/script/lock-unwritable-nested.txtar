@@ -1,0 +1,22 @@
+[root] skip 'root ignores file modes'
+
+mkdir home/.local/state/zakwas
+chmod 0555 home/.local/state/zakwas
+zakwas apply -y
+stderr 'warning: can.t take the run lock'
+stderr 'can.t run apply inside a zakwas run \(pid \d+'
+exec cat home/log
+cmp stdout expected-log
+chmod 0755 home/.local/state/zakwas
+
+-- zakwas.yaml --
+commands:
+  - name: nested
+    check: test -e done
+    run: |
+      ! [ -e log ] || [ "$(wc -l < log)" -lt 3 ] || exit 1
+      echo ran >> log
+      zakwas -c "$WORK/zakwas.yaml" apply -y
+      touch done
+-- expected-log --
+ran
