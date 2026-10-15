@@ -18,10 +18,11 @@ type JSONChange struct {
 }
 
 type JSONModule struct {
-	Name    string       `json:"name"`
-	Status  string       `json:"status"`
-	Error   string       `json:"error,omitempty"`
-	Changes []JSONChange `json:"changes"`
+	Name     string       `json:"name"`
+	Status   string       `json:"status"`
+	Error    string       `json:"error,omitempty"`
+	Warnings []string     `json:"warnings,omitempty"`
+	Changes  []JSONChange `json:"changes"`
 }
 
 type JSONSummary struct {
@@ -59,7 +60,7 @@ func (c Change) JSON(withDiff bool) JSONChange {
 func (p Plan) JSONModules(withDiff bool) []JSONModule {
 	out := make([]JSONModule, 0, len(p))
 	for _, mp := range p {
-		m := JSONModule{Name: mp.Module, Status: StatusUpToDate, Changes: []JSONChange{}}
+		m := JSONModule{Name: mp.Module, Status: StatusUpToDate, Warnings: mp.Warnings, Changes: []JSONChange{}}
 		switch {
 		case mp.Err != nil:
 			m.Status, m.Error = StatusError, mp.Err.Error()

@@ -127,7 +127,29 @@ func (m *Module) desiredClaudeRules() claudeRules {
 			r.Deny = append(r.Deny, rule)
 		}
 	}
+	for _, rule := range m.claudeGuardRules() {
+		if !slices.Contains(r.Deny, rule) {
+			r.Deny = append(r.Deny, rule)
+		}
+	}
 	return r
+}
+
+// codexPermissions are the agents.permissions entries for Codex and, with
+// the guard on, the rules that forbid applying the config.
+func (m *Module) codexPermissions() []config.Permission {
+	perms := m.Agents.PermissionsFor(config.ProviderCodex)
+	if !m.Guard {
+		return perms
+	}
+	for _, g := range m.Agents.GuardPermissions(config.ProviderCodex) {
+		if !slices.ContainsFunc(perms, func(p config.Permission) bool {
+			return p.Decision == g.Decision && slices.Equal(p.Words, g.Words)
+		}) {
+			perms = append(perms, g)
+		}
+	}
+	return perms
 }
 
 // planPermissions plans agents.permissions for Claude Code and Codex by
@@ -136,7 +158,7 @@ func (m *Module) desiredClaudeRules() claudeRules {
 // failed.
 func (m *Module) planPermissions() (map[string][]engine.Change, map[string]error, error) {
 	statePath := m.permissionsStatePath()
-	if m.Agents.Permissions == nil {
+	if m.Agents.Permissions == nil && !m.Guard {
 		if _, err := os.Lstat(statePath); errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, nil
 		}
@@ -178,7 +200,7 @@ func (m *Module) planPermissions() (map[string][]engine.Change, map[string]error
 		c, err := m.planCodexRules(path, nil)
 		add(config.ProviderCodex, c, err)
 	}
-	if want := m.Agents.PermissionsFor(config.ProviderCodex); len(want) > 0 || ownedCodexRules(st, rules) != "" {
+	if want := m.codexPermissions(); len(want) > 0 || ownedCodexRules(st, rules) != "" {
 		c, err := m.planCodexRules(rules, want)
 		add(config.ProviderCodex, c, err)
 	}

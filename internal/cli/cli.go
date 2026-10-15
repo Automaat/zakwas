@@ -96,6 +96,9 @@ type Env struct {
 	// LockHeldBy is $ZAKWAS_LOCK_HELD: the pid of the zakwas run this
 	// process was started from, which holds the run lock.
 	LockHeldBy string
+	// AgentSession names the coding agent this run was started from, from
+	// DetectAgentSession; empty for a person's terminal.
+	AgentSession string
 }
 
 func (e Env) now() time.Time {
@@ -152,6 +155,11 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
 	if err != nil {
 		errOut.fail(err)
+		return ExitErr
+	}
+	if (cmd == "apply" || cmd == "upgrade") && env.AgentSession != "" && cfg.Agents.GuardEnabled() {
+		errOut.printf("zakwas: refusing to %s from a %s session: an agent that can apply the config can widen its own permissions, add hooks or install marketplaces.\n"+
+			"Review with `zakwas plan`, then run `zakwas %s` in a terminal outside the agent, or set agents.guard: false in %s\n", cmd, env.AgentSession, cmd, cfg.Path)
 		return ExitErr
 	}
 	var saved *planDoc
@@ -531,6 +539,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if agentsCfg != nil {
 		mods = append(mods, &agents.Module{
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
+			Guard: cfg.Agents.GuardEnabled(), TemplateSources: templateSrcs(cfg, paths),
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
 		})
 	}
@@ -556,6 +565,14 @@ func templateDsts(cfg *config.Config, paths config.Paths) []string {
 		dsts = append(dsts, paths.Dst(t.Dst))
 	}
 	return dsts
+}
+
+func templateSrcs(cfg *config.Config, paths config.Paths) []string {
+	var srcs []string
+	for _, t := range cfg.Templates.Files {
+		srcs = append(srcs, paths.Src(t.Src))
+	}
+	return srcs
 }
 
 func selectModules(all []engine.Module, only string) ([]engine.Module, error) {

@@ -63,18 +63,22 @@ hand-written
 be terse
 -- zakwas.yaml --
 agents:
+  guard: false
   providers: [claude, codex, opencode]
   instructions: AGENTS.md
 -- zakwas-claude.yaml --
 agents:
+  guard: false
   providers: [claude]
   instructions: AGENTS.md
 -- zakwas-missing.yaml --
 agents:
+  guard: false
   providers: [claude]
   instructions: nope.md
 -- zakwas-none.yaml --
 agents:
+  guard: false
   providers: [claude]
 -- zakwas-empty.yaml --
 links: []

@@ -30,6 +30,7 @@ zakwas check --only agents
 
 -- zakwas.yaml --
 agents:
+  guard: false
   providers: [claude]
   marketplaces:
     sai: Owner/sai
@@ -37,6 +38,7 @@ agents:
     - humanize@sai
 -- zakwas-prune.yaml --
 agents:
+  guard: false
   providers: [claude]
   prune: true
   marketplaces:

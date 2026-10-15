@@ -130,7 +130,10 @@ func TestUnknownVariableFails(t *testing.T) {
 	}
 }
 
+var off = false
+
 var permissions = &config.Agents{
+	Guard:     &off,
 	Providers: []string{config.ProviderClaude, config.ProviderOpencode},
 	Permissions: &config.AgentPermissions{
 		Allow: []config.AgentPermission{
@@ -144,6 +147,15 @@ var permissions = &config.Agents{
 }
 
 func TestAgentPermissions(t *testing.T) {
+	var guard []string
+	for _, c := range []string{"apply", "upgrade", "self-update"} {
+		for _, name := range []string{"zakwas", "*/zakwas"} {
+			for _, p := range []string{name + " " + c, name + " " + c + " *", name + " * " + c, name + " * " + c + " *"} {
+				guard = append(guard, `"`+p+`": "deny"`)
+			}
+		}
+	}
+	guardEntries := strings.Join(guard, ", ")
 	entries := `"git status": "allow", "git status *": "allow", "peekaboo see": "allow", "peekaboo see *": "allow", ` +
 		`"git push": "ask", "git push *": "ask", "git push --force": "deny", "git push --force *": "deny"`
 	tests := []struct {
@@ -156,7 +168,13 @@ func TestAgentPermissions(t *testing.T) {
 		{"catch-all first, deny last", permissions, []string{"opencode", "ask"}, `{"*": "ask", ` + entries + `}`, ""},
 		{"without catch-all", permissions, []string{"opencode"}, `{` + entries + `}`, ""},
 		{"no agents section", nil, []string{"opencode", "allow"}, `{"*": "allow"}`, ""},
-		{"nothing declared", &config.Agents{}, []string{"opencode"}, `{}`, ""},
+		{"nothing declared", &config.Agents{Guard: &off}, []string{"opencode"}, `{}`, ""},
+		{"guard denies apply last, after a flag too", &config.Agents{Providers: []string{config.ProviderOpencode}}, []string{"opencode", "allow"}, `{"*": "allow", ` + guardEntries + `}`, ""},
+		{"guard beats an allow of the same command", &config.Agents{
+			Providers:   []string{config.ProviderOpencode},
+			Permissions: &config.AgentPermissions{Allow: []config.AgentPermission{{Command: "zakwas apply"}}},
+		}, []string{"opencode"}, `{` + guardEntries + `}`, ""},
+		{"guard skips a provider zakwas doesn't manage", &config.Agents{Providers: []string{config.ProviderClaude}}, []string{"opencode"}, `{}`, ""},
 		{"other provider", permissions, []string{"claude"}, "", `provider "claude" is not supported, only opencode`},
 		{"unknown action", permissions, []string{"opencode", "prompt"}, "", `default action "prompt" is not one of allow, ask, deny`},
 		{"two actions", permissions, []string{"opencode", "allow", "deny"}, "", "want at most one default action, got 2"},
@@ -187,7 +205,7 @@ func TestAgentPermissions(t *testing.T) {
 // even when one gets through.
 func TestAgentPermissionsEscape(t *testing.T) {
 	command := `say "hi" \ <b> & café`
-	a := &config.Agents{Permissions: &config.AgentPermissions{Deny: []config.AgentPermission{{Command: command}}}}
+	a := &config.Agents{Guard: &off, Permissions: &config.AgentPermissions{Deny: []config.AgentPermission{{Command: command}}}}
 	got, err := agentPermissions(a, config.ProviderOpencode)
 	if err != nil {
 		t.Fatal(err)

@@ -48,6 +48,7 @@ templates:
   files:
     - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
 agents:
+  guard: false
   providers: [claude, codex, opencode]
   permissions:
     allow:
@@ -63,6 +64,7 @@ templates:
   files:
     - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
 agents:
+  guard: false
   providers: [claude, codex, opencode]
   permissions:
     allow:

@@ -183,6 +183,10 @@ Find a macOS preference key: `defaults read > a`, toggle it in System Settings, 
 
 See [docs/config.md](docs/config.md#permissions).
 
+### Agents can't apply the config
+
+With an `agents` section, zakwas denies the managed agents `zakwas apply`, `upgrade` and `self-update` (Claude Code's `permissions.deny`, a Codex `forbidden` rule, opencode `deny` patterns), denies Claude Code edits to the config repo's main checkout and zakwas state, and refuses `apply` and `upgrade` started from an agent session. Otherwise one prompt injection could make an agent widen its own permissions through `apply`. `plan` and `check` stay allowed, and the plan names a managed provider the guard can't cover. Set `agents.guard: false` to turn it off; zakwas then removes only the rules it added. See [docs/config.md](docs/config.md#guard).
+
 ## Protected dotfiles
 
 `files` and `templates` write copies with write bits stripped; `protect.immutable` adds the macOS `uchg` flag (blocks `:w!`, `chmod`, `rm`). To change one, edit it in the repo and `zakwas apply`.
