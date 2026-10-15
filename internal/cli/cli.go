@@ -99,6 +99,7 @@ type Env struct {
 	ReleaseURL      string
 	ClaudeConfigDir string
 	CodexHome       string
+	CopilotHome     string
 	GeminiHome      string
 	// LockHeldBy is $ZAKWAS_LOCK_HELD: the pid of the zakwas run this
 	// process was started from, which holds the run lock.
@@ -590,13 +591,16 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if _, err := os.Lstat(agents.GeminiStatePath(env.Home)); agentsCfg == nil && err == nil {
 		agentsCfg = &config.Agents{}
 	}
+	if _, err := os.Lstat(agents.HookFilesStatePath(env.Home)); agentsCfg == nil && err == nil {
+		agentsCfg = &config.Agents{}
+	}
 	if agentsCfg != nil {
 		mods = append(mods, &agents.Module{
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
 			Guard: cfg.Agents.GuardEnabled(), TemplateSources: templateSrcs(cfg, paths),
 			Vars: cfg.Templates.Vars, Immutable: cfg.Protect.Immutable, TemplateFiles: cfg.Templates.Files,
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
-			GeminiHome: absFromCwd(env, env.GeminiHome),
+			GeminiHome: absFromCwd(env, env.GeminiHome), CopilotHome: absFromCwd(env, env.CopilotHome),
 		})
 	}
 	mods = append(mods, &commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner})
@@ -609,8 +613,8 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 }
 
 // absFromCwd makes an agent's config dir ($CLAUDE_CONFIG_DIR, $CODEX_HOME,
-// $GEMINI_CLI_HOME) absolute: zakwas reads it from its own working directory
-// but runs the agent from /.
+// $GEMINI_CLI_HOME, $COPILOT_HOME) absolute: zakwas reads it from its own working
+// directory but runs the agent from /.
 func absFromCwd(env Env, dir string) string {
 	if dir == "" || filepath.IsAbs(dir) {
 		return dir

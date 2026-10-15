@@ -10,7 +10,7 @@ Declarative macOS setup. Describe the machine in `zakwas.yaml`, keep it in a git
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: GUI apps and formulae from a `Brewfile` (`brew bundle`, optional zap cleanup)
 - **mise**: CLI tools pinned in a global mise config
-- **agents**: coding-agent plugins and marketplaces (Claude Code and Codex; skills for opencode), MCP servers, skills, permissions and profiles for Claude Code, Codex, opencode and, opt-in, Gemini CLI, global instructions rendered per provider from one or more files, shared command hooks, and selected global Codex settings
+- **agents**: coding-agent plugins and marketplaces (Claude Code, Codex and, opt-in, Copilot CLI; skills for opencode), MCP servers, skills, permissions and profiles for Claude Code, Codex, opencode and, opt-in, Gemini CLI and Copilot CLI, global instructions rendered per provider from one or more files, shared command hooks, and selected global Codex settings
 - **defaults**: macOS preferences (`defaults write`, restarts Dock/Finder when needed)
 - **system**: Touch ID for sudo, directories, SSH key
 - **commands**: guarded one-off steps (`run` only while `check` fails)
@@ -191,6 +191,7 @@ Find a macOS preference key: `defaults read > a`, toggle it in System Settings, 
 
 - zakwas removes only the Claude rules it added; rules you added yourself stay.
 - zakwas owns the Codex rules file. When rules from several files match, Codex applies the strictest. Allow only read-only commands for Codex.
+- Copilot CLI keeps user-level shell rules only in root-owned managed settings, so the plan reports permissions that reach `copilot` as unsupported instead of failing.
 - In an opencode template, write `"bash": {{ agentPermissions "opencode" "ask" }}`. It renders the catch-all first and deny entries last, because opencode applies the last matching pattern.
 
 See [docs/config.md](docs/config.md#permissions).
@@ -207,7 +208,7 @@ agents:
     linear: {url: https://mcp.linear.app/mcp, oauth: true, providers: [claude, codex]}
 ```
 
-- Secrets stay environment references: `${X}` for Claude, `env_vars` and `bearer_token_env_var` for Codex, `{env:X}` for opencode.
+- Secrets stay environment references: `${X}` for Claude and Copilot, `env_vars` and `bearer_token_env_var` for Codex, `{env:X}` for opencode.
 - Codex tables are edited in place, so the rest of `config.toml`, comments included, stays byte-identical.
 - A same-named server zakwas didn't add is adopted when identical and fails the plan when it differs; removing a server, or the whole `agents` section, removes only what zakwas added.
 - `plan` and `check` start no server and open no browser; OAuth servers show how to log in.
@@ -217,7 +218,7 @@ See [docs/config.md](docs/config.md#mcp).
 
 ### Agent profiles
 
-`agents.profiles` declares a profile such as "read-only review" once, and zakwas renders it for each agent: a Claude Code subagent file (`claude --agent review`), a Codex profile file (`codex --profile review`), an opencode agent file (`opencode --agent review`) and, once `gemini` is named, a Gemini CLI subagent (`@review`). Gemini CLI is opt-in: zakwas renders one linked extension and one policy file for it, and never writes its `settings.json` or `~/.gemini/GEMINI.md`.
+`agents.profiles` declares a profile such as "read-only review" once, and zakwas renders it for each agent: a Claude Code subagent file (`claude --agent review`), a Codex profile file (`codex --profile review`), an opencode agent file (`opencode --agent review`), once `gemini` is named, a Gemini CLI subagent (`@review`), and once `copilot` is named, a Copilot CLI agent file (`copilot --agent review`). Gemini CLI is opt-in: zakwas renders one linked extension and one policy file for it, and never writes its `settings.json` or `~/.gemini/GEMINI.md`. Copilot CLI is opt-in too, and zakwas never writes its `config.json` or `settings.json`.
 
 ```yaml
 agents:
@@ -243,7 +244,7 @@ See [docs/config.md](docs/config.md#profiles).
 
 ### Agent skills
 
-`agents.skills` links skills that don't come from a plugin marketplace into every managed agent: Claude Code reads only `~/.claude/skills`, while Codex and opencode read `~/.agents/skills`.
+`agents.skills` links skills that don't come from a plugin marketplace into every managed agent: Claude Code reads only `~/.claude/skills`, while Codex, opencode and Copilot CLI read `~/.agents/skills` (Copilot reads only `$COPILOT_HOME/skills` once that is set).
 
 ```yaml
 agents:
@@ -261,7 +262,7 @@ See [docs/config.md](docs/config.md#skills).
 
 ### Agents can't apply the config
 
-With an `agents` section, zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update` and `approve` (Claude Code's `permissions.deny`, a Codex `forbidden` rule, opencode `deny` patterns), denies Claude Code edits to the config repo's main checkout and zakwas state, and refuses `apply`, `upgrade` and `approve` started from an agent session. Otherwise one prompt injection could make an agent widen its own permissions through `apply`. `plan` and `check` stay allowed, and the plan names a managed provider the guard can't cover. Set `agents.guard: false` to turn it off; zakwas then removes only the rules it added. See [docs/config.md](docs/config.md#guard).
+With an `agents` section, zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update` and `approve` (Claude Code's `permissions.deny`, a Codex `forbidden` rule, opencode `deny` patterns; Copilot CLI has no user-level deny rules, so only the refusal covers it), denies Claude Code edits to the config repo's main checkout and zakwas state, and refuses `apply`, `upgrade` and `approve` started from an agent session. Otherwise one prompt injection could make an agent widen its own permissions through `apply`. `plan` and `check` stay allowed, and the plan names a managed provider the guard can't cover. Set `agents.guard: false` to turn it off; zakwas then removes only the rules it added. See [docs/config.md](docs/config.md#guard).
 
 ## Protected dotfiles
 

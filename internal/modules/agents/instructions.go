@@ -65,6 +65,8 @@ func (m *Module) instructionsPath(provider string) string {
 		return filepath.Join(m.codexBackend().home, "AGENTS.md")
 	case config.ProviderGemini:
 		return filepath.Join(m.geminiExtDir(), "GEMINI.md")
+	case config.ProviderCopilot:
+		return filepath.Join(m.copilotBackend().home, "instructions", "zakwas.instructions.md")
 	case sharedInstructions:
 		return m.Paths.Dst("~/.agents/AGENTS.md")
 	default:
@@ -125,9 +127,9 @@ func samePath(path string) string {
 // planInstructions renders agents.instructions into the global
 // instructions of every managed provider, grouped by provider, plus the
 // shared ~/.agents/AGENTS.md when asked for, and removes what zakwas wrote
-// that nothing wants anymore. Claude, and codex, gemini and opencode when
+// that nothing wants anymore. Claude, and codex, gemini, copilot and opencode when
 // zakwas.yaml names them, are strict: a copy that can't be rendered or
-// written fails the plan. Codex and Gemini are opt-in, as for plugins, and
+// written fails the plan. Codex, Gemini and Copilot are opt-in, as for plugins, and
 // opencode by the all-providers default is best effort: written only when opencode is
 // installed and nothing blocks it, its file otherwise left as is. A strict
 // provider that can't be written is returned in failed. Links an earlier

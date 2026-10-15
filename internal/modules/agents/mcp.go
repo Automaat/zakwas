@@ -29,16 +29,23 @@ import (
 type mcpState struct {
 	Claude map[string]map[string]string `json:"claude,omitempty"`
 	Codex  map[string]map[string]string `json:"codex,omitempty"`
+	// Copilot servers live in mcp-config.json.
+	Copilot map[string]map[string]string `json:"copilot,omitempty"`
 }
 
 func (st *mcpState) files(provider string) map[string]map[string]string {
-	if provider == config.ProviderCodex {
+	switch provider {
+	case config.ProviderCodex:
 		return st.Codex
+	case config.ProviderCopilot:
+		return st.Copilot
 	}
 	return st.Claude
 }
 
-func (st *mcpState) empty() bool { return len(st.Claude) == 0 && len(st.Codex) == 0 }
+func (st *mcpState) empty() bool {
+	return len(st.Claude) == 0 && len(st.Codex) == 0 && len(st.Copilot) == 0
+}
 
 // owned merges what is recorded for one file under any spelling of its
 // path.
@@ -80,7 +87,7 @@ func MCPStatePath(home string) string {
 func (m *Module) mcpStatePath() string { return MCPStatePath(m.Paths.Home) }
 
 func (m *Module) loadMCPState() (mcpState, error) {
-	st := mcpState{Claude: map[string]map[string]string{}, Codex: map[string]map[string]string{}}
+	st := mcpState{Claude: map[string]map[string]string{}, Codex: map[string]map[string]string{}, Copilot: map[string]map[string]string{}}
 	if err := loadState(m.mcpStatePath(), &st); err != nil {
 		return st, err
 	}
@@ -89,6 +96,9 @@ func (m *Module) loadMCPState() (mcpState, error) {
 	}
 	if st.Codex == nil {
 		st.Codex = map[string]map[string]string{}
+	}
+	if st.Copilot == nil {
+		st.Copilot = map[string]map[string]string{}
 	}
 	return st, nil
 }
@@ -259,7 +269,7 @@ func mcpSummary(s config.MCPServer) string {
 	return "http " + u.String()
 }
 
-// planMCP plans agents.mcp for Claude Code and Codex by provider; opencode
+// planMCP plans agents.mcp for Claude Code, Codex and Copilot by provider; opencode
 // gets the servers through the agentMCP template function instead. A
 // provider whose servers can't be planned is returned in failed.
 func (m *Module) planMCP() (map[string][]engine.Change, map[string]error, error) {
@@ -281,7 +291,7 @@ func (m *Module) planMCP() (map[string][]engine.Change, map[string]error, error)
 	}
 	changes := map[string][]engine.Change{}
 	failed := map[string]error{}
-	for _, store := range []mcpStore{m.claudeMCP(), m.codexMCP()} {
+	for _, store := range []mcpStore{m.claudeMCP(), m.codexMCP(), m.copilotMCP()} {
 		provider := store.provider()
 		want := map[string]config.MCPServer{}
 		for _, s := range m.Agents.MCPFor(provider) {
@@ -482,3 +492,5 @@ func (m *Module) claudeJSONPath() string {
 func (m *Module) claudeMCP() mcpStore { return claudeMCP{m: m} }
 
 func (m *Module) codexMCP() mcpStore { return codexMCP{m: m} }
+
+func (m *Module) copilotMCP() mcpStore { return copilotMCP{m: m} }

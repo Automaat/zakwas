@@ -168,7 +168,7 @@ defaults:
 		{"unquoted date default", "defaults: [{domain: d, key: k, value: 2024-01-01}]", []string{"defaults[0] d k: YAML reads 2024-01-01 as a date; quote it"}},
 		{"unquoted timestamp default", "defaults: [{domain: d, key: k, value: 2024-01-01T10:00:00Z}]", []string{"YAML reads 2024-01-01T10:00:00Z as a date"}},
 		{"template mode 0o unreadable by owner", "templates: {files: [{src: a, dst: ~/a, mode: 0o044}]}", []string{"e.g. 0o644"}},
-		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode, gemini)`}},
+		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode, gemini, copilot)`}},
 		{"duplicate agent provider", "agents: {providers: [claude, claude]}", []string{`agents.providers: provider "claude" is listed twice`}},
 		{"duplicate plugin provider", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: [codex, codex]}]}", []string{`agents.plugins[0].providers: provider "codex" is listed twice`}},
 		{"empty agent providers", "agents: {providers: []}", []string{"agents.providers: list at least one provider"}},
@@ -407,7 +407,7 @@ agents:
 		plugin int
 		want   []string
 	}{
-		{0, []string{ProviderClaude, ProviderCodex, ProviderOpencode}},
+		{0, []string{ProviderClaude, ProviderCodex, ProviderOpencode, ProviderCopilot}},
 		{1, []string{ProviderClaude}},
 		{2, []string{ProviderOpencode}},
 	} {

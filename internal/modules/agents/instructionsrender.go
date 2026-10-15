@@ -23,6 +23,11 @@ const sharedInstructions = "shared"
 // AGENTS.md.
 var instructionsLimits = map[string]int{config.ProviderCodex: 32768}
 
+// copilotInstructionsFront makes Copilot CLI load the file in every
+// session: its user-level *.instructions.md files apply only where their
+// applyTo glob matches.
+const copilotInstructionsFront = "---\napplyTo: \"**\"\n---\n\n"
+
 // importHops is how many files deep Claude follows @path imports.
 const importHops = 4
 
@@ -69,6 +74,9 @@ func (m *Module) renderInstructions(provider string) ([]byte, error) {
 			parts[i] = strings.TrimRight(parts[i], "\n")
 		}
 		out = []byte(strings.Join(parts, "\n\n") + "\n")
+	}
+	if provider == config.ProviderCopilot && len(out) > 0 {
+		out = append([]byte(copilotInstructionsFront), out...)
 	}
 	if limit, ok := instructionsLimits[provider]; ok && len(out) > limit {
 		return nil, fmt.Errorf("rendered instructions are %d bytes, over %s's %d byte limit", len(out), provider, limit)

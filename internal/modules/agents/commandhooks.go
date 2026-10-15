@@ -128,7 +128,27 @@ func (m *Module) desiredCommandHooks(provider string) []commandHookRegistration 
 	return result
 }
 
+// planCommandHooks plans the shared command hooks of every provider: Claude
+// and Codex in their JSON files, opencode in a plugin and Copilot in a
+// hooks file of its own.
 func (m *Module) planCommandHooks() (map[string][]engine.Change, map[string]error, error) {
+	changes, failed, err := m.planSharedCommandHooks()
+	if changes == nil {
+		changes = map[string][]engine.Change{}
+	}
+	if failed == nil {
+		failed = map[string]error{}
+	}
+	copilotChanges, copilotErr := m.planCopilotCommandHooks()
+	if copilotErr != nil {
+		failed[config.ProviderCopilot] = fmt.Errorf("copilot: command hooks: %w", copilotErr)
+	} else if len(copilotChanges) > 0 {
+		changes[config.ProviderCopilot] = copilotChanges
+	}
+	return changes, failed, err
+}
+
+func (m *Module) planSharedCommandHooks() (map[string][]engine.Change, map[string]error, error) {
 	statePath := m.commandHooksStatePath()
 	if m.Agents.Hooks == nil || len(m.Agents.Hooks.Commands) == 0 {
 		if _, err := os.Lstat(statePath); errors.Is(err, fs.ErrNotExist) {
@@ -148,7 +168,7 @@ func (m *Module) planCommandHooks() (map[string][]engine.Change, map[string]erro
 	changes := map[string][]engine.Change{}
 	failed := map[string]error{}
 	for _, provider := range config.Providers {
-		if provider == config.ProviderGemini {
+		if provider == config.ProviderGemini || provider == config.ProviderCopilot {
 			continue
 		}
 		want := m.desiredCommandHooks(provider)

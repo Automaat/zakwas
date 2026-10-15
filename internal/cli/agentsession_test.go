@@ -21,6 +21,7 @@ func TestDetectAgentSession(t *testing.T) {
 		{"codex sandbox", map[string]string{"CODEX_SANDBOX": "seatbelt"}, "Codex"},
 		{"codex thread", map[string]string{"CODEX_THREAD_ID": "abc"}, "Codex"},
 		{"opencode", map[string]string{"OPENCODE": "1"}, "opencode"},
+		{"copilot", map[string]string{"COPILOT_AGENT_SESSION_ID": "abc"}, "Copilot CLI"},
 		{"gemini", map[string]string{"GEMINI_CLI": "1"}, "Gemini CLI"},
 	}
 	for _, tt := range tests {

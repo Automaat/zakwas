@@ -33,7 +33,7 @@ Pin exact tool versions in `dotfiles/mise/config.toml` and let Renovate bump the
 
 ## Coding-agent plugins
 
-Claude Code and Codex marketplaces and plugins, with their skills linked into opencode too; `prune` removes user-scope ones you didn't declare (read the plan first). Codex reads Claude marketplaces too, so one entry serves both; `providers` narrows an entry to one agent. `instructions` renders one or more files from the repo into each agent's global instructions (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`), branching on `{{ .Provider }}` where agents differ.
+Claude Code, Codex and Copilot CLI marketplaces and plugins, with their skills linked into opencode too; `prune` removes user-scope ones you didn't declare (read the plan first). Codex and Copilot read Claude marketplaces too, so one entry serves all of them; `providers` narrows an entry to one agent. `instructions` renders one or more files from the repo into each agent's global instructions (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.copilot/instructions/zakwas.instructions.md`), branching on `{{ .Provider }}` where agents differ.
 
 ```yaml
 agents:

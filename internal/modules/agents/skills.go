@@ -94,15 +94,18 @@ func (st skillsState) owner(link string) (string, skillLink, bool) {
 }
 
 // skillsDir is where a provider loads user skills from: Claude Code only
-// from its own config dir, Codex and opencode, like Gemini CLI and Copilot
-// CLI, from ~/.agents/skills, which GEMINI_CLI_HOME moves for Gemini.
-// opencode's own skillsDir, which holds plugin skills, is not used.
+// from its own config dir, Codex, opencode and Copilot CLI from ~/.agents/skills, which
+// GEMINI_CLI_HOME moves for Gemini and where Copilot reads only its own home's skills
+// once $COPILOT_HOME moves it. opencode's own skillsDir, which holds plugin skills, is
+// not used.
 func (m *Module) skillsDir(provider string) string {
 	switch {
 	case provider == config.ProviderClaude:
 		return filepath.Join(m.claudeBackend().dir, "skills")
 	case provider == config.ProviderGemini && m.GeminiHome != "":
 		return filepath.Join(m.GeminiHome, ".agents", "skills")
+	case provider == config.ProviderCopilot && m.CopilotHome != "":
+		return filepath.Join(m.CopilotHome, "skills")
 	}
 	return m.Paths.Dst("~/.agents/skills")
 }
@@ -177,7 +180,7 @@ type providerSkills struct {
 
 // planSkills links agents.skills into every managed provider's skills
 // directory and removes the links and clones zakwas made that nothing wants
-// anymore. Claude, and codex and opencode when zakwas.yaml names them, are
+// anymore. Claude, and codex, copilot and opencode when zakwas.yaml names them, are
 // strict: a skill that can't be linked fails that provider. opencode by the
 // all-providers default is best effort: skipped when it isn't installed or
 // nothing can be linked. Codex and opencode share ~/.agents/skills, so a
