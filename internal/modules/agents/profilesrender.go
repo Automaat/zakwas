@@ -55,6 +55,10 @@ var (
 		"read": {"Read"}, "search": {"Glob", "Grep"}, "edit": {"Edit", "Write", "NotebookEdit"},
 		"shell": {"Bash"}, "web": {"WebFetch", "WebSearch"},
 	}
+	copilotToolNames = map[string][]string{
+		"read": {"read"}, "search": {"search"}, "edit": {"edit"},
+		"shell": {"execute"}, "web": {"web"},
+	}
 	opencodeToolKeys = map[string][]string{
 		"read": {"read"}, "search": {"glob", "grep", "list"}, "edit": {"edit"},
 		"shell": {"bash"}, "web": {"webfetch", "websearch"},
@@ -121,6 +125,8 @@ func (m *Module) resolveProfile(provider string, p config.NamedProfile) profileF
 		return m.claudeProfile(p)
 	case config.ProviderCodex:
 		return m.codexProfile(p)
+	case config.ProviderCopilot:
+		return m.copilotProfile(p)
 	}
 	return m.opencodeProfile(p)
 }
@@ -265,6 +271,60 @@ func (m *Module) codexProfile(p config.NamedProfile) profileFile {
 		t[k] = v
 	}
 	return profileFile{table: t, unsupported: unsupported}
+}
+
+// copilotProfile is a Copilot CLI custom agent. Its tools list is written
+// only when the profile takes something away: a listed tool or MCP server
+// is all it can name, so servers added outside zakwas are cut with the
+// rest.
+func (m *Module) copilotProfile(p config.NamedProfile) profileFile {
+	share := p.Share(config.ProviderCopilot)
+	front := &ordered{}
+	var unsupported []string
+	front.set("name", p.Name)
+	front.set("description", p.Description)
+	if share.Model != "" {
+		front.set("model", share.Model)
+	}
+	kept, removed := profileToolSets(p.Profile)
+	servers, access := m.profileAccess(config.ProviderCopilot, p.Profile)
+	exposed := func(d string) bool { return d == config.PermissionAllow || d == "ask" }
+	cut := len(removed) > 0
+	list := toolNames(kept, copilotToolNames)
+	for _, s := range servers {
+		if exposed(access[s]) {
+			list = append(list, s+"/*")
+		} else {
+			cut = true
+		}
+	}
+	if cut {
+		front.set("tools", list)
+	}
+	if p.Sandbox != "" {
+		unsupported = append(unsupported, "sandbox")
+	}
+	if p.Edit == config.PermissionAllow {
+		unsupported = append(unsupported, "edit: allow")
+	}
+	if p.Shell == config.PermissionAllow {
+		unsupported = append(unsupported, "shell: allow")
+	}
+	if p.Reviewer == "auto" {
+		unsupported = append(unsupported, "reviewer: auto")
+	}
+	if p.Network != nil && !*p.Network && slices.Contains(kept, "shell") {
+		unsupported = append(unsupported, "network: false for shell commands")
+	}
+	for _, s := range servers {
+		if access[s] == config.PermissionAllow {
+			unsupported = append(unsupported, "mcp "+s+": allow")
+		}
+	}
+	for _, k := range slices.Sorted(maps.Keys(share.Overrides)) {
+		front.set(k, share.Overrides[k])
+	}
+	return profileFile{front: front, unsupported: unsupported}
 }
 
 func (m *Module) opencodeProfile(p config.NamedProfile) profileFile {

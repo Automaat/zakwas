@@ -1,0 +1,166 @@
+chmod 755 bin/copilot
+mkdir state copilot
+env COPILOT_HOME=$WORK/copilot
+
+zakwas plan --only agents
+! stdout copilot
+! exists calls
+cp zakwas-copilot.yaml zakwas.yaml
+
+zakwas plan --only agents
+stdout '\+ copilot marketplace sai'
+stdout '\+ copilot plugin humanize@sai'
+stdout '- copilot plugin stale@old'
+stdout '- copilot marketplace old'
+stdout '\+ .*/copilot/instructions/zakwas.instructions.md'
+stdout '\+ copilot mcp docs'
+stdout '\+ .*/copilot/hooks/zakwas.json'
+stdout '\+ .*/copilot/agents/reviewer.agent.md'
+stdout '\+ ~/.agents/skills|\+ .*/copilot/skills/mine'
+stdout '⚠ copilot can''t express agents.permissions \(1 for copilot\)'
+stdout '⚠ copilot profile reviewer can''t express: sandbox'
+stdout '⚠ copilot can''t be protected by rules'
+! grep docs copilot/mcp-config.json
+! grep 'copilot plugin (install|uninstall|marketplace add|marketplace remove)' calls
+rm calls
+
+zakwas apply -y --only agents
+grep '^copilot plugin marketplace add owner/sai$' calls
+grep '^copilot plugin install humanize@sai$' calls
+grep '^copilot plugin uninstall stale@old$' calls
+grep '^copilot plugin marketplace remove old$' calls
+grep '^applyTo: "\*\*"$' copilot/instructions/zakwas.instructions.md
+grep '^be terse$' copilot/instructions/zakwas.instructions.md
+grep '"DOCS_TOKEN": "\$\{DOCS_TOKEN\}"' copilot/mcp-config.json
+grep '"mine"' copilot/mcp-config.json
+grep '"agentStop"' copilot/hooks/zakwas.json
+grep '"bash": "/bin/notify"' copilot/hooks/zakwas.json
+grep '^name: reviewer$' copilot/agents/reviewer.agent.md
+grep '^  - docs/\*$' copilot/agents/reviewer.agent.md
+grep '^You review\.$' copilot/agents/reviewer.agent.md
+linkto copilot/skills/mine skills/mine
+! exists copilot/settings.json
+! exists copilot/config.json
+rm calls
+
+zakwas check --only agents
+stdout 'No changes'
+
+zakwas apply -y --only agents
+stdout 'No changes'
+! grep 'copilot plugin (install|uninstall|marketplace add|marketplace remove)' calls
+rm calls
+
+zakwas upgrade -y --only agents
+grep '^copilot plugin marketplace update sai$' calls
+grep '^copilot plugin update humanize@sai$' calls
+rm calls
+
+env COPILOT_AGENT_SESSION_ID=abc123
+! zakwas apply -y --only agents
+stderr 'refusing to apply from a Copilot CLI session'
+env COPILOT_AGENT_SESSION_ID=
+! exists calls
+
+cp zakwas-unnamed.yaml zakwas.yaml
+zakwas plan --only agents
+stdout '- .*/copilot/hooks/zakwas.json'
+stdout '- copilot mcp docs'
+stdout '- .*/copilot/instructions/zakwas.instructions.md'
+stdout '- .*/copilot/agents/reviewer.agent.md'
+stdout '- .*/copilot/skills/mine'
+! stdout 'copilot plugin'
+zakwas apply -y --only agents
+! exists copilot/hooks/zakwas.json
+! exists copilot/instructions/zakwas.instructions.md
+! exists copilot/agents/reviewer.agent.md
+! exists copilot/skills/mine
+grep '"mine"' copilot/mcp-config.json
+! grep docs copilot/mcp-config.json
+zakwas check --only agents
+! exists copilot/settings.json
+! exists copilot/config.json
+
+-- zakwas.yaml --
+agents:
+  providers: [claude]
+  instructions: AGENTS.md
+-- zakwas-copilot.yaml --
+agents:
+  providers: [copilot]
+  prune: true
+  upgrade: true
+  marketplaces:
+    sai: owner/sai
+  plugins:
+    - humanize@sai
+  instructions: AGENTS.md
+  mcp:
+    docs:
+      command: docs-mcp
+      envVars: [DOCS_TOKEN]
+  hooks:
+    commands:
+      - {event: stop, command: /bin/notify}
+  permissions:
+    allow:
+      - git status
+  profiles:
+    reviewer:
+      description: Reviews code
+      prompt: reviewer.md
+      tools: [read, search]
+      sandbox: read-only
+      mcp: {docs: ask}
+  skills:
+    - skills/mine
+-- zakwas-unnamed.yaml --
+agents:
+  providers: [claude]
+-- AGENTS.md --
+be terse
+-- reviewer.md --
+You review.
+-- skills/mine/SKILL.md --
+---
+name: mine
+description: mine
+---
+Body
+-- copilot/mcp-config.json --
+{"mcpServers": {"mine": {"tools": ["*"], "type": "local", "command": "mine"}}}
+-- bin/copilot --
+#!/bin/sh
+echo "copilot $*" >> "$WORK/calls"
+[ "$(pwd)" = / ] || { echo "copilot must run from /, not $(pwd)" >&2; exit 97; }
+[ "$COPILOT_HOME" = "$WORK/copilot" ] || { echo "COPILOT_HOME=$COPILOT_HOME" >&2; exit 98; }
+st="$WORK/state"
+case "$*" in
+  "plugin marketplace list --json")
+    m='{"name":"copilot-plugins","source":"GitHub: github/copilot-plugins","isDefault":true}'
+    [ -f "$st/old-gone" ] || m="$m,{\"name\":\"old\",\"source\":\"URL: https://example.com/old.git\",\"isDefault\":false}"
+    [ -f "$st/sai" ] && m="$m,{\"name\":\"sai\",\"source\":\"GitHub: owner/sai\",\"isDefault\":false}"
+    echo "[$m]" ;;
+  "plugin list --json")
+    i='{"name":"builtin","marketplace":"copilot-plugins","enabled":true,"source":"installed"}'
+    [ -f "$st/stale-gone" ] || i="$i,{\"name\":\"stale\",\"marketplace\":\"old\",\"enabled\":true,\"source\":\"installed\"}"
+    [ -f "$st/humanize" ] && i="$i,{\"name\":\"humanize\",\"marketplace\":\"sai\",\"enabled\":true,\"source\":\"installed\"}"
+    echo "[$i]" ;;
+  "plugin marketplace add owner/sai")
+    touch "$st/sai"
+    echo 'Marketplace "sai" added successfully.' ;;
+  "plugin install humanize@sai")
+    touch "$st/humanize"
+    echo 'Plugin "humanize" installed successfully.' ;;
+  "plugin uninstall stale@old")
+    touch "$st/stale-gone"
+    echo 'Plugin "stale@old" uninstalled successfully.' ;;
+  "plugin marketplace remove old")
+    touch "$st/old-gone"
+    echo 'Marketplace "old" removed successfully.' ;;
+  "plugin marketplace browse sai --json")
+    echo '[{"name":"humanize","marketplace":"sai"}]' ;;
+  "plugin marketplace update sai"|"plugin update humanize@sai")
+    echo ok ;;
+  *) echo "unexpected copilot $*" >&2; exit 99 ;;
+esac

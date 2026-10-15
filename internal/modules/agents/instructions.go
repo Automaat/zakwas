@@ -63,6 +63,8 @@ func (m *Module) instructionsPath(provider string) string {
 		return filepath.Join(m.claudeBackend().dir, "CLAUDE.md")
 	case config.ProviderCodex:
 		return filepath.Join(m.codexBackend().home, "AGENTS.md")
+	case config.ProviderCopilot:
+		return filepath.Join(m.copilotBackend().home, "instructions", "zakwas.instructions.md")
 	case sharedInstructions:
 		return m.Paths.Dst("~/.agents/AGENTS.md")
 	default:
@@ -123,9 +125,9 @@ func samePath(path string) string {
 // planInstructions renders agents.instructions into the global
 // instructions of every managed provider, grouped by provider, plus the
 // shared ~/.agents/AGENTS.md when asked for, and removes what zakwas wrote
-// that nothing wants anymore. Claude, and codex and opencode when
+// that nothing wants anymore. Claude, and codex, copilot and opencode when
 // zakwas.yaml names them, are strict: a copy that can't be rendered or
-// written fails the plan. Codex is opt-in, as for plugins, and opencode by
+// written fails the plan. Codex and Copilot are opt-in, as for plugins, and opencode by
 // the all-providers default is best effort: written only when opencode is
 // installed and nothing blocks it, its file otherwise left as is. A strict
 // provider that can't be written is returned in failed. Links an earlier
@@ -186,7 +188,7 @@ func (m *Module) planInstructions() (map[string][]engine.Change, map[string]erro
 				continue
 			default:
 				named := m.desired(p).named
-				if p == config.ProviderCodex && !named {
+				if config.OptIn(p) && !named {
 					continue
 				}
 				strict = p == config.ProviderClaude || named

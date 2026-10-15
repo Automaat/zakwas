@@ -62,6 +62,7 @@ func run() int {
 
 		ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
 		CodexHome:       os.Getenv("CODEX_HOME"),
+		CopilotHome:     os.Getenv("COPILOT_HOME"),
 		LockHeldBy:      os.Getenv(cli.LockHeldEnv),
 		AgentSession:    cli.DetectAgentSession(os.Getenv),
 

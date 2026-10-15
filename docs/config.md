@@ -254,11 +254,11 @@ mise:
 
 Coding-agent plugins and the marketplaces they come from, declared once for every provider they target. Omit the section to leave agent plugins alone.
 
-The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converged. Each managed provider plans on its own: when one fails (its CLI is missing, a source conflicts), the plan reports the error and the other providers' changes still apply. Codex is opt-in: zakwas converges it only when `zakwas.yaml` names `codex` in `agents.providers` or in an entry's `providers`. Configs that rely on the default providers leave Codex alone, as they did before Codex support; once `codex` is named, entries without their own `providers` target it too.
+The `claude` (Claude Code), `codex` (Codex), `opencode` and `copilot` (GitHub Copilot CLI) providers are converged. Each managed provider plans on its own: when one fails (its CLI is missing, a source conflicts), the plan reports the error and the other providers' changes still apply. Codex and Copilot are opt-in: zakwas converges them only when `zakwas.yaml` names `codex` or `copilot` in `agents.providers` or in an entry's `providers`. Configs that rely on the default providers leave them alone, as they did before their support; once `codex` or `copilot` is named, entries without their own `providers` target it too.
 
 | Key | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `providers` | list of `claude` \| `codex` \| `opencode` | no | all three | Providers zakwas manages. Marketplaces target these unless they set their own; `prune` only touches these. |
+| `providers` | list of `claude` \| `codex` \| `opencode` \| `copilot` | no | `claude`, `codex`, `opencode`, with `codex` and `copilot` opt-in | Providers zakwas manages. Marketplaces target these unless they set their own; `prune` only touches these. |
 | `marketplaces` | map | no | | Marketplace name → source string, or `{source, providers}`. The name must match the `name` in the marketplace's own manifest. |
 | `plugins` | list | no | | `name@marketplace` strings, or `{id, providers}`. The marketplace must be declared under `marketplaces`. |
 | `upgrade` | bool | no | `false` | Update installed plugins to the version their marketplace offers on `apply`. |
@@ -292,6 +292,13 @@ For Codex, `apply` adds missing marketplaces (`codex plugin marketplace add`, a 
 
 The Codex plan fails when `codex` is not on `PATH`, when a declared marketplace is already in `config.toml` from a different source or ref, when a marketplace Codex finds on its own already has the declared name, when a local marketplace in `config.toml` lost its manifest (Codex can't list anything then; remove it with `codex plugin marketplace remove`), or when a declared plugin is not in its marketplace. zakwas runs `codex` from `/`, so a project's marketplace doesn't leak in, and honors `CODEX_HOME` (a relative one resolves from the directory zakwas runs in).
 
+For Copilot CLI, which reads Claude-format marketplaces, `apply` adds missing marketplaces (`copilot plugin marketplace add`, a `#ref` kept in the source) and installs missing plugins (`copilot plugin install`), and enables an installed one that is disabled (`copilot plugin enable`).
+
+- `upgrade`: Copilot lists no version for a plugin it installed from a Git marketplace, so the plan can't tell an outdated one. With `upgrade: true`, `zakwas upgrade` runs `copilot plugin marketplace update` for the declared marketplaces, then `copilot plugin update` for their declared plugins; plugins of a local marketplace are loaded live from it and need no update.
+- `prune`: undeclared plugins are uninstalled (`copilot plugin uninstall`), then undeclared marketplaces removed (`copilot plugin marketplace remove`). Copilot's built-in marketplaces (`copilot-plugins`, `awesome-copilot`) and their plugins, plugins installed straight from a repository, and marketplaces that still have a plugin installed are never touched. Copilot only disables an uninstalled plugin of a local marketplace; the plan counts it as gone.
+
+The Copilot plan fails when `copilot` is not on `PATH`, when a declared marketplace is already added from a different source or ref (Copilot's list omits the ref, so zakwas reads it from `settings.json`), or when a declared plugin is not in its marketplace. zakwas runs `copilot` from `/` and honors `COPILOT_HOME` (a relative one resolves from the directory zakwas runs in). zakwas never writes Copilot's `config.json` or `settings.json`; Copilot keeps its own marketplace and plugin state in them.
+
 For opencode, which has no plugin system, zakwas links each skill of every declared plugin (the paths its `plugin.json` or marketplace entry lists under `skills`, or else each `skills/<name>/` holding a `SKILL.md`) into `~/.config/opencode/skills/<name>`. `apply` fetches the git marketplaces of those plugins with `git clone --depth 1` into `~/.local/share/zakwas/agents/<name>` (a `#ref` must be a branch or tag) and uses local ones in place; the plugin directory comes from the first of `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` that lists the plugin, and must be inside the marketplace repo, symlinks resolved; skill paths that resolve outside it are skipped. `plan` never fetches: a marketplace not fetched yet shows as a fetch, followed by one step that links its plugins' skills and applies the other listed changes, checking every skill name before linking any. Under `prune`, links of those plugins' skills that the fetched copy no longer ships are removed in the same step; any other removal that only shows up after the fetch is left for the next plan. `zakwas upgrade` pulls the fetched copies first; the links point into them, so skill updates need no relink. zakwas records what it linked and fetched in `~/.local/state/zakwas/opencode.json`; it only replaces or removes its own links, so a skill directory you put there yourself fails the plan instead, and a link you made to the same skill is left alone and never pruned. Two plugins shipping a skill with the same name, ignoring case, fail the plan, naming both. Like other modules, zakwas won't write through a symlinked parent under `$HOME` (this covers its own cache and state under `~/.local` too), so when `~/.config/opencode` is a link into your repo, set `opencode.skillsDir` (opencode also loads `~/.agents/skills`). `OPENCODE_CONFIG_DIR` is ignored, since tools like Orca point it at a private config; set `opencode.skillsDir` to install elsewhere (also when `XDG_CONFIG_HOME` moves opencode's config). With `prune`, links zakwas made for skills no declared plugin ships anymore are removed (also in an earlier `skillsDir`), then fetched copies of marketplaces no opencode plugin uses anymore. The plan fails when `opencode` is not on `PATH`; when no plugin names opencode, it only prunes then. All of this is strict only for plugins that name opencode, in their own `providers`, their marketplace's or `agents.providers`: a plugin that targets opencode by the all-providers default is linked where it can be and otherwise skipped (missing opencode or git, a failed fetch, which `zakwas upgrade` retries, a failed pull, which keeps the copy it has, a plugin stored elsewhere, a skill path that is taken), so a Claude-only config gets no opencode errors once opencode is installed; a skill name shipped by two plugins fails either way.
 
 `instructions`: see [instructions](#instructions).
@@ -316,7 +323,7 @@ agents:
     - {id: lint@team, providers: [codex]}
 ```
 
-`hooks.commands` declares each command once. `event` is `beforeTool`, `afterTool`, `sessionStart`, or `stop`; `providers` defaults to `agents.providers`, with Codex opt-in as for plugins. Zakwas registers the command in Claude Code's `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Codex's `${CODEX_HOME:-~/.codex}/hooks.json`, and a generated OpenCode plugin at `~/.config/opencode/plugins/zakwas-hooks.js` (OpenCode 1.18.29+ or 2.x). It maps the events to `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` for Claude and Codex. In OpenCode, tool events use `tool.execute.before` and `tool.execute.after` on 1.x or `execute.before` and `execute.after` on 2.x; `sessionStart` observes `session.created`, and `stop` observes `session.idle` on 1.x or `session.execution.succeeded` on 2.x. Zakwas preserves unrelated JSON settings and hook groups, records its registrations in `~/.local/state/zakwas/command-hooks.json`, and removes only those registrations when they leave the config. A generated OpenCode plugin edited by hand is left in place when removed from the config. Codex may ask you to trust newly registered hooks through `/hooks` before running them. Commands receive provider-specific event JSON on stdin; a shared script must handle the payload and output rules of each provider. OpenCode blocks a tool when a before-tool command exits nonzero or returns a JSON `decision: block` / `hookSpecificOutput.permissionDecision: deny`; its after-tool and session hooks do not use command output. Don't also manage these agent settings or the generated plugin with `files`, `links`, or `templates`.
+`hooks.commands` declares each command once. `event` is `beforeTool`, `afterTool`, `sessionStart`, or `stop`; `providers` defaults to `agents.providers`, with Codex and Copilot opt-in as for plugins. Zakwas registers the command in Claude Code's `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Codex's `${CODEX_HOME:-~/.codex}/hooks.json`, a hooks file of its own for Copilot CLI, `${COPILOT_HOME:-~/.copilot}/hooks/zakwas.json` (a protected copy like [`instructions`](#instructions); Copilot reads every `*.json` in that directory, so none of its other files are edited; the events become `preToolUse`, `postToolUse`, `sessionStart` and `agentStop`, each command a `bash` hook; its hash is in `~/.local/state/zakwas/agent-hook-files.json`), and a generated OpenCode plugin at `~/.config/opencode/plugins/zakwas-hooks.js` (OpenCode 1.18.29+ or 2.x). It maps the events to `PreToolUse`, `PostToolUse`, `SessionStart`, and `Stop` for Claude and Codex. In OpenCode, tool events use `tool.execute.before` and `tool.execute.after` on 1.x or `execute.before` and `execute.after` on 2.x; `sessionStart` observes `session.created`, and `stop` observes `session.idle` on 1.x or `session.execution.succeeded` on 2.x. Zakwas preserves unrelated JSON settings and hook groups, records its registrations in `~/.local/state/zakwas/command-hooks.json`, and removes only those registrations when they leave the config. A generated OpenCode plugin edited by hand is left in place when removed from the config. Codex may ask you to trust newly registered hooks through `/hooks` before running them. Commands receive provider-specific event JSON on stdin; a shared script must handle the payload and output rules of each provider. OpenCode blocks a tool when a before-tool command exits nonzero or returns a JSON `decision: block` / `hookSpecificOutput.permissionDecision: deny`; its after-tool and session hooks do not use command output. Don't also manage these agent settings or the generated plugin with `files`, `links`, or `templates`.
 
 `agents.hooks.klaudiush: true` registers global klaudiush hooks for the providers enabled in `${XDG_CONFIG_HOME:-~/.config}/klaudiush/config.toml`. Install klaudiush and place its config with `files` or `templates` first. Zakwas checks hook targets during `plan` and runs `klaudiush init --install-hooks --global` during `apply` when registration is missing or the binary, config, or hook files changed. It records a registration fingerprint in `~/.local/state/zakwas/klaudiush.json`. Klaudiush keeps unrelated hooks. Codex's `hooks_config_path` and opencode's `plugin_path` come from the klaudiush config and can point outside default agent directories. Removing this option leaves existing registrations in place.
 
@@ -329,6 +336,7 @@ agents:
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` |
 | Codex | `${CODEX_HOME:-~/.codex}/AGENTS.md` |
 | opencode | `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` is ignored, as for skills, and `opencode.skillsDir` doesn't move it) |
+| Copilot CLI | `${COPILOT_HOME:-~/.copilot}/instructions/zakwas.instructions.md`, with `applyTo: "**"` frontmatter added so that Copilot loads it in every session |
 | shared | `~/.agents/AGENTS.md`, only with `sharedInstructions: true`; read by Warp, Cline and Factory Droid, not by Claude Code, Codex or opencode |
 
 ```yaml
@@ -339,18 +347,19 @@ agents:
 ```
 
 - Files are joined in order, separated by a blank line; a file that renders empty is left out. `instructions: dotfiles/AGENTS.md`, a single file, keeps working and is copied as rendered.
-- Every file is a Go template, like [`templates`](#templates), sharing `templates.vars`: `{{ .Provider }}` is `claude`, `codex`, `opencode` or `shared`, `{{ .Home }}` is your home directory, `{{ .Vars.name }}` a template variable. Branch on the provider to keep text for agents that can use it: `{{ if eq .Provider "claude" }}Use the Skill tool.{{ end }}`. A file with a literal `{{` needs `{{ "{{" }}`; an unknown variable or a syntax error fails the plan.
-- `@path` imports: Claude Code resolves them itself, up to four files deep, so its copy keeps them (a path relative to the instructions file becomes absolute, since the copy lives elsewhere). Codex, opencode and the shared copy don't resolve imports, so zakwas inlines the imported file, as it is: it is not rendered as a template. A path counts as an import when it starts a line or follows whitespace, begins with `@` and contains a `/` or ends in `.md` (`@docs/git.md`, `@~/notes/me.md`, `@/abs/rules.md`); `@claude` or a path in a code block or code span is left alone. A missing import, an import cycle or one nested more than four files deep fails the plan.
+- Every file is a Go template, like [`templates`](#templates), sharing `templates.vars`: `{{ .Provider }}` is `claude`, `codex`, `opencode`, `copilot` or `shared`, `{{ .Home }}` is your home directory, `{{ .Vars.name }}` a template variable. Branch on the provider to keep text for agents that can use it: `{{ if eq .Provider "claude" }}Use the Skill tool.{{ end }}`. A file with a literal `{{` needs `{{ "{{" }}`; an unknown variable or a syntax error fails the plan.
+- `@path` imports: Claude Code resolves them itself, up to four files deep, so its copy keeps them (a path relative to the instructions file becomes absolute, since the copy lives elsewhere). Codex, opencode, Copilot and the shared copy don't resolve imports, so zakwas inlines the imported file, as it is: it is not rendered as a template. A path counts as an import when it starts a line or follows whitespace, begins with `@` and contains a `/` or ends in `.md` (`@docs/git.md`, `@~/notes/me.md`, `@/abs/rules.md`); `@claude` or a path in a code block or code span is left alone. A missing import, an import cycle or one nested more than four files deep fails the plan.
 - Size limits: Codex reads at most 32768 bytes of `AGENTS.md`, so a Codex copy over that, after inlining, fails the plan naming the provider and the size.
 - A file already at a path is backed up to `<file>.zakwas-bak` first, one you edited later too; a symlink there, such as the link an earlier zakwas made, is replaced without a backup; a directory fails the plan, as does a missing source or a symlinked parent.
-- The instructions follow the plugin rules: Codex gets them only when `zakwas.yaml` names `codex`, and Claude Code and every named provider are strict, failing their own plan when the copy can't be rendered or written (the other providers still apply); opencode by the all-providers default is best effort, written only once `opencode` is on `PATH` and skipped when something blocks the write. The shared copy is strict. None of them needs the agent's CLI otherwise.
+- The instructions follow the plugin rules: Codex and Copilot get them only when `zakwas.yaml` names them, and Claude Code and every named provider are strict, failing their own plan when the copy can't be rendered or written (the other providers still apply); opencode by the all-providers default is best effort, written only once `opencode` is on `PATH` and skipped when something blocks the write. The shared copy is strict. None of them needs the agent's CLI otherwise.
 - zakwas records the hash of each copy in `~/.local/state/zakwas/instruction-files.json`. When a provider leaves `agents.providers`, its config dir moves, `sharedInstructions` is turned off or `instructions` is removed, the copy zakwas wrote is removed (a destructive change in the plan; one edited since is backed up first). Removing the whole `agents` section removes them too. Links an earlier zakwas recorded in `instructions.json` are replaced by the copy on the next `apply`, or removed when no provider wants them. Don't also list these paths under `files`, `links` or `templates`.
 
 ### permissions
 
 `agents.permissions` is one list of shell command permissions for every agent. Each entry is a command prefix: one or more words, matched on whole words, so `git status` covers `git status --short` but not `git statusx`. Write it as a string, or as `{command, providers, justification}`:
 
-- `providers` defaults to `agents.providers`, with Codex opt-in as for plugins: an entry without its own `providers` reaches Codex only when `zakwas.yaml` names `codex`.
+- `providers` defaults to `agents.providers`, with Codex and Copilot opt-in as for plugins: an entry without its own `providers` reaches Codex or Copilot only when `zakwas.yaml` names it.
+- Copilot CLI keeps user-level shell permission rules only in root-owned managed settings, which zakwas can't write. An entry that reaches `copilot` is reported in the plan as unsupported, which isn't a change and fails nothing.
 - `justification` is a one-line reason Codex shows the agent when its rule prompts for or forbids a command. The other providers ignore it.
 
 Prefixes stay plain words. Shell operators, quotes, globs, variables, backslashes, brackets and control characters (`* ? [ ] { } ( ) | & ; < > $` backtick, quotes, `\`) fail validation. A command may sit in only one list per provider, and only once.
@@ -444,9 +453,12 @@ agents:
 |---|---|---|
 | Claude Code | `mcpServers` in `.claude.json`: `${CLAUDE_CONFIG_DIR}/.claude.json`, or `~/.claude.json` | `${X}` in `env` or `headers` |
 | Codex | `[mcp_servers.<name>]` in `${CODEX_HOME:-~/.codex}/config.toml` | `env_vars`, `bearer_token_env_var`, `env_http_headers` |
+| Copilot CLI | `mcpServers` in `${COPILOT_HOME:-~/.copilot}/mcp-config.json` | `${X}` in `env` or `headers`, which Copilot expands from its own environment |
 | opencode | the `agentMCP` template function (below) | `{env:X}` in `environment` or `headers` |
 
 **Claude Code.** `claude mcp get` starts the server it reports on, so zakwas reads `.claude.json` instead and edits only the entry of the server it changes. The rest of the file keeps its key order and values. If Claude Code saves the file while zakwas edits it, zakwas redoes its edit on the new content, and gives up after three tries.
+
+**Copilot CLI.** zakwas edits the user-level `mcpServers` of `mcp-config.json` in place, the way `copilot mcp add` does (a stdio server is `type: local`, an HTTP one `type: http`, each with `tools: ["*"]`), and keeps the file's other servers and keys, so servers added with `copilot mcp add` stay. Servers from a workspace `.mcp.json` or a plugin live elsewhere and are never touched. An OAuth server needs `/mcp auth <name>` in Copilot CLI.
 
 **Codex.** `codex mcp add` rewrites every `[mcp_servers.*]` table and drops their comments, and it opens a browser for OAuth servers. zakwas edits the server's own tables in `config.toml` as text instead: a changed or removed server rewrites only the lines from its `[mcp_servers.<name>]` header to its last key, subtables included. Everything else, comments included, stays byte-identical, and a new server is appended at the end of the file. Comments and blank lines after a server's last key stay, as does everything above its header, and the file's line endings and final newline are kept. A server written as an inline table (`[mcp_servers]` with `name = { … }`) can't be edited in place: if it differs from `zakwas.yaml`, or has to change or go, the plan fails and says to do it by hand.
 
@@ -497,6 +509,7 @@ Only declared leaves are updated. Removing a value or the settings block leaves 
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md` (a subagent file; Claude Code scans the directory recursively) | `claude --agent <name>` |
 | Codex | `${CODEX_HOME:-~/.codex}/<name>.config.toml` (layered over `config.toml`) | `codex --profile <name>` |
 | opencode | `~/.config/opencode/agents/<name>.md` | `opencode --agent <name>` |
+| Copilot CLI | `${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md` (a custom agent; only when `copilot` is named) | `copilot --agent <name>` |
 
 ```yaml
 agents:
@@ -525,32 +538,32 @@ agents:
 | Field | Description |
 |---|---|
 | `description` | Required, one line. Codex profiles carry none. |
-| `prompt` | A file relative to the directory holding `zakwas.yaml`, rendered as a template that sees `{{ .Provider }}`, `{{ .Home }}` and `{{ .Vars }}`. It is the body of the Claude Code and opencode files (Claude Code replaces its default system prompt with it) and Codex's `developer_instructions`. |
+| `prompt` | A file relative to the directory holding `zakwas.yaml`, rendered as a template that sees `{{ .Provider }}`, `{{ .Home }}` and `{{ .Vars }}`. It is the body of the Claude Code, opencode and Copilot CLI files (Claude Code replaces its default system prompt with it) and Codex's `developer_instructions`. |
 | `tools` | Any of `read`, `search`, `edit`, `shell`, `web`. Omit for all. |
 | `edit`, `shell` | `allow`, `ask` or `deny`. A profile that sets `edit` or `shell` to `allow` or `ask` can't leave that tool out of `tools`. |
 | `sandbox` | `read-only`, `workspace-write` or `danger-full-access`: Codex's sandbox mode. Without it, Codex gets `read-only` for `edit: deny` and `workspace-write` for `edit: allow`. |
 | `network` | `true` or `false`. |
 | `reviewer` | `user`, or `auto` for an automatic reviewer. |
 | `mcp` | Server name → `allow`, `ask` or `deny`. Every server must be declared under [`mcp`](#mcp); one the profile doesn't list is denied. Servers added outside zakwas (`claude mcp add`, a plugin, a hand-edited config) are not affected. |
-| `providers` | Providers to render for; default `agents.providers`, with Codex opt-in as for plugins. |
-| `claude`, `codex`, `opencode` | `model` in the provider's own spelling, and `overrides`: extra top-level keys written as is. A key zakwas sets from the profile's own fields (`tools`, `permission`, `sandbox_mode`, …) is rejected; opencode's `mode` (`primary`) can be overridden. Values are re-typed by YAML, so quote ones that must stay strings: `2024-01-01` becomes a timestamp. |
+| `providers` | Providers to render for; default `agents.providers`, with Codex and Copilot opt-in as for plugins. |
+| `claude`, `codex`, `opencode`, `copilot` | `model` in the provider's own spelling, and `overrides`: extra top-level keys written as is. A key zakwas sets from the profile's own fields (`tools`, `permission`, `sandbox_mode`, …) is rejected; opencode's `mode` (`primary`) can be overridden. Values are re-typed by YAML, so quote ones that must stay strings: `2024-01-01` becomes a timestamp. |
 
 How each field maps:
 
-| Field | Claude Code | Codex | opencode |
-|---|---|---|---|
-| `tools` | `tools` allowlist | not expressible | other tools `deny` in `permission` |
-| `edit` | `deny` removes the edit tools; `allow` is `permissionMode: acceptEdits`; `ask` is `default` | `deny` is sandbox `read-only`, `allow` is `workspace-write`; `ask` is not expressible | `permission.edit` |
-| `shell` | `deny` removes `Bash`; `ask` is `default` (with `edit: allow` it is not honored: `acceptEdits` also approves filesystem commands); `allow` is not expressible | `ask` is `approval_policy = "on-request"`, `allow` is `"never"`; `deny` is not expressible | `permission.bash`: `deny`, or the [`agents.permissions`](#permissions) rules with `allow` or `ask` as the catch-all, the guard's deny rules last |
-| `sandbox` | not expressible | `sandbox_mode` | not expressible |
-| `network` | `false` removes `WebFetch` and `WebSearch`; shell commands stay unrestricted | `sandbox_workspace_write.network_access` | `false` denies `webfetch` and `websearch`; shell commands stay unrestricted |
-| `reviewer` | `auto` is `permissionMode: auto`, `user` is `default` | `approvals_reviewer`: `user` or `auto_review` | `auto` is not expressible |
-| `mcp` | `mcp__<server>` in `tools` or `disallowedTools`; `allow` is not expressible, the server's tools still ask | `enabled` and `default_tools_approval_mode` (`approve` for `allow`, `prompt` for `ask`) | `<server>_*` in `permission` |
+| Field | Claude Code | Codex | opencode | Copilot CLI |
+|---|---|---|---|---|
+| `tools` | `tools` allowlist | not expressible | other tools `deny` in `permission` | `tools` allowlist of `read`, `search`, `edit`, `execute`, `web` |
+| `edit` | `deny` removes the edit tools; `allow` is `permissionMode: acceptEdits`; `ask` is `default` | `deny` is sandbox `read-only`, `allow` is `workspace-write`; `ask` is not expressible | `permission.edit` | `deny` removes `edit` from `tools`; `ask` is Copilot's default; `allow` is not expressible |
+| `shell` | `deny` removes `Bash`; `ask` is `default` (with `edit: allow` it is not honored: `acceptEdits` also approves filesystem commands); `allow` is not expressible | `ask` is `approval_policy = "on-request"`, `allow` is `"never"`; `deny` is not expressible | `permission.bash`: `deny`, or the [`agents.permissions`](#permissions) rules with `allow` or `ask` as the catch-all, the guard's deny rules last | `deny` removes `execute` from `tools`; `ask` is Copilot's default; `allow` is not expressible |
+| `sandbox` | not expressible | `sandbox_mode` | not expressible | not expressible |
+| `network` | `false` removes `WebFetch` and `WebSearch`; shell commands stay unrestricted | `sandbox_workspace_write.network_access` | `false` denies `webfetch` and `websearch`; shell commands stay unrestricted | `false` removes `web` from `tools`; shell commands stay unrestricted |
+| `reviewer` | `auto` is `permissionMode: auto`, `user` is `default` | `approvals_reviewer`: `user` or `auto_review` | `auto` is not expressible | `auto` is not expressible |
+| `mcp` | `mcp__<server>` in `tools` or `disallowedTools`; `allow` is not expressible, the server's tools still ask | `enabled` and `default_tools_approval_mode` (`approve` for `allow`, `prompt` for `ask`) | `<server>_*` in `permission` | `<server>/*` in `tools`; `deny` leaves the server out; `allow` is not expressible, its tools still ask |
 
 - The plan lists, per provider and profile, every field the provider cannot express (`claude profile review can't express: …`), the same way as the guard's warnings: it is not a change, so `check` stays clean.
 - A profile name an opencode template defines under `agent` (a template that renders to the `opencode.json`) fails the opencode plan: the two would define one agent twice.
 - The files are protected copies, like [`instructions`](#instructions): a file already there is backed up first. zakwas records their hashes in `~/.local/state/zakwas/agent-profiles.json`. Removing a profile, a provider, or the whole `agents` section removes only the files zakwas rendered (destructive in the plan; one edited since is backed up instead).
-- Claude Code and every named provider are strict, failing their own plan when a profile can't be rendered; Codex gets profiles only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, written only once `opencode` is on `PATH`.
+- Claude Code and every named provider are strict, failing their own plan when a profile can't be rendered; Codex and Copilot get profiles only when `zakwas.yaml` names them; opencode by the all-providers default is best effort, written only once `opencode` is on `PATH`.
 
 ### skills
 
@@ -559,7 +572,7 @@ How each field maps:
 | Provider | Link |
 |---|---|
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/<name>` |
-| Codex, opencode | `~/.agents/skills/<name>`, one link for both (Gemini CLI and Copilot CLI read it too) |
+| Codex, opencode, Copilot CLI | `~/.agents/skills/<name>`, one link for all (Gemini CLI reads it too). Once `COPILOT_HOME` is set, Copilot reads only `${COPILOT_HOME}/skills`, so it gets its own link there instead |
 
 ```yaml
 agents:
@@ -575,7 +588,7 @@ agents:
 | `path` | Required. The skill directory, holding `SKILL.md`: relative to the directory holding `zakwas.yaml`, absolute or `~/…`. With `git`, a path inside the repository. The last element is the skill's name. |
 | `git` | A GitHub `owner/repo` or a clone URL: the skill is `path` inside that repository. |
 | `ref` | A branch or tag to clone, only with `git`. Default: the repository's default branch. |
-| `providers` | Providers to link for; default `agents.providers`, with Codex opt-in as for plugins. |
+| `providers` | Providers to link for; default `agents.providers`, with Codex and Copilot opt-in as for plugins. |
 
 A skill written as a plain string is its `path`.
 
@@ -584,7 +597,7 @@ A skill written as a plain string is its `path`.
 - `plan` never fetches. `apply` clones missing git sources with `git clone --depth 1` into `~/.local/share/zakwas/skills/<source>` (shared by every skill of one repository and `ref`), checks every skill of the clone and then links them, in one `<provider> skills` step of the plan. `zakwas upgrade` pulls the clones; the links point into them, so a newer skill needs no relink. A skill that resolves outside its repository through a symlink fails.
 - Removing a skill, a provider, or the whole `agents` section removes only the links zakwas made (destructive in the plan; a link changed since is only forgotten), then the clones no skill uses anymore (a clone a tracked link still points into is kept until that link has moved).
 - zakwas won't write through a symlinked parent under `$HOME`, so when `~/.claude` or `~/.agents` is a link into your repo the plan fails; point `CLAUDE_CONFIG_DIR` elsewhere or unlink it. opencode's `opencode.skillsDir`, which holds plugin skills, is not used for these.
-- Claude Code and every named provider are strict, failing their own plan when a skill can't be linked; Codex gets skills only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, linked only once `opencode` is on `PATH`.
+- Claude Code and every named provider are strict, failing their own plan when a skill can't be linked; Codex and Copilot get skills only when `zakwas.yaml` names them; opencode by the all-providers default is best effort, linked only once `opencode` is on `PATH`.
 
 ### guard
 
@@ -592,10 +605,10 @@ An agent that can run `zakwas apply`, or edit the config repo or zakwas state, c
 
 - **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade`, `zakwas self-update`, `zakwas approve` and `zakwas mcp`, also with a flag before the command (`zakwas -c zakwas.yaml apply`) and, for Claude Code and opencode, when run by path (`~/.local/bin/zakwas apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
 - **Edits.** Claude Code is also denied edits (`Edit(…)` rules, which cover its file tools) to the config repo's main checkout, and to the checkout zakwas runs from when that is a linked worktree of it, and to `~/.local/state/zakwas`. Worktrees agents create outside that checkout stay editable, so an agent can still propose a change as a branch; one created inside it is covered by the rule. A repo that holds your home directory can't be denied, and the plan says so. These rules don't stop a shell command that writes a file; the command rules above are what stop `apply`. They match the command as the agent writes it, so a wrapper (`sh -c`, a script, a PTY) is outside what they stop.
-- **Refusal.** `zakwas apply`, `zakwas upgrade` and `zakwas approve` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and, with `zakwas propose`, save a change for you to [approve](commands.md#approve) in a terminal.
-- **Providers that can't be protected.** The plan lists a managed provider the guard can't cover, under `agents`: opencode when no template renders `agentPermissions "opencode"` into its `opencode.json`. Such a warning doesn't count as a change, so `check` stays clean.
+- **Refusal.** `zakwas apply`, `zakwas upgrade` and `zakwas approve` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, `COPILOT_AGENT_SESSION_ID`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and, with `zakwas propose`, save a change for you to [approve](commands.md#approve) in a terminal.
+- **Providers that can't be protected.** The plan lists a managed provider the guard can't cover, under `agents`: opencode when no template renders `agentPermissions "opencode"` into its `opencode.json`, and Copilot CLI, which has no user-level deny rules, so only the refusal covers it. Such a warning doesn't count as a change, so `check` stays clean.
 
-Codex is guarded only when `zakwas.yaml` names `codex`, like its other settings. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
+Codex and Copilot are guarded only when `zakwas.yaml` names them, like their other settings. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
 
 ## system
 

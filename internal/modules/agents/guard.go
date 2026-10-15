@@ -149,6 +149,7 @@ var agentPermissionsCall = regexp.MustCompile("agentPermissions\\s+[\"`]opencode
 // what each profile asks of a provider that can't express it.
 func (m *Module) Warnings(context.Context) []string {
 	out := append(m.profileWarnings(), m.opencodePromptWarnings()...)
+	out = append(out, m.copilotWarnings()...)
 	if !m.Guard {
 		return out
 	}
@@ -156,6 +157,9 @@ func (m *Module) Warnings(context.Context) []string {
 		if _, warning := m.guardedDirs(); warning != "" {
 			out = append(out, "claude is only partly protected: "+warning)
 		}
+	}
+	if m.Agents.GuardsProvider(config.ProviderCopilot) {
+		out = append(out, "copilot can't be protected by rules: Copilot CLI has no user-level deny rules, so only zakwas's refusal to apply or upgrade from a Copilot session stops its agents from running zakwas apply")
 	}
 	if m.Agents.GuardsProvider(config.ProviderOpencode) && !m.rendersOpencodePermissions() {
 		out = append(out, "opencode can't be protected: no template renders agentPermissions \"opencode\" into its opencode.json, so its agents can run zakwas apply")
@@ -198,4 +202,15 @@ func (m *Module) templatesAsk(key string) bool {
 		}
 	}
 	return false
+}
+
+// copilotWarnings names what Copilot CLI can't take: it reads shell
+// permission rules only from root-owned managed settings, not from any
+// user-level file zakwas could write.
+func (m *Module) copilotWarnings() []string {
+	perms := m.Agents.PermissionsFor(config.ProviderCopilot)
+	if len(perms) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("copilot can't express agents.permissions (%d for copilot): Copilot CLI keeps user-level shell rules only in root-owned managed settings, so its agents ask about every command", len(perms))}
 }

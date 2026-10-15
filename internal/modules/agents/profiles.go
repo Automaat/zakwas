@@ -39,20 +39,22 @@ const orphanProfiles = "profiles"
 // profilePath is where a provider loads the profile from: Claude Code scans
 // its agents dir recursively, so zakwas keeps its files in a subdirectory of
 // their own; Codex reads <name>.config.toml from its home for --profile;
-// opencode loads agents/<name>.md.
+// Copilot reads agents/<name>.agent.md; opencode loads agents/<name>.md.
 func (m *Module) profilePath(provider, name string) string {
 	switch provider {
 	case config.ProviderClaude:
 		return filepath.Join(m.claudeBackend().dir, "agents", "zakwas", name+".md")
 	case config.ProviderCodex:
 		return filepath.Join(m.codexBackend().home, name+".config.toml")
+	case config.ProviderCopilot:
+		return filepath.Join(m.copilotBackend().home, "agents", name+".agent.md")
 	}
 	return m.Paths.Dst("~/.config/opencode/agents/" + name + ".md")
 }
 
 // planProfiles renders agents.profiles for every managed provider and
 // removes the files zakwas rendered that no profile wants anymore. Claude,
-// and codex and opencode when zakwas.yaml names them, are strict: a profile
+// and codex, copilot and opencode when zakwas.yaml names them, are strict: a profile
 // that can't be rendered or written fails that provider. opencode by the
 // all-providers default is best effort: skipped when it isn't installed or
 // nothing can be rendered, except that a name an opencode template defines
