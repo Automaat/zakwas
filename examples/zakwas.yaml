@@ -21,31 +21,27 @@ mise:
   config: dotfiles/mise/config.toml
   prune: true
 
-# agents:
-#   providers: [claude, codex, opencode]  # codex, gemini and copilot are opt-in: name them to converge them
-#   codex:
-#     settings:  # global config.toml values, independent of profiles
-#       agents:
-#         enabled: true
-#         max_concurrent_threads_per_session: 8
-#   instructions: [dotfiles/AGENTS.md]  # one rendered copy per agent
-#   hooks:
-#     commands:
-#       - {event: beforeTool, command: /path/to/check-tool}
-#     # klaudiush: true  # install klaudiush and its config first
-#   mcp:
-#     docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
-#     search: {url: "https://mcp.example.com/mcp", bearerTokenEnv: SEARCH_TOKEN}
-#   skills:  # linked into every agent's skills directory
-#     - dotfiles/skills/review
-#     - {git: owner/skills, path: skills/pdf, ref: v1}
-#   profiles:  # claude --agent review, codex --profile review, opencode --agent review, @review in gemini, copilot --agent review
-#     review:
-#       description: Read-only change review
-#       tools: [read, search, shell]
-#       edit: deny
-#       shell: ask
-#       mcp: {search: allow}
+# Agents: one declaration, rendered in each agent's own format. This section
+# needs no agent CLI, so `zakwas plan --only agents` works on a Mac without
+# them; CI plans the other modules. Plugins and marketplaces call the agent
+# CLIs, so they are not part of this example.
+agents:
+  providers: [claude, codex]  # gemini and copilot are opt-in too
+  instructions: [dotfiles/agents/AGENTS.md]  # one rendered copy per agent
+  mcp:
+    docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
+    search: {url: "https://mcp.example.com/mcp", bearerTokenEnv: SEARCH_TOKEN}
+  skills:  # linked into every agent's skills directory
+    - dotfiles/agents/skills/review
+  profiles:  # claude --agent review, codex --profile review
+    review:
+      description: Read-only change review
+      prompt: dotfiles/agents/review.md
+      edit: deny
+      shell: ask
+      # mcp: unnamed servers are denied, so review gets neither docs nor search
+  # permissions: {allow: [git status, git diff], deny: [git push --force]}
+  # hooks: {commands: [{event: beforeTool, command: /path/to/check-tool}]}
 
 system:
   sudoTouchID: true

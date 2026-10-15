@@ -74,6 +74,10 @@ func (m *Module) geminiCmd(args ...string) runner.Cmd {
 	return c
 }
 
+func geminiCmdAt(base string, args ...string) runner.Cmd {
+	return runner.Cmd{Name: "gemini", Args: args, Dir: "/", Env: []string{"GEMINI_CLI_HOME=" + base}}
+}
+
 // geminiNativeEvent maps a shared hook event to Gemini's: AfterAgent fires
 // once per turn, after the final response.
 func geminiNativeEvent(event string) string {
@@ -257,12 +261,23 @@ var geminiPriorities = map[string]int{
 }
 
 // geminiGuardRegex matches the command as written, after a flag, as in
-// `zakwas -c zakwas.yaml apply`, and run by path. Gemini matches a command
-// regex against `"command":"<command>"`, so it starts at the command; the
-// groups hold no quantifier, which Gemini rejects as unsafe.
+// `zakwas -c zakwas.yaml apply`, and run by path, any of them quoted.
+// Gemini matches a command regex against the JSON-encoded arguments, as
+// `"command":"<command>"`, where a quote is `\"`, so it starts at the
+// command and a quoted value is spelled out as its own alternative.
+// Gemini rejects a quantified group as unsafe, so none is used: the
+// alternatives allow up to geminiGuardQuotedValues quoted values before
+// the guarded word.
 func geminiGuardRegex(words []string) string {
-	return `(?:|\S*/)` + regexp.QuoteMeta(words[0]) + `\s(?:|[^"]*\s)` + regexp.QuoteMeta(strings.Join(words[1:], " ")) + `(?:[\s"]|\\")`
+	middle := []string{"", `[^"]*\s`}
+	for n := 1; n <= geminiGuardQuotedValues; n++ {
+		middle = append(middle, `[^"]*`+strings.Repeat(`\\"[^"]*\\"[^"]*`, n)+`\s`)
+	}
+	return `(?:|\S*/|\\"[^"]*/)(?:|\\")` + regexp.QuoteMeta(words[0]) + `(?:|\\"|')\s(?:` + strings.Join(middle, "|") + `)(?:|\\")` +
+		regexp.QuoteMeta(strings.Join(words[1:], " ")) + `(?:[\s"]|\\")`
 }
+
+const geminiGuardQuotedValues = 3
 
 // geminiRules are the rules of zakwas.toml: the guard's, agents.permissions
 // and the decisions of the profiles.
@@ -341,15 +356,22 @@ type geminiInstall struct {
 	Type   string `json:"type"`
 }
 
-func (m *Module) geminiInstallPath() string {
-	return filepath.Join(m.geminiDir(), "extensions", geminiExtension, ".gemini-extension-install.json")
+func (m *Module) geminiInstallPath() string { return geminiInstallPathAt(m.geminiBase()) }
+
+func geminiInstallPathAt(base string) string {
+	return filepath.Join(base, ".gemini", "extensions", geminiExtension, ".gemini-extension-install.json")
 }
 
 // geminiLinked reads gemini's record of the zakwas extension. Reading it
 // instead of running `gemini extensions list` keeps plan from creating
 // gemini's project files.
 func (m *Module) geminiLinked() (*geminiInstall, error) {
-	data, err := os.ReadFile(m.geminiInstallPath())
+	return m.geminiLinkedAt(m.geminiBase())
+}
+
+func (m *Module) geminiLinkedAt(base string) (*geminiInstall, error) {
+	path := geminiInstallPathAt(base)
+	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -358,9 +380,62 @@ func (m *Module) geminiLinked() (*geminiInstall, error) {
 	}
 	var in geminiInstall
 	if err := json.Unmarshal(data, &in); err != nil {
-		return nil, fmt.Errorf("%s: %w", m.Paths.Pretty(m.geminiInstallPath()), err)
+		return nil, fmt.Errorf("%s: %w", m.Paths.Pretty(path), err)
 	}
 	return &in, nil
+}
+
+// geminiStaleBases are the GEMINI_CLI_HOME values an earlier apply wrote
+// the extension manifest under, other than the current one, read from the
+// recorded files.
+func (m *Module) geminiStaleBases(tracked []string) []string {
+	current := samePath(filepath.Join(m.geminiExtDir(), "gemini-extension.json"))
+	var bases []string
+	for _, dst := range tracked {
+		ext := filepath.Dir(dst)
+		dot := filepath.Dir(ext)
+		if filepath.Base(dst) != "gemini-extension.json" || filepath.Base(ext) != geminiExtension || filepath.Base(dot) != ".gemini" || samePath(dst) == current {
+			continue
+		}
+		if base := filepath.Dir(dot); !slices.Contains(bases, base) {
+			bases = append(bases, base)
+		}
+	}
+	return bases
+}
+
+// planGeminiStaleUnlinks uninstalls the extension zakwas linked under a
+// GEMINI_CLI_HOME it no longer uses, with that home in the environment, since
+// gemini keeps its record per home and would warn about the missing manifest
+// on every start. The old manifest's removal comes after, as gemini needs
+// it. A record that can't be read, isn't a link zakwas made or has lost its
+// manifest is left alone. keep holds the manifests that must stay until gemini
+// is installed.
+func (m *Module) planGeminiStaleUnlinks(tracked []string) (changes []engine.Change, keep map[string]bool) {
+	keep = map[string]bool{}
+	for _, base := range m.geminiStaleBases(tracked) {
+		have, err := m.geminiLinkedAt(base)
+		dir := filepath.Join(base, ".gemini", geminiExtension)
+		if err != nil || have == nil || have.Type != "link" || sameFile(have.Source) != sameFile(dir) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "gemini-extension.json")); errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if !m.Runner.Installed("gemini") {
+			keep[samePath(filepath.Join(dir, "gemini-extension.json"))] = true
+			continue
+		}
+		changes = append(changes, engine.Change{
+			Action: engine.Remove, Target: "gemini extension " + geminiExtension + " in " + m.Paths.Pretty(filepath.Join(base, ".gemini")),
+			Detail: "GEMINI_CLI_HOME moved", Destructive: true,
+			Apply: func(ctx context.Context) error {
+				_, err := runner.Output(ctx, m.Runner, geminiCmdAt(base, "extensions", "uninstall", geminiExtension))
+				return err
+			},
+		})
+	}
+	return changes, keep
 }
 
 // planGeminiLink links the extension, or unlinks one zakwas linked when it
@@ -427,7 +502,8 @@ func (m *Module) planGemini() ([]engine.Change, error) {
 	if !wanted && len(tracked) == 0 && link == nil {
 		return nil, nil
 	}
-	var changes []engine.Change
+	stale, staleKept := m.planGeminiStaleUnlinks(tracked)
+	changes := stale
 	keep := map[string]bool{}
 	if unlink {
 		changes = append(changes, *link)
@@ -458,7 +534,7 @@ func (m *Module) planGemini() ([]engine.Change, error) {
 		}
 	}
 	for _, dst := range tracked {
-		if keep[samePath(dst)] || kept && samePath(dst) == samePath(filepath.Join(m.geminiExtDir(), "gemini-extension.json")) {
+		if keep[samePath(dst)] || staleKept[samePath(dst)] || kept && samePath(dst) == samePath(filepath.Join(m.geminiExtDir(), "gemini-extension.json")) {
 			continue
 		}
 		c, err := m.planCopyRemove(in, statePath, dst, "gemini no longer declares it")
