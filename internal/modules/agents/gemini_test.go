@@ -29,16 +29,25 @@ type geminiRunner struct {
 func (r *geminiRunner) Run(ctx context.Context, c runner.Cmd) (runner.Result, error) {
 	if c.Name == "gemini" && len(c.Args) >= 2 && c.Args[0] == "extensions" {
 		r.Calls = append(r.Calls, c)
+		base := r.m.Paths.Home
+		for _, e := range c.Env {
+			if v, ok := strings.CutPrefix(e, "GEMINI_CLI_HOME="); ok {
+				base = v
+			}
+		}
 		switch c.Args[1] {
 		case "link":
 			data, _ := json.Marshal(geminiInstall{Source: c.Args[2], Type: "link"})
-			path := r.m.geminiInstallPath()
+			path := geminiInstallPathAt(base)
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return runner.Result{}, err
 			}
 			return runner.Result{}, os.WriteFile(path, data, 0o644)
 		case "uninstall":
-			return runner.Result{}, os.RemoveAll(filepath.Dir(r.m.geminiInstallPath()))
+			if _, err := os.Stat(filepath.Join(base, ".gemini", geminiExtension, "gemini-extension.json")); err != nil {
+				return runner.Result{}, err
+			}
+			return runner.Result{}, os.RemoveAll(filepath.Dir(geminiInstallPathAt(base)))
 		}
 	}
 	return r.Fake.Run(ctx, c)
@@ -574,6 +583,74 @@ func TestGeminiHome(t *testing.T) {
 	link := r.Calls[len(r.Calls)-1]
 	if len(link.Env) != 1 || link.Env[0] != "GEMINI_CLI_HOME="+m.GeminiHome {
 		t.Errorf("link env = %v", link.Env)
+	}
+	assertConverged(t, m)
+}
+
+func TestGeminiMovedHomeUninstallsTheOldExtension(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		from, to func(m *Module) string
+	}{
+		{"unset to a value", func(m *Module) string { return "" }, func(m *Module) string { return filepath.Join(t.TempDir(), "b") }},
+		{"a value to another", func(m *Module) string { return filepath.Join(t.TempDir(), "a") }, func(m *Module) string { return filepath.Join(t.TempDir(), "b") }},
+		{"a value to unset", func(m *Module) string { return filepath.Join(t.TempDir(), "a") }, func(m *Module) string { return "" }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m, r := newGemini(t, geminiConfig(t))
+			prepareGemini(t, m)
+			m.GeminiHome = tt.from(m)
+			oldBase := m.geminiBase()
+			apply(t, plan(t, m))
+			if _, err := os.Stat(geminiInstallPathAt(oldBase)); err != nil {
+				t.Fatal(err)
+			}
+
+			m.GeminiHome = tt.to(m)
+			r.Calls = nil
+			changes := plan(t, m)
+			apply(t, changes)
+
+			var uninstall *runner.Cmd
+			for i, c := range r.Calls {
+				if len(c.Args) > 1 && c.Args[1] == "uninstall" {
+					uninstall = &r.Calls[i]
+				}
+			}
+			if uninstall == nil || len(uninstall.Env) != 1 || uninstall.Env[0] != "GEMINI_CLI_HOME="+oldBase {
+				t.Fatalf("uninstall = %+v, want one with GEMINI_CLI_HOME=%s; calls %v", uninstall, oldBase, r.Lines())
+			}
+			for _, path := range []string{
+				filepath.Join(oldBase, ".gemini", "extensions", geminiExtension),
+				filepath.Join(oldBase, ".gemini", geminiExtension, "gemini-extension.json"),
+			} {
+				if _, err := os.Lstat(path); !os.IsNotExist(err) {
+					t.Errorf("%s left behind: %v", path, err)
+				}
+			}
+			if _, err := os.Stat(m.geminiInstallPath()); err != nil {
+				t.Errorf("the extension is not linked in the new home: %v", err)
+			}
+			assertConverged(t, m)
+		})
+	}
+}
+
+func TestGeminiMovedHomeLeavesAnExtensionZakwasDidNotLink(t *testing.T) {
+	m, r := newGemini(t, geminiConfig(t))
+	prepareGemini(t, m)
+	m.GeminiHome = filepath.Join(t.TempDir(), "a")
+	oldBase := m.GeminiHome
+	apply(t, plan(t, m))
+	writeFile(t, geminiInstallPathAt(oldBase), `{"source":"https://example.com/x","type":"git"}`)
+
+	m.GeminiHome = filepath.Join(t.TempDir(), "b")
+	r.Calls = nil
+	apply(t, plan(t, m))
+	for _, c := range r.Calls {
+		if len(c.Args) > 1 && c.Args[1] == "uninstall" {
+			t.Errorf("uninstalled an extension zakwas did not link: %v", r.Lines())
+		}
 	}
 	assertConverged(t, m)
 }
