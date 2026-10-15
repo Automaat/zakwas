@@ -1073,6 +1073,64 @@
             "null"
           ]
         },
+        "skills": {
+          "items": {
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Skill directory holding SKILL.md, named like the skill. Without 'git': relative to the directory holding zakwas.yaml, or absolute or '~/...'. With 'git': a relative path inside the repository."
+              },
+              "git": {
+                "minLength": 1,
+                "description": "Git source of the skill: GitHub 'owner/repo' or a clone URL. zakwas clones it on apply into ~/.local/share/zakwas/skills and pulls it on 'zakwas upgrade'. Omit for a skill on disk.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ref": {
+                "minLength": 1,
+                "description": "Branch or tag to clone, only with 'git'. Default: the repository's default branch.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "providers": {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex",
+                    "opencode"
+                  ]
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Providers to link this skill for; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins. Codex and opencode share ~/.agents/skills.",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "minLength": 1,
+            "required": [
+              "path"
+            ],
+            "type": [
+              "string",
+              "object"
+            ]
+          },
+          "description": "Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex and opencode. Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them.",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "opencode": {
           "properties": {
             "skillsDir": {

@@ -31,6 +31,9 @@ mise:
 #   mcp:
 #     docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
 #     search: {url: "https://mcp.example.com/mcp", bearerTokenEnv: SEARCH_TOKEN}
+#   skills:  # linked into every agent's skills directory
+#     - dotfiles/skills/review
+#     - {git: owner/skills, path: skills/pdf, ref: v1}
 #   profiles:  # claude --agent review, codex --profile review, opencode --agent review
 #     review:
 #       description: Read-only change review
