@@ -461,3 +461,52 @@ agents:
 		t.Errorf("nil agents servers = %v", got)
 	}
 }
+
+func TestAgentsGuard(t *testing.T) {
+	tests := []struct {
+		name      string
+		yaml      string
+		enabled   bool
+		providers []string
+	}{
+		{"default", "agents: {}", true, []string{ProviderClaude, ProviderOpencode}},
+		{"explicitly on", "agents: {guard: true}", true, []string{ProviderClaude, ProviderOpencode}},
+		{"off", "agents: {guard: false}", false, nil},
+		{"codex named", "agents: {providers: [claude, codex]}", true, []string{ProviderClaude, ProviderCodex}},
+		{"unmanaged providers", "agents: {providers: [opencode]}", true, []string{ProviderOpencode}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, tt.yaml), "/home/u")
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := cfg.Agents
+			if a.GuardEnabled() != tt.enabled {
+				t.Errorf("GuardEnabled = %v, want %v", a.GuardEnabled(), tt.enabled)
+			}
+			var got []string
+			for _, p := range Providers {
+				if a.GuardsProvider(p) {
+					got = append(got, p)
+					perms := a.GuardPermissions(p)
+					if len(perms) != len(GuardedCommands) || perms[0].Decision != PermissionDeny || perms[0].Command() != "zakwas apply" {
+						t.Errorf("%s guard permissions = %+v", p, perms)
+					}
+				} else if a.GuardPermissions(p) != nil {
+					t.Errorf("%s is not guarded but has guard permissions", p)
+				}
+			}
+			if !slices.Equal(got, tt.providers) {
+				t.Errorf("guarded providers = %q, want %q", got, tt.providers)
+			}
+		})
+	}
+}
+
+func TestNoAgentsSectionHasNoGuard(t *testing.T) {
+	var a *Agents
+	if a.GuardEnabled() || a.GuardsProvider(ProviderClaude) || a.GuardPermissions(ProviderClaude) != nil {
+		t.Error("a missing agents section is guarded")
+	}
+}

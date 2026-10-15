@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/lock"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 	"github.com/Automaat/zakwas/schema"
@@ -380,5 +382,150 @@ func TestAbsFromCwd(t *testing.T) {
 		if got := absFromCwd(Env{Cwd: "/work"}, tc.in); got != tc.want {
 			t.Errorf("absFromCwd(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func holdLock(t *testing.T, home string) *lock.Lock {
+	t.Helper()
+	l, err := lock.Acquire(context.Background(), home, "zakwas apply", lock.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return l
+}
+
+func TestNoWaitFailsWhileAnotherRunHoldsTheLock(t *testing.T) {
+	for _, cmd := range []string{"apply", "upgrade"} {
+		t.Run(cmd, func(t *testing.T) {
+			env, home := setup(t, linksOnly)
+			held := holdLock(t, home)
+			defer func() { _ = held.Release() }()
+
+			r := invoke(env, "", cmd, "-y", "--no-wait")
+
+			if r.code != ExitErr {
+				t.Errorf("exit %d, want %d\nstderr: %s", r.code, ExitErr, r.stderr)
+			}
+			want := fmt.Sprintf(`"zakwas apply" (pid %d)`, os.Getpid())
+			if !strings.Contains(r.stderr, want) {
+				t.Errorf("stderr does not name the holder %s: %s", want, r.stderr)
+			}
+			if _, err := os.Lstat(filepath.Join(home, ".zshrc")); err == nil {
+				t.Error("a blocked run changed the system")
+			}
+		})
+	}
+}
+
+func TestApplyWaitsForTheLock(t *testing.T) {
+	env, home := setup(t, linksOnly)
+	held := holdLock(t, home)
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		_ = held.Release()
+	}()
+
+	r := invoke(env, "", "apply", "-y")
+
+	if r.code != ExitOK {
+		t.Fatalf("exit %d\nstderr: %s", r.code, r.stderr)
+	}
+	want := fmt.Sprintf(`waiting for "zakwas apply" (pid %d) to finish`, os.Getpid())
+	if !strings.Contains(r.stderr, want) {
+		t.Errorf("stderr does not say it waits (%s): %s", want, r.stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".zshrc")); err != nil {
+		t.Errorf("apply did not run after the lock was released: %v", err)
+	}
+}
+
+func TestPlanAndCheckIgnoreTheLock(t *testing.T) {
+	env, home := setup(t, linksOnly)
+	held := holdLock(t, home)
+	defer func() { _ = held.Release() }()
+
+	if r := invoke(env, "", "plan"); r.code != ExitOK {
+		t.Errorf("plan exit %d\nstderr: %s", r.code, r.stderr)
+	}
+	if r := invoke(env, "", "check"); r.code != ExitDrift {
+		t.Errorf("check exit %d, want drift\nstderr: %s", r.code, r.stderr)
+	}
+}
+
+func TestNoWaitOnlyWorksWithApplyAndUpgrade(t *testing.T) {
+	env, _ := setup(t, linksOnly)
+	for _, cmd := range []string{"plan", "check"} {
+		r := invoke(env, "", cmd, "--no-wait")
+		if r.code != ExitUsage || !strings.Contains(r.stderr, "-no-wait only works with apply and upgrade") {
+			t.Errorf("%s: exit %d, stderr: %s", cmd, r.code, r.stderr)
+		}
+	}
+}
+
+func TestConcurrentAppliesEndLikeSequentialOnes(t *testing.T) {
+	env, home := setup(t, `commands:
+  - name: once
+    check: test -e marker
+    run: |
+      sleep 0.3
+      echo ran >> log
+      touch marker
+`)
+	results := make(chan result, 2)
+	for range 2 {
+		env := env
+		env.Runner = runner.NewExec()
+		go func() { results <- invoke(env, "", "apply", "-y") }()
+	}
+	for range 2 {
+		if r := <-results; r.code != ExitOK {
+			t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+		}
+	}
+
+	log, err := os.ReadFile(filepath.Join(home, "log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(log) != "ran\n" {
+		t.Errorf("command ran %d times, want once: the second apply planned before the first finished", strings.Count(string(log), "ran"))
+	}
+}
+
+func TestNestedApplyFailsInsteadOfWaitingOnItsParent(t *testing.T) {
+	env, home := setup(t, linksOnly)
+	env.LockHeldBy = "4242"
+
+	r := invoke(env, "", "apply", "-y")
+
+	if r.code != ExitErr || !strings.Contains(r.stderr, "can't run apply inside a zakwas run (pid 4242") {
+		t.Errorf("exit %d, stderr: %s", r.code, r.stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".zshrc")); err == nil {
+		t.Error("a nested apply changed the system")
+	}
+	if r := invoke(env, "", "plan"); r.code != ExitOK {
+		t.Errorf("a nested plan exit %d, stderr: %s", r.code, r.stderr)
+	}
+}
+
+func TestCommandsSeeTheRunLockHolder(t *testing.T) {
+	env, home := setup(t, `commands:
+  - name: who
+    check: test -e holder
+    run: echo "$ZAKWAS_LOCK_HELD" > holder
+`)
+	env.Runner = runner.NewExec()
+
+	if r := invoke(env, "", "apply", "-y"); r.code != ExitOK {
+		t.Fatalf("exit %d\nstderr: %s", r.code, r.stderr)
+	}
+
+	got, err := os.ReadFile(filepath.Join(home, "holder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("%d\n", os.Getpid()); string(got) != want {
+		t.Errorf("command saw ZAKWAS_LOCK_HELD=%q, want %q", got, want)
 	}
 }

@@ -62,6 +62,8 @@ func run() int {
 
 		ClaudeConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"),
 		CodexHome:       os.Getenv("CODEX_HOME"),
+		LockHeldBy:      os.Getenv(cli.LockHeldEnv),
+		AgentSession:    cli.DetectAgentSession(os.Getenv),
 
 		StdinTTY:      term.IsTerminal(int(os.Stdin.Fd())),
 		Color:         colorOutput(),

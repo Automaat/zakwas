@@ -70,6 +70,7 @@ stdout 'skill "humanize" is shipped by both humanize@sai and copy@mp'
 
 -- zakwas.yaml --
 agents:
+  guard: false
   providers: [opencode]
   marketplaces:
     sai: owner/sai
@@ -79,6 +80,7 @@ agents:
     - tool@mp
 -- zakwas-prune.yaml --
 agents:
+  guard: false
   providers: [opencode]
   prune: true
   marketplaces:
@@ -88,6 +90,7 @@ agents:
     - humanize@sai
 -- zakwas-fork.yaml --
 agents:
+  guard: false
   providers: [opencode]
   prune: true
   opencode: {}
@@ -98,6 +101,7 @@ agents:
     - humanize@sai
 -- zakwas-dup.yaml --
 agents:
+  guard: false
   providers: [opencode]
   marketplaces:
     sai: owner/fork

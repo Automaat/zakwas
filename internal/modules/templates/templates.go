@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -102,7 +101,8 @@ var opencodeActions = map[string]string{
 // agentPermissions renders agents.permissions as opencode's permission.bash
 // object. opencode applies the last matching pattern, so the catch-all
 // comes first and deny entries last; each prefix gets a bare pattern and
-// one with " *" for its arguments.
+// one with " *" for its arguments. With the guard on, the commands that
+// apply the config are denied last, also after a flag (zakwas * apply) and run by path (*/zakwas apply).
 func agentPermissions(agents *config.Agents, provider string, catchAll ...string) (string, error) {
 	if provider != config.ProviderOpencode {
 		return "", fmt.Errorf("agentPermissions: provider %q is not supported, only %s", provider, config.ProviderOpencode)
@@ -110,38 +110,48 @@ func agentPermissions(agents *config.Agents, provider string, catchAll ...string
 	if len(catchAll) > 1 {
 		return "", fmt.Errorf("agentPermissions: want at most one default action, got %d", len(catchAll))
 	}
+	type rule struct{ pattern, action string }
+	var rules []rule
+	add := func(pattern, action string) {
+		rules = slices.DeleteFunc(rules, func(r rule) bool { return r.pattern == pattern })
+		rules = append(rules, rule{pattern, action})
+	}
+	if len(catchAll) == 1 {
+		if !slices.Contains([]string{"allow", "ask", "deny"}, catchAll[0]) {
+			return "", fmt.Errorf("agentPermissions: default action %q is not one of allow, ask, deny", catchAll[0])
+		}
+		add("*", catchAll[0])
+	}
+	for _, p := range agents.PermissionsFor(provider) {
+		action := opencodeActions[p.Decision]
+		add(p.Command(), action)
+		add(p.Command()+" *", action)
+	}
+	for _, p := range agents.GuardPermissions(provider) {
+		first, rest := p.Words[0], strings.Join(p.Words[1:], " ")
+		for _, name := range []string{first, "*/" + first} {
+			for _, pattern := range []string{name + " " + rest, name + " " + rest + " *", name + " * " + rest, name + " * " + rest + " *"} {
+				add(pattern, opencodeActions[p.Decision])
+			}
+		}
+	}
 	var b strings.Builder
-	add := func(pattern, action string) error {
-		key, err := json.Marshal(pattern)
+	b.WriteByte('{')
+	for i, r := range rules {
+		key, err := json.Marshal(r.pattern)
 		if err != nil {
-			return err
+			return "", err
 		}
-		value, err := json.Marshal(action)
+		value, err := json.Marshal(r.action)
 		if err != nil {
-			return err
+			return "", err
 		}
-		if b.Len() > 1 {
+		if i > 0 {
 			b.WriteString(", ")
 		}
 		b.Write(key)
 		b.WriteString(": ")
 		b.Write(value)
-		return nil
-	}
-	b.WriteByte('{')
-	if len(catchAll) == 1 {
-		if !slices.Contains([]string{"allow", "ask", "deny"}, catchAll[0]) {
-			return "", fmt.Errorf("agentPermissions: default action %q is not one of allow, ask, deny", catchAll[0])
-		}
-		if err := add("*", catchAll[0]); err != nil {
-			return "", err
-		}
-	}
-	for _, p := range agents.PermissionsFor(provider) {
-		action := opencodeActions[p.Decision]
-		if err := errors.Join(add(p.Command(), action), add(p.Command()+" *", action)); err != nil {
-			return "", err
-		}
 	}
 	b.WriteByte('}')
 	return b.String(), nil

@@ -71,13 +71,21 @@ type Module interface {
 	Plan(ctx context.Context) ([]Change, error)
 }
 
+// Warner is a Module that also reports what it can't do, e.g. a provider it
+// can't protect. Warnings don't count as changes: a plan with only warnings
+// is empty, and they don't fail plan or check.
+type Warner interface {
+	Warnings(ctx context.Context) []string
+}
+
 // ModulePlan is the plan for one module. Err is set when the module could
 // not be planned, or only in part: changes it did plan alongside the error
 // are shown and applied, the rest are unknown.
 type ModulePlan struct {
-	Module  string
-	Changes []Change
-	Err     error
+	Module   string
+	Changes  []Change
+	Warnings []string
+	Err      error
 }
 
 // Plan is the full set of pending changes, in module order.
@@ -155,7 +163,11 @@ func Build(ctx context.Context, modules []Module) Plan {
 	plan := make(Plan, 0, len(modules))
 	for _, m := range modules {
 		changes, err := m.Plan(ctx)
-		plan = append(plan, ModulePlan{Module: m.Name(), Changes: changes, Err: err})
+		mp := ModulePlan{Module: m.Name(), Changes: changes, Err: err}
+		if w, ok := m.(Warner); ok {
+			mp.Warnings = w.Warnings(ctx)
+		}
+		plan = append(plan, mp)
 	}
 	return plan
 }

@@ -47,6 +47,7 @@ templates:
   files:
     - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
 agents:
+  guard: false
   providers: [claude, codex, opencode]
   mcp:
     docs:
@@ -65,6 +66,7 @@ templates:
   files:
     - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
 agents:
+  guard: false
   providers: [claude, codex, opencode]
   mcp:
     docs:
@@ -81,6 +83,7 @@ templates:
     - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
 -- zakwas-conflict.yaml --
 agents:
+  guard: false
   providers: [claude]
   mcp:
     docs: {command: npx}

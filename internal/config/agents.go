@@ -38,6 +38,7 @@ type Agents struct {
 	Permissions  *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
 	MCP          map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
 	Opencode     *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
+	Guard        *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
 }
 
 // AgentHooks declares global command hooks and optional integrations.
@@ -184,6 +185,39 @@ func (a *Agents) targets(own []string) []string {
 		return a.DefaultProviders()
 	}
 	return slices.DeleteFunc(slices.Clone(a.DefaultProviders()), func(p string) bool { return p == ProviderCodex })
+}
+
+// GuardedCommands are the zakwas commands that change the system or zakwas
+// itself, which the guard keeps agents from running.
+var GuardedCommands = []string{"apply", "upgrade", "self-update"}
+
+// GuardEnabled reports whether the guard is on: it is, for any agents
+// section, unless it sets guard to false.
+func (a *Agents) GuardEnabled() bool {
+	return a != nil && (a.Guard == nil || *a.Guard)
+}
+
+// GuardsProvider reports whether the guard applies to provider: it is
+// managed, and Codex is also named, like for permissions.
+func (a *Agents) GuardsProvider(provider string) bool {
+	return a.GuardEnabled() && slices.Contains(a.permissionProviders(AgentPermission{}), provider)
+}
+
+// GuardPermissions are the deny entries that keep provider's agents from
+// running the guarded zakwas commands, none when the guard is off or the
+// provider isn't guarded.
+func (a *Agents) GuardPermissions(provider string) []Permission {
+	if !a.GuardsProvider(provider) {
+		return nil
+	}
+	out := make([]Permission, len(GuardedCommands))
+	for i, c := range GuardedCommands {
+		out[i] = Permission{
+			Decision: PermissionDeny, Words: []string{"zakwas", c},
+			Justification: "agents must not apply the zakwas config; ask the user to run it in a terminal",
+		}
+	}
+	return out
 }
 
 // permissionMeta are the characters a shell or an agent's matcher would
