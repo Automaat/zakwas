@@ -101,9 +101,9 @@ func TestCaptureClaude(t *testing.T) {
 		"claude mcp keyed !",
 		"claude mcp literal !",
 		"claude mcp remote",
-		"claude permission Bash !",
-		"claude permission Bash(npm run build) !",
-		"claude permission WebFetch(domain:example.com) !",
+		"claude permission Bash(...) !",
+		"claude permission Bash(...) !",
+		"claude permission WebFetch(...) !",
 		"claude permission git status",
 		"claude permission ls",
 	}
@@ -211,8 +211,8 @@ prefix_rule(pattern=["make"], decision="sometimes")
 		"codex mcp remote",
 		"codex mcp tuned !",
 		"codex permission git status",
-		`codex permission prefix_rule(pattern=["cargo", ["build", "test"]], decision="allow") !`,
-		`codex permission prefix_rule(pattern=["make"], decision="sometimes") !`,
+		"codex permission prefix_rule on line 6 !",
+		"codex permission prefix_rule on line 7 !",
 		"codex permission rm -rf",
 	}
 	if l := listed(got); !slices.Equal(l, want) {
@@ -441,8 +441,8 @@ func TestCaptureReadsCodexRulesOnlyWhenTheyAreWholeAndKeepsTheRestOnASymlink(t *
 	want := []string{
 		"codex marketplace cx",
 		`codex permission ls`,
-		`codex permission prefix_rule(pattern=["dd"], !`,
-		`codex permission prefix_rule(pattern=["rm", "-rf"], decision='forbidden') !`,
+		"codex permission prefix_rule on line 1 !",
+		"codex permission prefix_rule on line 3 !",
 	}
 	if l := listed(got); !slices.Equal(l, want) {
 		t.Errorf("candidates\n got %q\nwant %q", l, want)
@@ -463,5 +463,123 @@ func TestCaptureServerDeclaredForOtherProvidersIsReported(t *testing.T) {
 	got := capture(t, m)
 	if l := listed(got); !slices.Equal(l, []string{"claude mcp docs !"}) || !strings.Contains(got[0].Skip, "other providers only") {
 		t.Errorf("candidates = %q", l)
+	}
+}
+
+func TestLooksSecret(t *testing.T) {
+	secret := [][]string{
+		{"curl", "-H", "Authorization:Bearer-ghp_abcdefghijklmnopqrstuvwxyz0123456789"},
+		{"export", "GITHUB_TOKEN=hunter2secret"},
+		{"aws", "--secret-access-key", "X", "s3", "ls"},
+		{"mysql", "-pPASS1234"},
+		{"curl", "-H", "Authorization: Bearer sk-abcdefghSECRET"},
+		{"gh", "auth", "login", "--with-token", "ghp_x"},
+		{"mcp-remote", "https://x.example.com", "--header", "Authorization: Bearer X"},
+		{"--auth=X"},
+		{"--api_key", "X"},
+		{"--key", "X"},
+		{"--access-key", "X"},
+		{"postgres://user:pass@host/db"},
+		{"--dsn=mysql://u:p@h/db"},
+		{"-c", "API_KEY=X srv"},
+		{"login", "X"},
+		{"--url", "https://x/mcp?key=abc"},
+		{"https://h.example.com/KEY/mcp"},
+		{"https://h.example.com/s/Zx81QpLm/mcp"},
+		{"abcdefghij0123456789abcdefgh"},
+	}
+	for _, words := range secret {
+		if !looksSecret(words) {
+			t.Errorf("%q isn't recognized", words)
+		}
+	}
+	plain := [][]string{
+		{"git", "status"},
+		{"gh", "auth", "status"},
+		{"gh", "auth", "login"},
+		{"npx", "-y", "@scope/task-manager-mcp"},
+		{"--max-tokens-disabled"},
+		{"disk-mcp"},
+		{"https://mcp.example.com/mcp"},
+		{"https://mcp.example.com/v1/sse"},
+		{"npm", "run", "build"},
+		{"--stdio"},
+	}
+	for _, words := range plain {
+		if looksSecret(words) {
+			t.Errorf("%q is refused", words)
+		}
+	}
+}
+
+func TestCaptureScreensRulesAndApprovalsAndNeverPrintsTheirText(t *testing.T) {
+	m, fake := newModule(t, config.Agents{Providers: []string{config.ProviderClaude, config.ProviderCodex}})
+	writeFile(t, m.claude().settingsPath(), `{"permissions": {"allow": [
+  "Bash(curl -H Authorization:Bearer-ghp_abcdefghijklmnopqrstuvwxyz0123456789:*)",
+  "Bash(export GITHUB_TOKEN=hunter2secret:*)",
+  "Bash(mysql -pLEAKR3:*)",
+  "Bash(aws --secret-access-key LEAKR4 s3 ls:*)",
+  "Read(/home/me/LEAKR5/**)",
+  "Bash(git status:*)"]}}`)
+	writeFile(t, filepath.Join(m.codexBackend().home, "rules", "default.rules"),
+		"prefix_rule(pattern=[\"curl\", \"-H\", \"Authorization: Bearer sk-LEAKC5abcdef\"], decision=\"allow\")\n"+
+			"prefix_rule(pattern=[\"ls\"], decision=\"allow\", justification=\"token=LEAKC6\")\n"+
+			"prefix_rule(pattern=[\"git\", \"log\"], decision=\"allow\")\n")
+	fake.OnOK(marketList, "[]")
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	fake.OnOK(codexMarketList, `{"marketplaces":[]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	got := capture(t, m)
+	if l := listed(got); !slices.Equal(l, []string{
+		"claude permission Bash(...) !", "claude permission Bash(...) !", "claude permission Bash(...) !", "claude permission Bash(...) !",
+		"claude permission Read(...) !", "claude permission git status",
+		"codex permission git log", "codex permission prefix_rule on line 1 !", "codex permission prefix_rule on line 2 !",
+	}) {
+		t.Errorf("candidates = %q", l)
+	}
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"ghp_", "hunter2", "LEAKR", "LEAKC", "sk-"} {
+		if strings.Contains(string(data), leak) {
+			t.Errorf("%s reached the output: %s", leak, data)
+		}
+	}
+	if why := got[0].Skip; !strings.Contains(why, "credential") {
+		t.Errorf("reason = %q", why)
+	}
+}
+
+func TestCaptureScreensMCPServers(t *testing.T) {
+	m, fake := newModule(t, config.Agents{Providers: []string{config.ProviderClaude, config.ProviderCodex}})
+	writeFile(t, m.claudeJSONPath(), `{"mcpServers": {
+  "hdr": {"type": "stdio", "command": "npx", "args": ["mcp-remote", "https://x.example.com", "--header", "Authorization: Bearer LEAKM1"]},
+  "auth": {"type": "stdio", "command": "srv", "args": ["--auth=LEAKM2"]},
+  "pathkey": {"type": "http", "url": "https://mcp.example.com/LEAKM3/mcp"},
+  "pos": {"type": "stdio", "command": "srv", "args": ["login", "LEAKM4"]},
+  "dsn": {"type": "stdio", "command": "srv", "args": ["postgres://user:LEAKM5@host/db"]},
+  "sh": {"type": "stdio", "command": "sh", "args": ["-c", "API_KEY=LEAKM6 srv"]},
+  "ok": {"type": "http", "url": "https://mcp.example.com/mcp"}}}`)
+	writeFile(t, filepath.Join(m.codexBackend().home, "config.toml"), "[mcp_servers.chdr]\ncommand = \"npx\"\nargs = [\"--header\", \"Authorization: Bearer LEAKC2\"]\n")
+	fake.OnOK(marketList, "[]")
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	fake.OnOK(codexMarketList, `{"marketplaces":[]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	got := capture(t, m)
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "LEAK") {
+		t.Errorf("a secret reached the output: %s", data)
+	}
+	for _, c := range got {
+		if (c.Name == "ok") == (c.Skip != "") {
+			t.Errorf("%+v", c)
+		}
+	}
+	if len(got) != 8 {
+		t.Errorf("candidates = %q", listed(got))
 	}
 }

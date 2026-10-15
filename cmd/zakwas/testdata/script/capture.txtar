@@ -8,7 +8,7 @@ stdout '^  plugin       humanize@sai$'
 stdout '^  mcp server   docs  stdio npx -y docs-mcp$'
 stdout '^  allow rule   git status$'
 stdout 'claude plugin off@sai: installed but disabled'
-stdout 'claude allow rule WebFetch\(domain:example.com\): not a Bash command rule'
+stdout 'claude allow rule WebFetch\(\.\.\.\): not a Bash command rule'
 stdout 'zakwas capture --write'
 ! stdout 'team@sai|cloud@synced|core@builtin'
 ! stderr .

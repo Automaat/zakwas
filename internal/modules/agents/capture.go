@@ -157,8 +157,6 @@ func (m *Module) marketplaceCandidate(provider, name, source string) Candidate {
 	return c
 }
 
-var tokenPrefix = regexp.MustCompile(`(?i)(ghp_|gho_|ghs_|github_pat_|glpat-|xox[abprs]-|sk-[a-z0-9]|AKIA[0-9A-Z]{8})`)
-
 // secretSource says why a marketplace source may carry a credential, or "".
 // A user name alone is what ssh://git@host uses, so only a password, a user
 // name on an http URL, or a query counts.
@@ -338,6 +336,9 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 		if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return s, "its URL has credentials, a query or a fragment, which could hold a key; add it to zakwas.yaml by hand"
 		}
+		if secretURLPath(raw) {
+			return s, "its URL path has a segment that could be a key; add it to zakwas.yaml by hand"
+		}
 		s.URL = raw
 		if provider == config.ProviderCodex {
 			s.BearerTokenEnv, _ = v["bearer_token_env_var"].(string)
@@ -351,8 +352,8 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 	}
 	s.Command, _ = v["command"].(string)
 	s.Args = mcpStrings(v["args"])
-	if secretArgs(s.Args) {
-		return s, "an argument looks like a credential, which would reach the config repo; add it to zakwas.yaml by hand"
+	if looksSecret(append([]string{s.Command}, s.Args...)) {
+		return CapturedServer{}, "its command or arguments " + credentialReason
 	}
 	if provider == config.ProviderCodex {
 		s.EnvVars = mcpStrings(v["env_vars"])
@@ -365,22 +366,6 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 		}
 	}
 	return s, ""
-}
-
-var credentialFlag = regexp.MustCompile(`(?i)^-{0,2}[a-z0-9_-]*(token|secret|passw(or)?d|api-?key|apikey|credential)[a-z0-9_-]*(=.+)?$`)
-
-// secretArgs reports an argument that names a credential with its value, or
-// holds one by its look.
-func secretArgs(args []string) bool {
-	for i, a := range args {
-		switch {
-		case tokenPrefix.MatchString(a):
-			return true
-		case credentialFlag.MatchString(a) && (strings.Contains(a, "=") || i+1 < len(args)):
-			return true
-		}
-	}
-	return false
 }
 
 func mcpStrings(v any) []string {
@@ -437,16 +422,26 @@ func (m *Module) captureClaudeRules() ([]Candidate, error) {
 		}
 		seen[rule] = true
 		cmd, reason := claudeBashPrefix(rule)
+		if reason == "" && looksSecret(strings.Fields(cmd)) {
+			reason = "the rule " + credentialReason
+		}
 		if reason == "" && known[cmd] {
 			continue
 		}
 		c := Candidate{Provider: config.ProviderClaude, Kind: KindPermission, Name: cmd, Decision: config.PermissionAllow, Found: m.Paths.Pretty(path)}
 		if reason != "" {
-			c.Name, c.Skip = rule, reason
+			c.Name, c.Skip = describeRule(rule), reason
 		}
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// describeRule names a Claude rule that can't be declared by its tool alone,
+// since what is inside the parentheses may be a secret.
+func describeRule(rule string) string {
+	tool, _, _ := strings.Cut(rule, "(")
+	return strings.TrimSpace(tool) + "(...)"
 }
 
 // declaredCommands are the command prefixes zakwas.yaml gives a decision
@@ -505,18 +500,23 @@ func (m *Module) captureCodexRules() ([]Candidate, error) {
 	known := m.declaredCommands(config.ProviderCodex)
 	var out []Candidate
 	seen := map[string]bool{}
+	n := 0
 	for line := range strings.Lines(string(data)) {
+		n++
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "prefix_rule(") {
 			continue
 		}
 		words, decision, justification, reason := parsePrefixRule(line)
+		if reason == "" && looksSecret(append(slices.Clone(words), strings.Fields(justification)...)) {
+			reason = "the rule " + credentialReason
+		}
 		c := Candidate{
 			Provider: config.ProviderCodex, Kind: KindPermission, Name: strings.Join(words, " "),
 			Decision: decision, Justification: justification, Found: m.Paths.Pretty(path),
 		}
 		if reason != "" {
-			c.Name, c.Skip = line, reason
+			c.Name, c.Decision, c.Justification, c.Skip = fmt.Sprintf("prefix_rule on line %d", n), "", "", reason
 		}
 		key := c.Decision + "\x00" + c.Name
 		if seen[key] || reason == "" && known[c.Name] {

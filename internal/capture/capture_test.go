@@ -130,10 +130,10 @@ func TestPlanDropsOperationsTheConfigRejects(t *testing.T) {
 	got := skips(res)
 	for key, want := range map[string]string{
 		"claude marketplace market":  "already declared",
-		"claude plugin b@nowhere":    `marketplace "nowhere" is not declared`,
+		"claude plugin b@nowhere":    `marketplace "nowhere" isn't declared for claude`,
 		"claude permission rm -rf *": "contains '*'",
 	} {
-		if !strings.Contains(got[key], want) || !strings.HasPrefix(got[key], "can't be declared: ") {
+		if !strings.Contains(got[key], want) || (!strings.HasPrefix(got[key], "can't be declared: ") && !strings.Contains(key, "plugin")) {
 			t.Errorf("%s: %q, want %q", key, got[key], want)
 		}
 	}
@@ -163,5 +163,27 @@ func TestPlanKeepsTheStrictestDecisionOfACommand(t *testing.T) {
 	}
 	if len(res.Skipped) != 2 || !strings.Contains(res.Skipped[0].Skip, "stricter decision") {
 		t.Errorf("skipped = %v", skips(res))
+	}
+}
+
+func TestPlanKeepsAPluginForTheProviderWhoseMarketplaceIsDeclared(t *testing.T) {
+	cfg, home := repo(t)
+	res := Plan([]agents.Candidate{
+		market("claude", "diff", "o/diffA"),
+		market("codex", "diff", "o/diffB"),
+		{Provider: "claude", Kind: agents.KindPlugin, Name: "q@diff"},
+		{Provider: "codex", Kind: agents.KindPlugin, Name: "q@diff"},
+		{Provider: "claude", Kind: agents.KindPlugin, Name: "p@market"},
+		{Provider: "codex", Kind: agents.KindPlugin, Name: "p@market"},
+	}, cfg, home)
+	want := []string{"add marketplace diff claude", "add plugin q@diff claude", "add plugin p@market claude,codex"}
+	if got := summary(res); !slices.Equal(got, want) {
+		t.Errorf("ops\n got %q\nwant %q", got, want)
+	}
+	if why := skips(res)["codex plugin q@diff"]; !strings.Contains(why, `"diff" isn't declared for codex`) {
+		t.Errorf("skipped = %v", skips(res))
+	}
+	if _, err := proposal.Apply(res.Ops, cfg, home); err != nil {
+		t.Errorf("the operations don't apply together: %v", err)
 	}
 }

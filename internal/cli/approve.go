@@ -14,6 +14,8 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/modules/agents"
 	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner"
 )
@@ -191,11 +193,15 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 	if err != nil {
 		return a.fail(err)
 	}
+	restoreOwnership := snapshotOwnership(a.env.Home)
 	if code := a.apply(ctx, ev, style); code != ExitOK {
 		if err := restore(); err != nil {
 			a.errOut.fail(fmt.Errorf("couldn't restore every config file; check them with git status: %w", err))
 		} else {
 			a.errOut.print("zakwas: restored the config files; the proposal is still pending\n")
+		}
+		if err := restoreOwnership(); err != nil {
+			a.errOut.fail(fmt.Errorf("couldn't restore the records of the servers and rules zakwas owns: %w", err))
 		}
 		return code
 	}
@@ -325,6 +331,33 @@ func (a *approval) commit(ctx context.Context, rels []string) error {
 		return err
 	}
 	return run(append([]string{"commit", "-m", subject, "-m", body, "--"}, rels...)...)
+}
+
+// snapshotOwnership remembers the records of which MCP servers and Claude
+// rules zakwas owns, and returns a func that puts them back. A failed
+// approve restores the config files, and records an earlier step adopted
+// from them would otherwise make zakwas own what the config no longer
+// declares, and plan its removal.
+func snapshotOwnership(home string) func() error {
+	paths := []string{agents.MCPStatePath(home), agents.PermissionsStatePath(home)}
+	saved := make([][]byte, len(paths))
+	for i, p := range paths {
+		saved[i], _ = os.ReadFile(p)
+	}
+	return func() error {
+		var errs []error
+		for i, p := range paths {
+			current, _ := os.ReadFile(p)
+			switch {
+			case bytes.Equal(current, saved[i]):
+			case saved[i] == nil:
+				errs = append(errs, os.Remove(p))
+			default:
+				errs = append(errs, install.WriteAtomic(p, saved[i], 0o600))
+			}
+		}
+		return errors.Join(errs...)
+	}
 }
 
 // writeEdits replaces the files with their new contents and returns a func

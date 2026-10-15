@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/modules/agents"
 	"github.com/Automaat/zakwas/internal/proposal"
 )
 
@@ -102,8 +104,8 @@ func TestCaptureListsWithoutChangingAnything(t *testing.T) {
 		"  mcp server   docs  stdio npx -y docs-mcp\n", "  allow rule   git status\n", "  allow rule   ls\n",
 		"codex\n", "  marketplace  cx  o/cx\n", "  plugin       p@cx\n", "  approval     allow git status\n", "  approval     allow cargo build\n",
 		"Not captured\n", "claude plugin off@sai: installed but disabled",
-		"claude mcp server secret: has settings capture can't declare (env)", "claude allow rule Bash(npm run build): matches one exact command",
-		"claude allow rule WebFetch(domain:example.com): not a Bash command rule",
+		"claude mcp server secret: has settings capture can't declare (env)", "claude allow rule Bash(...): matches one exact command",
+		"claude allow rule WebFetch(...): not a Bash command rule",
 		"Save these as one proposal with: zakwas capture --write",
 	} {
 		if !strings.Contains(r.stdout, want) {
@@ -341,5 +343,85 @@ func TestCaptureIsListedWithTheCommands(t *testing.T) {
 	}
 	if !found || !strings.Contains(usage(), "capture [--write]") {
 		t.Error("capture is missing from the command list")
+	}
+}
+
+func TestCaptureConvergesWhenAPluginIsInstalledWhereTheMarketplacesDiffer(t *testing.T) {
+	env, home := proposeSetupConfig(t, captureConfig)
+	writeAt(t, filepath.Join(home, ".claude", "settings.json"), `{"extraKnownMarketplaces": {"diff": {"autoUpdate": true}}}`)
+	writeAt(t, filepath.Join(home, ".claude", "plugins", "known_marketplaces.json"),
+		`{"diff": {"source": {"source": "github", "repo": "o/diffA"}, "installLocation": "/x/diff", "autoUpdate": true}}`)
+	writeAt(t, filepath.Join(home, ".codex", "config.toml"), "[marketplaces.diff]\nsource_type = \"git\"\nsource = \"o/diffB\"\n")
+	fake := env.Runner.(gitRunner).Fake
+	fake.OnOK("claude plugin marketplace list --json", `[{"name":"diff","source":"github","repo":"o/diffA"}]`)
+	fake.OnOK("claude plugin list --json --available", `{"installed": [{"id":"q@diff","version":"1","scope":"user","enabled":true}], "available": []}`)
+	fake.OnOK("codex plugin marketplace list --json", `{"marketplaces":[{"name":"diff","root":"/y"}]}`)
+	fake.OnOK("codex plugin list --available --json", `{"installed": [{"pluginId":"q@diff","version":"1","enabled":true}], "available": []}`)
+
+	doc := captureJSON(t, env)
+	var got []string
+	for _, op := range doc.Ops {
+		got = append(got, op.Kind+" "+op.Name+" "+strings.Join(op.Providers, ","))
+	}
+	if want := []string{"add-marketplace diff claude", "add-plugin q@diff claude"}; !slices.Equal(got, want) {
+		t.Fatalf("ops\n got %q\nwant %q", got, want)
+	}
+	if r := invoke(env, "", "capture", "--write"); r.code != ExitOK {
+		t.Fatalf("exit %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	all, _ := (proposal.Store{Dir: proposal.Dir(home)}).List()
+	if len(all) != 1 {
+		t.Fatalf("proposals = %d", len(all))
+	}
+	env.StdinTTY = true
+	if r := invoke(env, "y\n", "approve", all[0].ID); r.code != ExitOK {
+		t.Fatalf("approve exit %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	if doc := captureJSON(t, env); len(doc.Findings) != 0 || len(doc.Ops) != 0 {
+		t.Errorf("a second capture lists %+v", doc.Findings)
+	}
+}
+
+func TestFailedApproveRestoresTheOwnershipRecords(t *testing.T) {
+	env, home := proposeSetupConfig(t, "agents:\n  guard: false\n  providers: [claude]\n  marketplaces:\n    sai: o/sai\n")
+	writeAt(t, filepath.Join(home, ".claude", "settings.json"), `{"extraKnownMarketplaces": {"sai": {"autoUpdate": true}}}`)
+	writeAt(t, filepath.Join(home, ".claude", "plugins", "known_marketplaces.json"),
+		`{"sai": {"source": {"source": "github", "repo": "o/sai"}, "installLocation": "/x/sai", "autoUpdate": true}}`)
+	handAdded := `{"mcpServers": {"docs": {"type": "stdio", "command": "npx", "args": ["-y", "docs-mcp"]}}}`
+	writeAt(t, filepath.Join(home, ".claude.json"), handAdded)
+	fake := env.Runner.(gitRunner).Fake
+	fake.OnOK("claude plugin marketplace list --json", `[{"name":"sai","source":"github","repo":"o/sai"}]`)
+	fake.OnOK("claude plugin list --json --available", `{"installed": [], "available": [{"pluginId":"x@sai","version":"1"}]}`)
+
+	cfg, err := loadConfig("", env.Cwd, env.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _, err := saveProposal(context.Background(), env, cfg,
+		proposal.Op{Kind: proposal.AddMCP, Name: "docs", Server: &proposal.Server{Command: "npx", Args: []string{"-y", "docs-mcp"}}, Providers: []string{"claude"}},
+		proposal.Op{Kind: proposal.AddPlugin, Name: "x@sai", Providers: []string{"claude"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := readFile(t, filepath.Join(env.Cwd, "zakwas.yaml"))
+	env.StdinTTY = true
+	r := invoke(env, "y\n", "approve", p.ID)
+	if r.code == ExitOK {
+		t.Fatalf("approve succeeded:\n%s", r.stdout)
+	}
+	if !strings.Contains(r.stderr, "restored the config files") {
+		t.Errorf("stderr:\n%s", r.stderr)
+	}
+	if readFile(t, filepath.Join(env.Cwd, "zakwas.yaml")) != before {
+		t.Error("the config wasn't restored")
+	}
+	if _, err := os.Stat(agents.MCPStatePath(home)); err == nil {
+		t.Errorf("the failed approve left ownership of docs behind:\n%s", readFile(t, agents.MCPStatePath(home)))
+	}
+	if readFile(t, filepath.Join(home, ".claude.json")) != handAdded {
+		t.Error("the hand-added server changed")
+	}
+	if r := invoke(env, "", "plan", "--only", "agents"); strings.Contains(r.stdout, "- claude mcp docs") {
+		t.Errorf("zakwas plans to remove the hand-added server:\n%s", r.stdout)
 	}
 }

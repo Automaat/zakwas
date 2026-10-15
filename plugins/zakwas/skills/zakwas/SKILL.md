@@ -20,10 +20,12 @@ zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent set
 2. Save the proposal. Prefer the MCP tool `zakwas_propose`; without the zakwas MCP server, run `zakwas propose -json OPERATION ...` in a shell. Proposing changes nothing on disk except the saved proposal.
 3. Report the proposal's `id`, `tier`, `summary` and `reasons` to the user, then follow the tier below.
 4. Remove a proposal the user no longer wants with `zakwas_discard`, or `zakwas proposals` to list them.
-5. Say "proposed", not "installed", until the user has applied it. Confirm afterwards with `zakwas_check`.
+5. To record what the user installed or approved in an agent by hand, call `zakwas_capture` (or `zakwas capture` in a shell) and pass the `ops` it returns to `zakwas_propose` one by one; the user can also run `zakwas capture --write` for one proposal. Never copy a value the scan skipped as a credential.
+6. Say "proposed", not "installed", until the user has applied it. Confirm afterwards with `zakwas_check`.
 
 | Operation | MCP `kind` | Shell |
 |---|---|---|
+| add a plugin marketplace | `add-marketplace`, `name`, `source` | `zakwas propose add-marketplace NAME SOURCE` |
 | add an agent plugin | `add-plugin`, `name: NAME@MARKETPLACE` | `zakwas propose add-plugin NAME@MARKETPLACE` |
 | add a permission rule | `add-permission`, `decision`, `command` | `zakwas propose add-permission allow\|review\|deny COMMAND...` |
 | remove a permission rule | `remove-permission`, `decision`, `command` | `zakwas propose remove-permission allow\|review\|deny COMMAND...` |
@@ -43,10 +45,10 @@ zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent set
   ```
 
 - When the proposal result has a `next` field, relay its command to the user as written.
-- Add a plugin only from a marketplace already in `zakwas.yaml`; `zakwas_config` shows it. `allow` rules, casks, tap formulae, mise backend tools and MCP servers are always `high`.
+- Add a plugin only from a marketplace already in `zakwas.yaml`; `zakwas_config` shows it. `allow` rules, casks, tap formulae, mise backend tools, marketplaces and MCP servers are always `high`.
 
 ## When a proposal is refused
 
 - Marketplace not declared, flow-style YAML (`plugins: [a@m]`), a duplicate entry or an invalid result: tell the user the exact reason and the edit they would need to make in `zakwas.yaml`. Do not make it.
-- No operation covers the request (a hook, a profile, a new marketplace): describe the `zakwas.yaml` change and let the user make it.
+- No operation covers the request (a hook, a profile): describe the `zakwas.yaml` change and let the user make it.
 - A proposal older than 7 days expires; propose again.

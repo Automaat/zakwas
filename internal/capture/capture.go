@@ -36,7 +36,13 @@ func Plan(cands []agents.Candidate, cfg *config.Config, home string) Result {
 	var entries []*entry
 	index := map[string]*entry{}
 	cands, res.Skipped = strictest(cands)
+	cands = marketplacesFirst(cands)
 	for _, c := range cands {
+		if c.Skip == "" && c.Kind == agents.KindPlugin {
+			if why := noMarketplace(c, index, cfg); why != "" {
+				c.Skip = why
+			}
+		}
 		if c.Skip != "" {
 			res.Skipped = append(res.Skipped, c)
 			continue
@@ -83,6 +89,35 @@ func Plan(cands []agents.Candidate, cfg *config.Config, home string) Result {
 		}
 	}
 	return res
+}
+
+// marketplacesFirst puts the plugins after everything else, so the
+// marketplaces they come from are merged before they are looked at.
+func marketplacesFirst(cands []agents.Candidate) []agents.Candidate {
+	var rest, plugins []agents.Candidate
+	for _, c := range cands {
+		if c.Kind == agents.KindPlugin {
+			plugins = append(plugins, c)
+		} else {
+			rest = append(rest, c)
+		}
+	}
+	return append(rest, plugins...)
+}
+
+// noMarketplace says why a plugin has no marketplace for its provider: one
+// declared there already, or one this proposal declares for it. A plugin
+// installed in two providers whose marketplaces of one name differ is kept
+// for the provider whose marketplace is declared, not dropped with the other.
+func noMarketplace(c agents.Candidate, index map[string]*entry, cfg *config.Config) string {
+	_, mk, _ := config.SplitPluginID(c.Name)
+	if _, declared := cfg.Agents.Marketplaces[mk]; declared && slices.Contains(cfg.Agents.MarketplaceProviders(mk), c.Provider) {
+		return ""
+	}
+	if e, ok := index[agents.KindMarketplace+"\x00"+mk]; ok && slices.Contains(e.op.Providers, c.Provider) {
+		return ""
+	}
+	return fmt.Sprintf("its marketplace %q isn't declared for %s, and capture can't declare it there", mk, c.Provider)
 }
 
 var strictness = []string{config.PermissionDeny, config.PermissionReview, config.PermissionAllow}

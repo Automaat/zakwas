@@ -162,7 +162,7 @@ It refuses, changing nothing, when:
 - a module can't be planned;
 - it runs from an agent session while [`agents.guard`](config.md#guard) is on. The guard also denies the managed agents `zakwas approve`.
 
-If the apply fails, the files are written back as they were and the proposal stays pending; the steps that ran stay done. If only the commit fails, the change stays applied and uncommitted, and the message says so.
+If the apply fails, the files are written back as they were and the proposal stays pending; the steps that ran stay done. The records of the MCP servers and Claude rules zakwas owns (`agent-mcp.json`, `agent-permissions.json`) go back with them, so a server an earlier step adopted isn't owned, or planned for removal, once the config no longer declares it. If only the commit fails, the change stays applied and uncommitted, and the message says so.
 
 ## capture
 
@@ -198,13 +198,13 @@ Not captured
 
 **Not captured.** A finding is only declared when the declaration reproduces what is there, so an apply right after adopts it without changing it. These are listed with the reason and left out:
 
-- a marketplace source with credentials or a query, and a server whose arguments look like a credential (`--token=...`, `--api-key VALUE`, a `ghp_` or `sk-` token);
-- a disabled plugin (declaring it would enable it) and a plugin whose marketplace `zakwas.yaml` doesn't declare for the provider and capture can't either;
+- anything that looks like it holds a credential: a marketplace source with credentials or a query; a server whose command or arguments name a credential with its value (`--token=...`, `--api-key VALUE`, `--header "Authorization: Bearer ..."`, `API_KEY=... srv`, `login VALUE`), carry a URL with a password or query, or hold a known token prefix (`ghp_`, `sk-`, ...); an HTTP server whose URL path has a segment that isn't a plain lower-case word or version; and a Claude rule or Codex approval (or its justification) that does the same, such as `Bash(export TOKEN=...:*)` or `curl -H "Authorization: Bearer ..."`. The value is never printed: a skipped rule is shown as `Bash(...)` or `prefix_rule on line N`;
+- a disabled plugin (declaring it would enable it) and a plugin whose marketplace `zakwas.yaml` doesn't declare for that provider and capture can't either (a plugin installed in two providers whose marketplaces of one name differ is declared for the provider whose marketplace is);
 - an MCP server with settings `agents.mcp` can't express here (literal `env` values or headers, which may be secrets; a URL with a query, a fragment or credentials; options such as timeouts), one whose name another provider uses for a different server, and one `zakwas.yaml` declares for other providers only;
 - a Claude rule that isn't a command prefix (`Read(...)`, `WebFetch(...)`, an exact `Bash(cmd)` rule, `Bash(*)`), and a Codex rule whose pattern has alternatives, that spans lines or whose decision isn't `allow`, `prompt` or `forbidden`; when one command is saved with several decisions, only the strictest is declared;
 - an operation that wouldn't apply to `zakwas.yaml` (a marketplace declared for other providers only, a flow-style list, an invalid rule), with the error.
 
-A server's command, arguments and URL path are copied as they are, and a key that doesn't look like one can't be told from the rest: read them in the proposal's diff before approving, since a secret would reach the config repo.
+What passes is copied as it is, and a key that doesn't look like one can't be told from the rest: read the proposal's diff before approving, since a secret would reach the config repo.
 
 With `--write` the findings become **one proposal** that follows the normal [approval rules](#propose-proposals-approve): it is saved with its diff, plan and tier (high, since it adds marketplaces or servers), nothing is edited, and a person applies it with `zakwas approve ID` in a terminal. Marketplaces are added as `add-marketplace`, plugins as `add-plugin`, servers as `add-mcp`, rules as `add-permission`, each with `providers` set to where it was found, so nothing reaches a provider that didn't have it. After the proposal is approved, a second `capture` lists nothing; what it can't declare stays under "Not captured". Without anything to declare, `--write` saves no proposal. `-json` prints `findings`, `skipped`, `ops` (each a valid [`zakwas_propose`](#mcp) argument) and, with `--write`, the `proposal`. Exit 1 when a provider can't be read, for example its CLI is missing; the others' findings are still printed.
 
