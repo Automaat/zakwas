@@ -269,10 +269,15 @@ const (
 	geminiGuardQuotedValues = 6
 	guardLead               = `[ ]*(?:|\\t[ ]*)`
 	guardBlank              = `(?:[ ]|\\t)[ ]*(?:|\\t[ ]*)`
+	guardOneBlank           = `(?:[ ]|\\t)`
 	guardWordEnd            = `(?:[ ;&|)<>"]|\\[tn])`
-	guardQuotedEnd          = `(?:"|[;&|)<>]|\\n|` + guardBlank + `[-;&|<>]|` + guardBlank + `[0-9]+[<>])`
+	guardFlagLike           = `(?:[-;&|<>$` + "`" + `]|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
+	guardQuotedEnd          = `(?:"|[;&|)<>]|\\n|` + guardBlank + guardFlagLike + `)`
 	guardEscapedQuote       = `\\\\\\"`
-	guardQuoted             = `(?:\\"[^"]*(?:|` + guardEscapedQuote + `[^"]*(?:|` + guardEscapedQuote + `[^"]*))\\"|'[^']*')`
+	guardEscapedApostrophe  = `\\\\'`
+	guardDoubleQuoted       = `\\"[^"]*(?:|` + guardEscapedQuote + `[^"]*(?:|` + guardEscapedQuote + `[^"]*))\\"`
+	guardSingleQuoted       = `'[^']*(?:|` + guardEscapedApostrophe + `[^']*)'`
+	guardQuoted             = `(?:` + guardDoubleQuoted + `|` + guardSingleQuoted + `|` + guardEscapedQuote + `|` + guardEscapedApostrophe + `)`
 	guardFlagStart          = `(?:-|\\\\|[<>&${` + "`" + `]|[0-9]+[<>]|\\"[-$][^"]*\\"|'[-$][^']*')`
 )
 
@@ -281,20 +286,22 @@ const (
 // then the guarded word as the first word after the binary or after flags
 // and their values, as in `zakwas -c "my dir/x.yaml" apply`. A word before
 // the flags, as in `zakwas plan apply`, makes that word the command, so it
-// does not match. A quoted guarded word after flags matches unless another
-// word follows it, as in `zakwas -m "apply" plan`.
+// does not match. A quoted guarded word after flags matches unless a plain
+// word follows it, as in `zakwas -m "apply" plan`; the real command takes
+// no word there, only flags.
 func geminiGuardRegex(words []string) string {
 	name := caselessWord(words[0])
 	word := regexp.QuoteMeta(strings.Join(words[1:], " "))
 	quoted := `(?:\\"` + word + `\\"|'` + word + `')`
-	binary := `(?:(?:|\S*/)(?:` + name + `|\\"` + name + `\\"|'` + name + `')|\\"[^"]*/` + name + `\\"|'[^']*/` + name + `')`
+	prefix := `(?:|\S*/|\\"[^"]*/\\"|'[^']*/')`
+	binary := `(?:` + prefix + `(?:` + name + `|\\"` + name + `\\"|'` + name + `')|\\"[^"]*/` + name + `\\"|'[^']*/` + name + `')`
 	rest := `[^"']*`
 	for range geminiGuardQuotedValues {
 		rest = `[^"']*(?:|` + guardQuoted + rest + `)`
 	}
 	first := `(?:` + word + guardWordEnd + `|` + quoted + guardWordEnd + `)`
 	later := `(?:` + word + guardWordEnd + `|` + quoted + guardQuotedEnd + `)`
-	return guardLead + binary + guardBlank + `(?:` + first + `|` + guardFlagStart + rest + guardBlank + later + `)`
+	return guardLead + binary + guardBlank + `(?:` + first + `|` + guardFlagStart + rest + guardOneBlank + later + `)`
 }
 
 func caselessWord(word string) string {

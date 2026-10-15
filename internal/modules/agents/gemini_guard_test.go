@@ -107,8 +107,23 @@ func TestGeminiGuardRegexTable(t *testing.T) {
 		{"zakwas $FLAGS apply", true},
 		{"zakwas $(echo -y) apply", true},
 		{"zakwas apply\necho", true},
+		{`zakwas -c x.yaml "apply" "-y"`, true},
+		{`zakwas -c x.yaml "apply" '-y'`, true},
+		{`zakwas -c x.yaml "apply" $F`, true},
+		{`zakwas -c x.yaml "apply" "$F"`, true},
+		{"zakwas -y \"apply\" `echo -y`", true},
+		{`zakwas -- "apply" "-y"`, true},
+		{`zakwas -c x.yaml "apply" \-y`, true},
+		{`zakwas -c it\'s apply`, true},
+		{`zakwas -c $'a\'b' apply`, true},
+		{`zakwas -c a\"b apply`, true},
+		{`"/my dir/"zakwas apply`, true},
+		{`"/a/"zakwas apply`, true},
+		{`'/a/'zakwas apply`, true},
 		{"zakwas plan", false},
 		{`zakwas -c "x.yaml" plan`, false},
+		{`zakwas -c x.yaml "apply" 'y'`, false},
+		{`zakwas -c x.yaml "apply" "plan"`, false},
 		{`"/usr/local/bin/zakwas" plan`, false},
 		{`zakwas -c "my dir/x.yaml" check`, false},
 		{"zakwas applyx", false},
@@ -232,6 +247,9 @@ func guardCases(rng *rand.Rand, n int) []guardCase {
 		{`-c 'notes apply x'`, false, 1},
 		{`-c "a \"b\" c"`, false, 1},
 		{`-c "it's"`, false, 1},
+		{`-c it\'s`, false, 1},
+		{`-c $'a\'b'`, false, 1},
+		{`-c a\"b`, false, 1},
 		{`-c='a b'`, false, 1},
 		{`-out "o p"`, false, 1},
 		{`-m "apply"`, true, 1},
@@ -306,7 +324,7 @@ func classifyGuardCase(zak, danger bool, pre []guardItem, isGuarded bool, tail s
 		if it.valueIsWord {
 			return "flag-value-is-the-guarded-word"
 		}
-		escaped = escaped || strings.Contains(it.text, `\"`)
+		escaped = escaped || strings.Contains(it.text, `\"`) || strings.Contains(it.text, `\'`)
 		inside = inside || strings.Contains(it.text, "apply")
 	}
 	if escaped && inside {
@@ -362,7 +380,7 @@ func TestGeminiGuardRegexDocumentedLimits(t *testing.T) {
 		"env zakwas apply", "sudo zakwas apply", "command zakwas apply", "exec zakwas apply", "nohup zakwas apply",
 		"time zakwas apply", "xargs zakwas apply", "FOO=1 zakwas apply", `bash -lc "zakwas apply"`, `eval "zakwas apply"`,
 		`\zakwas apply`, `z""akwas apply`, `zakwas ap""ply`, ">/dev/null zakwas apply", "${ZAKWAS:-zakwas} apply",
-		"zakwas $SUBCOMMAND", "zakwas\t\t\tapply", `zakwas -c a\"b apply`, "zakwas -y \\\napply",
+		"zakwas $SUBCOMMAND", "zakwas\t\t\tapply", "zakwas -y \\\napply",
 		"zakwas" + strings.Repeat(` -c "a b"`, geminiGuardQuotedValues+1) + " apply",
 		"zakwas -c \"a\" -m 'b' -m \"c\" -m 'd' -m \"e\" -m 'f' -m \"g\" apply",
 	} {
