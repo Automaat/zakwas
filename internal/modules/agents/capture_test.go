@@ -694,7 +694,7 @@ func TestCredentialNamesWithGluedWordsAreSkippedUnlessTheyAreOnTheBenignList(t *
 				if root == "pat" && strings.HasPrefix(suffix, "h") {
 					continue
 				}
-				benign := plainRoots[root] && qualifiers[suffix] && !(strings.Contains(root, "secret") && suffix == "id")
+				benign := plainRoots[root] && qualifiers[suffix] && (!strings.Contains(root, "secret") || suffix != "id")
 				for _, words := range nameForms(name) {
 					if words[0] == "export" || words[0] == "-H" {
 						continue
