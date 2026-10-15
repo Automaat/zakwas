@@ -5,6 +5,7 @@ package capture
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -64,9 +65,6 @@ func Plan(cands []agents.Candidate, cfg *config.Config, home string) Result {
 		e.cands = append(e.cands, c)
 		if !slices.Contains(e.op.Providers, c.Provider) {
 			e.op.Providers = append(e.op.Providers, c.Provider)
-		}
-		if e.op.Justification == "" {
-			e.op.Justification = c.Justification
 		}
 	}
 	slices.SortStableFunc(entries, func(a, b *entry) int {
@@ -161,7 +159,7 @@ func opOf(c agents.Candidate) proposal.Op {
 			Command: s.Command, Args: s.Args, URL: s.URL, EnvVars: s.EnvVars, BearerTokenEnv: s.BearerTokenEnv,
 		}}
 	}
-	return proposal.Op{Kind: proposal.AddPermission, Decision: c.Decision, Command: c.Name, Justification: c.Justification}
+	return proposal.Op{Kind: proposal.AddPermission, Decision: c.Decision, Command: c.Name}
 }
 
 // conflict says why c can't share the declaration e already makes for
@@ -237,12 +235,17 @@ func ops(entries []*entry) []proposal.Op {
 	return out
 }
 
-// reason is an apply error without the "operation N (...)" it starts with
-// and the config path it repeats.
+// quoted finds the quoted text of an error, which can be a value an agent's
+// file holds.
+var quoted = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'[^']*'|` + "`[^`]*`")
+
+// reason is an apply error without the "operation N (...)" it starts with,
+// the config path it repeats and any quoted value: the text it explains
+// may be a credential.
 func reason(err error, path string) string {
 	if inner := errors.Unwrap(err); inner != nil {
 		err = inner
 	}
 	text := strings.ReplaceAll(strings.ReplaceAll(err.Error(), path+": ", ""), "\n", "; ")
-	return "can't be declared: " + text
+	return "can't be declared: " + quoted.ReplaceAllString(text, "...")
 }

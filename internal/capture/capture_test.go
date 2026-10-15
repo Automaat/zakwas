@@ -70,7 +70,7 @@ func TestPlanMergesProvidersAndOrdersOperations(t *testing.T) {
 		market("claude", "fresh", "o/fresh"),
 		rule("codex", "allow", "git status"),
 		server("claude", agents.CapturedServer{Command: "npx", EnvVars: []string{"A", "B"}}),
-		{Provider: "codex", Kind: agents.KindPermission, Name: "rm -rf", Decision: "deny", Justification: "no"},
+		{Provider: "codex", Kind: agents.KindPermission, Name: "rm -rf", Decision: "deny"},
 	}, cfg, home)
 	want := []string{
 		"add marketplace fresh claude,codex",
@@ -84,9 +84,6 @@ func TestPlanMergesProvidersAndOrdersOperations(t *testing.T) {
 	}
 	if len(res.Findings) != 8 || len(res.Skipped) != 0 {
 		t.Errorf("%d findings, skipped %v", len(res.Findings), skips(res))
-	}
-	if res.Ops[4].Justification != "no" {
-		t.Errorf("justification = %q", res.Ops[4].Justification)
 	}
 	if _, err := proposal.Apply(res.Ops, cfg, home); err != nil {
 		t.Errorf("the operations don't apply together: %v", err)
@@ -131,7 +128,7 @@ func TestPlanDropsOperationsTheConfigRejects(t *testing.T) {
 	for key, want := range map[string]string{
 		"claude marketplace market":  "already declared",
 		"claude plugin b@nowhere":    `marketplace "nowhere" isn't declared for claude`,
-		"claude permission rm -rf *": "contains '*'",
+		"claude permission rm -rf *": "contains ...",
 	} {
 		if !strings.Contains(got[key], want) || (!strings.HasPrefix(got[key], "can't be declared: ") && !strings.Contains(key, "plugin")) {
 			t.Errorf("%s: %q, want %q", key, got[key], want)
@@ -185,5 +182,21 @@ func TestPlanKeepsAPluginForTheProviderWhoseMarketplaceIsDeclared(t *testing.T) 
 	}
 	if _, err := proposal.Apply(res.Ops, cfg, home); err != nil {
 		t.Errorf("the operations don't apply together: %v", err)
+	}
+}
+
+func TestPlanReasonsNeverEchoTheValuesOfTheRules(t *testing.T) {
+	cfg, home := repo(t)
+	res := Plan([]agents.Candidate{
+		rule("claude", "allow", "rm -rf *LEAK"),
+		rule("claude", "allow", `curl "LEAK" 'LEAK2'`),
+	}, cfg, home)
+	for _, why := range skips(res) {
+		if strings.Contains(why, "LEAK") {
+			t.Errorf("reason echoes a value: %q", why)
+		}
+	}
+	if len(res.Skipped) != 2 {
+		t.Errorf("skipped = %v", skips(res))
 	}
 }

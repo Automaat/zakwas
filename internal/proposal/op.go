@@ -130,7 +130,7 @@ func (o Op) validateMCP() []error {
 	}
 	for _, v := range append(slices.Clone(s.EnvVars), s.BearerTokenEnv) {
 		if v != "" && !envName.MatchString(v) {
-			errs = append(errs, fmt.Errorf("%q is not an environment variable name", v))
+			errs = append(errs, errors.New("an environment variable name is invalid"))
 		}
 	}
 	if s.URL != "" && (len(s.Args) > 0 || len(s.EnvVars) > 0) {

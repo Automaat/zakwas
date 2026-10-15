@@ -124,7 +124,7 @@ func TestCaptureClaude(t *testing.T) {
 	if why := find(t, got, KindMCP, "literal").Skip; !strings.Contains(why, "env") || !strings.Contains(why, "by hand") {
 		t.Errorf("literal env: %q", why)
 	}
-	if why := find(t, got, KindMCP, "keyed").Skip; !strings.Contains(why, "query") {
+	if why := find(t, got, KindMCP, "keyed").Skip; !strings.Contains(why, "may hold a credential") {
 		t.Errorf("keyed URL: %q", why)
 	}
 	if p := find(t, got, KindPermission, "git status"); p.Decision != config.PermissionAllow || p.Found != m.Paths.Pretty(c.settingsPath()) {
@@ -230,7 +230,7 @@ prefix_rule(pattern=["make"], decision="sometimes")
 	if why := find(t, got, KindMCP, "tuned").Skip; !strings.Contains(why, "startup_timeout_sec") {
 		t.Errorf("tuned: %q", why)
 	}
-	if p := find(t, got, KindPermission, "rm -rf"); p.Decision != config.PermissionDeny || p.Justification != `never "rm"` {
+	if p := find(t, got, KindPermission, "rm -rf"); p.Decision != config.PermissionDeny {
 		t.Errorf("rule = %+v", p)
 	}
 	if p := find(t, got, KindPermission, "git status"); p.Decision != config.PermissionAllow {
@@ -340,21 +340,20 @@ func TestParsePrefixRule(t *testing.T) {
 		line          string
 		words         []string
 		decision, why string
-		justification string
 	}{
-		{`prefix_rule(pattern=["git", "status"], decision="allow")`, []string{"git", "status"}, "allow", "", ""},
-		{`prefix_rule(pattern = ["ls"])`, []string{"ls"}, "allow", "", ""},
-		{`prefix_rule(pattern=["git", "push"], decision="prompt", justification="ask first")`, []string{"git", "push"}, "review", "", "ask first"},
-		{`prefix_rule(pattern=["a b", "c\\d"], decision="forbidden")`, []string{"a b", `c\d`}, "deny", "", ""},
-		{`prefix_rule(pattern=["cargo", ["build", "test"]], decision="allow")`, nil, "", "alternatives", ""},
-		{`prefix_rule(pattern=[], decision="allow")`, nil, "", "empty", ""},
-		{`prefix_rule(decision="allow")`, nil, "", "alternatives", ""},
-		{`prefix_rule(pattern=["x"], decision="maybe")`, []string{"x"}, "", `"maybe"`, ""},
+		{`prefix_rule(pattern=["git", "status"], decision="allow")`, []string{"git", "status"}, "allow", ""},
+		{`prefix_rule(pattern = ["ls"])`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(pattern=["git", "push"], decision="prompt", justification="ask first")`, []string{"git", "push"}, "review", ""},
+		{`prefix_rule(pattern=["a b", "c\\d"], decision="forbidden")`, []string{"a b", `c\d`}, "deny", ""},
+		{`prefix_rule(pattern=["cargo", ["build", "test"]], decision="allow")`, nil, "", "alternatives"},
+		{`prefix_rule(pattern=[], decision="allow")`, nil, "", "empty"},
+		{`prefix_rule(decision="allow")`, nil, "", "alternatives"},
+		{`prefix_rule(pattern=["x"], decision="maybe")`, []string{"x"}, "", "not one zakwas declares"},
 	}
 	for _, tt := range tests {
-		words, decision, justification, why := parsePrefixRule(tt.line)
-		if !slices.Equal(words, tt.words) || decision != tt.decision || justification != tt.justification || !strings.Contains(why, tt.why) || (tt.why == "") != (why == "") {
-			t.Errorf("%s\n got %q %q %q %q\nwant %q %q %q %q", tt.line, words, decision, justification, why, tt.words, tt.decision, tt.justification, tt.why)
+		words, decision, why := parsePrefixRule(tt.line)
+		if !slices.Equal(words, tt.words) || decision != tt.decision || !strings.Contains(why, tt.why) || (tt.why == "") != (why == "") {
+			t.Errorf("%s\n got %q %q %q\nwant %q %q %q", tt.line, words, decision, why, tt.words, tt.decision, tt.why)
 		}
 	}
 }
@@ -392,7 +391,7 @@ func TestCaptureKeepsCredentialsOutOfTheFindings(t *testing.T) {
 	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
 	got := capture(t, m)
 	for _, name := range []string{"priv", "web"} {
-		if why := find(t, got, KindMarketplace, name).Skip; !strings.Contains(why, "credentials or a query") {
+		if why := find(t, got, KindMarketplace, name).Skip; !strings.Contains(why, "may hold a credential") {
 			t.Errorf("%s: %q", name, why)
 		}
 	}
@@ -484,9 +483,41 @@ func TestLooksSecret(t *testing.T) {
 		{"-c", "API_KEY=X srv"},
 		{"login", "X"},
 		{"--url", "https://x/mcp?key=abc"},
-		{"https://h.example.com/KEY/mcp"},
-		{"https://h.example.com/s/Zx81QpLm/mcp"},
 		{"abcdefghij0123456789abcdefgh"},
+		{"sshpass", "-p", "VALUE", "ssh"},
+		{"setx", "API_KEY", "VALUE"},
+		{"docker", "login", "-p", "VALUE"},
+		{"foo", "-k", "VALUE"},
+		{"foo", "--pw", "VALUE"},
+		{"foo", "--passphrase", "VALUE"},
+		{"foo", "--pin", "VALUE"},
+		{"foo", "--session-id", "VALUE"},
+		{"curl", "-u", "admin:VALUE", "https://x"},
+		{"curl", "--proxy-user", "a:VALUE"},
+		{"foo", "--userpass", "a:VALUE"},
+		{"aws", "configure", "set", "aws_secret_access_key", "VALUE"},
+		{"export", "NAME_TOKEN", "VALUE"},
+		{"npm", "config", "set", "//registry.npmjs.org/:_authToken", "VALUE"},
+		{"openssl", "enc", "-pass", "pass:VALUE"},
+		{"security", "add-generic-password", "-w", "VALUE"},
+		{"net", "use", "/password:VALUE"},
+		{"foo", "--token:VALUE"},
+		{"curl", "--header=Authorization:VALUE"},
+		{"--connection-string", "Server=h;Password=VALUE;"},
+		{"--connection-string", "Host=h;Pwd=VALUE"},
+		{"--config", `{"apiKey": "VALUE"}`},
+		{"git", "clone", "https://VALUE@github.com/o/r"},
+		{"https://host/mcp#VALUE"},
+		{"foo", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"},
+		{"foo", "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MA=="},
+		{"foo", "sk_live_abcdefghijklmnop"},
+		{"foo", "rk_live_abcdefghijklmnop"},
+		{"powershell", "-Command", "$env:TOKEN='VALUE'"},
+		{"curl", "https://hooks.slack.com/services/T0000/B0000/XXXXXXXX"},
+		{"foo", "--cookie", "session=VALUE"},
+		{"foo", "123e4567-e89b-12d3-a456-426614174000"},
+		{"-e", "DB_PASS=VALUE"},
+		{"foo", "PATTOKEN=VALUE"},
 	}
 	for _, words := range secret {
 		if !looksSecret(words) {
@@ -504,6 +535,15 @@ func TestLooksSecret(t *testing.T) {
 		{"https://mcp.example.com/v1/sse"},
 		{"npm", "run", "build"},
 		{"--stdio"},
+		{"mkdir", "-p"},
+		{"ls", "-t"},
+		{"gh", "api", "-H", "Accept: application/json"},
+		{"git", "clone", "ssh://git@github.com/o/r.git"},
+		{"PATH=/usr/bin", "ls"},
+		{"--path=/tmp/x"},
+		{"/usr/local/bin/some-tool", "--flag"},
+		{"docker", "run", "--rm", "-it", "alpine"},
+		{"cargo", "test", "--workspace"},
 	}
 	for _, words := range plain {
 		if looksSecret(words) {
@@ -533,7 +573,7 @@ func TestCaptureScreensRulesAndApprovalsAndNeverPrintsTheirText(t *testing.T) {
 	if l := listed(got); !slices.Equal(l, []string{
 		"claude permission Bash(...) !", "claude permission Bash(...) !", "claude permission Bash(...) !", "claude permission Bash(...) !",
 		"claude permission Read(...) !", "claude permission git status",
-		"codex permission git log", "codex permission prefix_rule on line 1 !", "codex permission prefix_rule on line 2 !",
+		"codex permission git log", "codex permission ls", "codex permission prefix_rule on line 1 !",
 	}) {
 		t.Errorf("candidates = %q", l)
 	}
@@ -581,5 +621,60 @@ func TestCaptureScreensMCPServers(t *testing.T) {
 	}
 	if len(got) != 8 {
 		t.Errorf("candidates = %q", listed(got))
+	}
+}
+
+func TestCaptureNeverEchoesAValueInAReason(t *testing.T) {
+	m, fake := newModule(t, config.Agents{Providers: []string{config.ProviderClaude, config.ProviderCodex}})
+	writeFile(t, m.claude().settingsPath(), `{"permissions": {"allow": [
+  "Bash(curl -d {\"password\":\"LEAKR5\"}:*)"]}}`)
+	writeFile(t, m.claudeJSONPath(), `{"mcpServers": {
+  "name": {"type": "stdio", "command": "srv", "env": {"API_KEY": "LEAKR6"}},
+  "sec": {"type": "http", "url": "https://h.example.com/mcp", "headers": {"Authorization": "Bearer LEAKR7"}},
+  "env": {"type": "stdio", "command": "srv", "env": {"lowercase": "${lowercase}"}},
+  "tok": {"type": "http", "url": "https://h.example.com/mcp", "headers": {"Authorization": "Bearer ${ghp_Zq8xK2mP9vL4tR7wN3bY6cD1fG5hJ0sA}"}}}}`)
+	writeFile(t, filepath.Join(m.codexBackend().home, "config.toml"), `
+[marketplaces.mk]
+source_type = "git"
+source = "o/r"
+ref = "ghp_Zq8xK2mP9vL4tR7wN3bY6cD1fG5hJ0sA"
+
+[mcp_servers.web]
+url = "https://h.example.com/mcp"
+bearer_token_env_var = "ghp_Zq8xK2mP9vL4tR7wN3bY6cD1fG5hJ0sA"
+
+[mcp_servers.low]
+url = "https://h.example.com/mcp"
+bearer_token_env_var = "leakr8"
+
+[mcp_servers.vars]
+command = "srv"
+env_vars = ["API_KEY=LEAKR9"]
+`)
+	writeFile(t, filepath.Join(m.codexBackend().home, "rules", "default.rules"),
+		"prefix_rule(pattern=[\"sshpass\", \"-p\", \"LEAKR10\", \"ssh\"], decision=\"allow\")\n"+
+			"prefix_rule(pattern=[\"setx\", \"API_KEY\", \"LEAKR11\"], decision=\"allow\")\n"+
+			"prefix_rule(pattern=[\"ls\"], decision=\"allow\", justification=\"the key is LEAKR12\")\n"+
+			"prefix_rule(pattern=[\"x\"], decision=\"maybe-LEAKR13\")\n")
+	fake.OnOK(marketList, "[]")
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	fake.OnOK(codexMarketList, `{"marketplaces":[{"name":"mk","root":"/x"}]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	got := capture(t, m)
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"LEAKR", "leakr8", "ghp_", "hunter2"} {
+		if strings.Contains(string(data), leak) {
+			t.Errorf("%s reached the output: %s", leak, data)
+		}
+	}
+	ls := find(t, got, KindPermission, "ls")
+	if ls.Skip != "" {
+		t.Errorf("an ordinary rule with a free-text justification was skipped: %q", ls.Skip)
+	}
+	if strings.Contains(string(data), "justification") {
+		t.Errorf("a justification reached the findings: %s", data)
 	}
 }

@@ -53,15 +53,14 @@ func (s CapturedServer) Summary() string {
 // Name is the marketplace name, plugin id, server name or command prefix.
 // A candidate with a Skip reason can't be turned into a declaration.
 type Candidate struct {
-	Provider      string          `json:"provider"`
-	Kind          string          `json:"kind"`
-	Name          string          `json:"name"`
-	Source        string          `json:"source,omitempty"`
-	Decision      string          `json:"decision,omitempty"`
-	Justification string          `json:"justification,omitempty"`
-	Server        *CapturedServer `json:"server,omitempty"`
-	Found         string          `json:"found_in,omitempty"`
-	Skip          string          `json:"skipped,omitempty"`
+	Provider string          `json:"provider"`
+	Kind     string          `json:"kind"`
+	Name     string          `json:"name"`
+	Source   string          `json:"source,omitempty"`
+	Decision string          `json:"decision,omitempty"`
+	Server   *CapturedServer `json:"server,omitempty"`
+	Found    string          `json:"found_in,omitempty"`
+	Skip     string          `json:"skipped,omitempty"`
 }
 
 // sentinelMarketplaces are the marketplace names Claude gives plugins that
@@ -98,6 +97,7 @@ func (m *Module) Capture(ctx context.Context) ([]Candidate, error) {
 		}
 		out = append(out, found...)
 	}
+	out = withholdSecretNames(out)
 	slices.SortStableFunc(out, func(a, b Candidate) int {
 		return cmp.Or(
 			cmp.Compare(slices.Index(config.Providers, a.Provider), slices.Index(config.Providers, b.Provider)),
@@ -107,6 +107,18 @@ func (m *Module) Capture(ctx context.Context) ([]Candidate, error) {
 		)
 	})
 	return out, errors.Join(errs...)
+}
+
+// withholdSecretNames drops a marketplace, plugin or server whose name looks
+// like a credential, and shows it without the name.
+func withholdSecretNames(cands []Candidate) []Candidate {
+	for i, c := range cands {
+		if c.Kind == KindPermission || !looksSecret([]string{c.Name}) {
+			continue
+		}
+		cands[i] = Candidate{Provider: c.Provider, Kind: c.Kind, Name: "(name withheld)", Skip: "its name " + credentialReason}
+	}
+	return cands
 }
 
 // declared is what zakwas.yaml declares for one provider.
@@ -158,24 +170,12 @@ func (m *Module) marketplaceCandidate(provider, name, source string) Candidate {
 }
 
 // secretSource says why a marketplace source may carry a credential, or "".
-// A user name alone is what ssh://git@host uses, so only a password, a user
-// name on an http URL, or a query counts.
+// The ref after # is looked at apart from the URL, since it is not a
+// URL fragment.
 func secretSource(source string) string {
-	const why = "its source has credentials or a query, which could hold a key; add it to zakwas.yaml by hand"
-	base, _, _ := strings.Cut(source, "#")
-	if tokenPrefix.MatchString(base) {
-		return why
-	}
-	if !strings.Contains(base, "://") {
-		return ""
-	}
-	u, err := url.Parse(base)
-	if err != nil {
-		return why
-	}
-	_, hasPassword := u.User.Password()
-	if hasPassword || u.RawQuery != "" || u.User != nil && (u.Scheme == "http" || u.Scheme == "https") {
-		return why
+	base, ref, _ := strings.Cut(source, "#")
+	if looksSecret([]string{base}) || looksSecret([]string{ref}) {
+		return "its source " + credentialReason
 	}
 	return ""
 }
@@ -333,21 +333,28 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 	var s CapturedServer
 	if raw, _ := v["url"].(string); raw != "" {
 		u, err := url.Parse(raw)
-		if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return s, "its URL has credentials, a query or a fragment, which could hold a key; add it to zakwas.yaml by hand"
+		if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || looksSecret([]string{raw}) {
+			return s, "its URL " + credentialReason
 		}
 		if secretURLPath(raw) {
 			return s, "its URL path has a segment that could be a key; add it to zakwas.yaml by hand"
 		}
 		s.URL = raw
+		var name string
 		if provider == config.ProviderCodex {
-			s.BearerTokenEnv, _ = v["bearer_token_env_var"].(string)
+			name, _ = v["bearer_token_env_var"].(string)
 		} else if headers, ok := v["headers"].(map[string]any); ok {
 			auth, _ := headers["Authorization"].(string)
 			if g := bearerEnv.FindStringSubmatch(auth); g != nil {
-				s.BearerTokenEnv = g[1]
+				name = g[1]
+			} else if auth != "" {
+				return CapturedServer{}, "it sends an Authorization header with a literal value, which " + credentialReason
 			}
 		}
+		if name != "" && !validEnvName(name) {
+			return CapturedServer{}, "the environment variable it names for a token " + credentialReason
+		}
+		s.BearerTokenEnv = name
 		return s, ""
 	}
 	s.Command, _ = v["command"].(string)
@@ -357,12 +364,17 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 	}
 	if provider == config.ProviderCodex {
 		s.EnvVars = mcpStrings(v["env_vars"])
-		return s, ""
+	} else {
+		env, _ := v["env"].(map[string]any)
+		for _, key := range sortedKeys(env) {
+			if val, _ := env[key].(string); envRef.FindStringSubmatch(val) != nil && envRef.FindStringSubmatch(val)[1] == key {
+				s.EnvVars = append(s.EnvVars, key)
+			}
+		}
 	}
-	env, _ := v["env"].(map[string]any)
-	for _, key := range sortedKeys(env) {
-		if val, _ := env[key].(string); envRef.FindStringSubmatch(val) != nil && envRef.FindStringSubmatch(val)[1] == key {
-			s.EnvVars = append(s.EnvVars, key)
+	for _, name := range s.EnvVars {
+		if !validEnvName(name) {
+			return CapturedServer{}, "an environment variable name it lists " + credentialReason
 		}
 	}
 	return s, ""
@@ -507,16 +519,16 @@ func (m *Module) captureCodexRules() ([]Candidate, error) {
 		if !strings.HasPrefix(line, "prefix_rule(") {
 			continue
 		}
-		words, decision, justification, reason := parsePrefixRule(line)
-		if reason == "" && looksSecret(append(slices.Clone(words), strings.Fields(justification)...)) {
+		words, decision, reason := parsePrefixRule(line)
+		if reason == "" && looksSecret(words) {
 			reason = "the rule " + credentialReason
 		}
 		c := Candidate{
 			Provider: config.ProviderCodex, Kind: KindPermission, Name: strings.Join(words, " "),
-			Decision: decision, Justification: justification, Found: m.Paths.Pretty(path),
+			Decision: decision, Found: m.Paths.Pretty(path),
 		}
 		if reason != "" {
-			c.Name, c.Decision, c.Justification, c.Skip = fmt.Sprintf("prefix_rule on line %d", n), "", "", reason
+			c.Name, c.Decision, c.Skip = fmt.Sprintf("prefix_rule on line %d", n), "", reason
 		}
 		key := c.Decision + "\x00" + c.Name
 		if seen[key] || reason == "" && known[c.Name] {
@@ -529,42 +541,39 @@ func (m *Module) captureCodexRules() ([]Candidate, error) {
 }
 
 var (
-	ruleDecision      = regexp.MustCompile(`decision\s*=\s*"([a-z]+)"`)
-	ruleJustification = regexp.MustCompile(`justification\s*=\s*"((?:[^"\\]|\\.)*)"`)
-	rulePattern       = regexp.MustCompile(`pattern\s*=\s*\[((?:[^\]"\[]|"(?:[^"\\]|\\.)*")*)\]`)
-	ruleString        = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
-	ruleEscape        = strings.NewReplacer(`\\`, `\`, `\"`, `"`)
+	ruleDecision = regexp.MustCompile(`decision\s*=\s*"([a-z]+)"`)
+	rulePattern  = regexp.MustCompile(`pattern\s*=\s*\[((?:[^\]"\[]|"(?:[^"\\]|\\.)*")*)\]`)
+	ruleString   = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
+	ruleEscape   = strings.NewReplacer(`\\`, `\`, `\"`, `"`)
 )
 
 // parsePrefixRule reads a one-line prefix_rule: the words of its pattern,
-// its decision as a zakwas decision, and its justification. A rule whose
+// its decision as a zakwas decision. Its justification is not read: it is
+// free text, and never declared. A rule whose
 // pattern has alternatives, or whose decision zakwas doesn't know, comes
 // back with the reason it can't be declared.
-func parsePrefixRule(line string) (words []string, decision, justification, reason string) {
+func parsePrefixRule(line string) (words []string, decision, reason string) {
 	if !strings.HasSuffix(line, ")") {
-		return nil, "", "", "the rule spans lines, which capture can't read"
+		return nil, "", "the rule spans lines, which capture can't read"
 	}
 	m := rulePattern.FindStringSubmatch(line)
 	if m == nil {
-		return nil, "", "", "its pattern has alternatives or spans lines, which capture can't declare"
+		return nil, "", "its pattern has alternatives or spans lines, which capture can't declare"
 	}
 	for _, s := range ruleString.FindAllStringSubmatch(m[1], -1) {
 		words = append(words, ruleEscape.Replace(s[1]))
 	}
 	if len(words) == 0 {
-		return nil, "", "", "its pattern is empty"
+		return nil, "", "its pattern is empty"
 	}
 	d := ruleDecision.FindStringSubmatch(line)
 	if d == nil && strings.Contains(line, "decision") {
-		return words, "", "", "its decision isn't written as decision=\"...\", which capture can't read"
+		return words, "", "its decision isn't written as decision=\"...\", which capture can't read"
 	}
 	if d == nil {
 		decision = config.PermissionAllow
 	} else if decision = codexRuleDecisions[d[1]]; decision == "" {
-		return words, "", "", fmt.Sprintf("its decision %q is not one zakwas declares", d[1])
+		return words, "", "its decision is not one zakwas declares"
 	}
-	if j := ruleJustification.FindStringSubmatch(line); j != nil {
-		justification = ruleEscape.Replace(j[1])
-	}
-	return words, decision, justification, ""
+	return words, decision, ""
 }
