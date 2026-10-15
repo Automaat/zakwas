@@ -81,7 +81,7 @@ func runMCP(ctx context.Context, env Env, args []string, out, errOut *console) i
 		return ExitUsage
 	}
 	if ex, ok := env.Runner.(*runner.Exec); ok {
-		ex.Stdout = ex.Stderr
+		ex.Stdout, ex.NoStdin = ex.Stderr, true
 		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
 	}
 	t := &mcpTools{env: env, cfgPath: o.cfgPath, enableApply: o.enableApply}
@@ -365,10 +365,11 @@ func (t *mcpTools) discard(_ context.Context, c *mcp.Call) (mcp.Result, error) {
 }
 
 type applyOutcome struct {
-	Applied bool   `json:"applied"`
-	Reason  string `json:"reason,omitempty"`
-	Command string `json:"command,omitempty"`
-	Output  string `json:"output,omitempty"`
+	Applied   bool   `json:"applied"`
+	Committed bool   `json:"committed"`
+	Reason    string `json:"reason,omitempty"`
+	Command   string `json:"command,omitempty"`
+	Output    string `json:"output,omitempty"`
 }
 
 func (t *mcpTools) apply(ctx context.Context, c *mcp.Call) (mcp.Result, error) {
@@ -397,23 +398,27 @@ func (t *mcpTools) apply(ctx context.Context, c *mcp.Call) (mcp.Result, error) {
 	var errBuf, logBuf bytes.Buffer
 	held, ok := takeLock(ctx, t.env, "mcp apply", true, &console{w: &errBuf})
 	if !ok {
-		return mcp.Result{}, errors.New(strings.TrimSpace(strings.TrimPrefix(errBuf.String(), "zakwas: ")))
+		return mcp.Result{}, errors.New(reasonText(errBuf.String()))
 	}
 	defer func() { _ = held.Release() }()
 
 	env := t.env
 	env.Color, env.GitHubActions = false, false
-	ap := &approval{env: env, cfg: cfg, p: p, out: &console{w: &logBuf}, errOut: &console{w: &errBuf}, maxTier: proposal.TierLow}
+	ap := &approval{env: env, cfg: cfg, p: p, out: &console{w: &logBuf}, errOut: &console{w: &errBuf}, maxTier: proposal.TierLow, via: "the agent, by an MCP confirmation"}
 	ap.ask = t.confirm(c, ap)
 	ap.observer = func(style engine.Style) engine.Observer {
 		return observers{&progress{out: ap.out, style: style}, mcpProgress{c}}
 	}
 	code := ap.run(ctx, store)
 
-	problems := strings.TrimSpace(errBuf.String())
+	problems := reasonText(errBuf.String())
 	switch {
 	case code == ExitOK:
-		return jsonResult(applyOutcome{Applied: true, Output: strings.TrimSpace(logBuf.String())})
+		return jsonResult(applyOutcome{Applied: true, Committed: true, Output: strings.TrimSpace(logBuf.String())})
+	case ap.applied:
+		res, err := jsonResult(applyOutcome{Applied: true, Reason: problems, Output: strings.TrimSpace(logBuf.String())})
+		res.IsError = true
+		return res, err
 	case ap.outcome != "":
 		reason := problems
 		if reason == "" {
@@ -424,6 +429,16 @@ func (t *mcpTools) apply(ctx context.Context, c *mcp.Call) (mcp.Result, error) {
 	res, err := jsonResult(applyOutcome{Reason: problems, Output: strings.TrimSpace(logBuf.String())})
 	res.IsError = true
 	return res, err
+}
+
+// reasonText is what zakwas printed to its error output, without the
+// "zakwas: " that starts each line there.
+func reasonText(s string) string {
+	var lines []string
+	for line := range strings.Lines(s) {
+		lines = append(lines, strings.TrimPrefix(strings.TrimRight(line, "\n"), "zakwas: "))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // confirm asks the user in the agent to approve the review zakwas renders.

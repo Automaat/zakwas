@@ -182,7 +182,7 @@ func (m *Module) opencodePromptWarnings() []string {
 	for _, s := range m.Agents.MCPFor(config.ProviderOpencode) {
 		for _, tool := range s.PromptTools() {
 			key := opencodeToolChars.ReplaceAllString(s.Name, "_") + "_" + opencodeToolChars.ReplaceAllString(tool, "_")
-			if !m.templatesMention(key) {
+			if !m.templatesAsk(key) {
 				out = append(out, fmt.Sprintf("opencode won't ask before %s of MCP server %s: add %q: \"ask\" to the permission object of its opencode.json template", tool, s.Name, key))
 			}
 		}
@@ -190,9 +190,10 @@ func (m *Module) opencodePromptWarnings() []string {
 	return out
 }
 
-func (m *Module) templatesMention(text string) bool {
+func (m *Module) templatesAsk(key string) bool {
+	ask := regexp.MustCompile(`"` + regexp.QuoteMeta(key) + `"\s*:\s*"ask"`)
 	for _, src := range m.TemplateSources {
-		if data, err := os.ReadFile(src); err == nil && strings.Contains(string(data), text) {
+		if data, err := os.ReadFile(src); err == nil && ask.Match(data) {
 			return true
 		}
 	}

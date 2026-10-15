@@ -605,3 +605,45 @@ func TestMCPLeavesTheConfigToEachCall(t *testing.T) {
 		t.Error("the server didn't start without a config")
 	}
 }
+
+func TestMCPApplyReportsACommitThatFailedAfterTheApply(t *testing.T) {
+	env, home := brewSetup(t)
+	hook := filepath.Join(env.Cwd, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho hook says no >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := startMCP(t, env, formClient, "--enable-apply")
+	id := parseJSON(t, c.tool("zakwas_propose", map[string]any{"kind": "add-brew", "name": "jq"}, nil).text)["id"].(string)
+
+	r := c.tool("zakwas_apply", map[string]any{"id": id}, accept)
+
+	out := parseJSON(t, r.text)
+	if !r.isErr || out["applied"] != true || out["committed"] != false {
+		t.Errorf("outcome (error %v) = %v", r.isErr, out)
+	}
+	reason := out["reason"].(string)
+	if !strings.HasPrefix(reason, "applied, but the commit failed") {
+		t.Errorf("reason = %q", reason)
+	}
+	if _, err := os.Stat(HistoryPath(home)); err != nil {
+		t.Errorf("the apply wasn't recorded: %v", err)
+	}
+}
+
+func TestMCPCommitSaysWhereItWasApproved(t *testing.T) {
+	env, _ := brewSetup(t)
+	c := startMCP(t, env, formClient, "--enable-apply")
+	id := parseJSON(t, c.tool("zakwas_propose", map[string]any{"kind": "add-brew", "name": "jq"}, nil).text)["id"].(string)
+	if r := c.tool("zakwas_apply", map[string]any{"id": id}, accept); r.isErr {
+		t.Fatal(r.text)
+	}
+	if body := gitIn(t, env.Cwd, "log", "-1", "--format=%b"); !strings.Contains(body, "approved in the agent, by an MCP confirmation") {
+		t.Errorf("commit body = %q", body)
+	}
+}
+
+func TestReasonText(t *testing.T) {
+	if got := reasonText("zakwas: one\nzakwas: two: three\n"); got != "one\ntwo: three" {
+		t.Errorf("reasonText = %q", got)
+	}
+}

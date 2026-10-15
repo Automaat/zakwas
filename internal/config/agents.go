@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -131,8 +132,11 @@ func (s MCPServer) PromptTools() []string {
 		return nil
 	}
 	for _, arg := range s.Args[1:] {
-		switch arg {
-		case "-enable-apply", "--enable-apply", "-enable-apply=true", "--enable-apply=true":
+		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if name != "enable-apply" || !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if on, err := strconv.ParseBool(value); !hasValue || err == nil && on {
 			return []string{MCPApplyTool}
 		}
 	}

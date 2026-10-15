@@ -275,6 +275,11 @@ func TestOpencodeIsToldToPromptByHand(t *testing.T) {
 		t.Errorf("warnings with the permission in the template = %q", got)
 	}
 
+	writeFile(t, tmpl, `{"permission": {"zakwas_zakwas_apply": "allow"}}`)
+	if got := m.Warnings(context.Background()); !slices.Equal(got, []string{want}) {
+		t.Errorf("warnings with the tool allowed in the template = %q, want %q", got, want)
+	}
+
 	m.TemplateSources = nil
 	m.Agents.Providers = []string{config.ProviderClaude}
 	if got := m.Warnings(context.Background()); len(got) != 0 {

@@ -77,7 +77,8 @@ func checkProposal(p *proposal.Proposal, cfg *config.Config, env Env) error {
 // whether to go on; nil asks on the terminal. observer reports the steps
 // of the apply; nil prints them to out. maxTier, when set, refuses a
 // proposal rated above it. outcome says why nothing was applied when that
-// was on purpose.
+// was on purpose. via says where it was approved, for the commit message,
+// and applied turns true once the changes ran and the commit is next.
 type approval struct {
 	env      Env
 	cfg      *config.Config
@@ -88,6 +89,8 @@ type approval struct {
 	observer func(style engine.Style) engine.Observer
 	maxTier  string
 	outcome  string
+	via      string
+	applied  bool
 
 	summary, tier string
 }
@@ -192,6 +195,7 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		}
 		return code
 	}
+	a.applied = true
 	if err := store.Delete(a.p.ID); err != nil {
 		a.errOut.print("zakwas: warning: proposal " + a.p.ID + " not removed: " + err.Error() + "\n")
 	}
@@ -305,7 +309,11 @@ func (a *approval) commit(ctx context.Context, rels []string) error {
 	if r := []rune(subject); len(r) > 72 {
 		subject = string(r[:71]) + "…"
 	}
-	body := fmt.Sprintf("Proposal %s (%s risk), approved in a terminal.", a.p.ID, a.tier)
+	via := a.via
+	if via == "" {
+		via = "a terminal"
+	}
+	body := fmt.Sprintf("Proposal %s (%s risk), approved in %s.", a.p.ID, a.tier, via)
 	run := func(args ...string) error {
 		return runner.Check(ctx, a.env.Runner, runner.Cmd{Name: "git", Args: append([]string{"-C", root}, args...)})
 	}

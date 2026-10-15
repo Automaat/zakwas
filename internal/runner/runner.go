@@ -62,9 +62,10 @@ type Runner interface {
 
 // Exec runs commands on the host. Env entries go to every command.
 type Exec struct {
-	Stdout io.Writer
-	Stderr io.Writer
-	Env    []string
+	Stdout  io.Writer
+	Stderr  io.Writer
+	Env     []string
+	NoStdin bool
 }
 
 // NewExec returns an Exec streaming to the process stdout/stderr.
@@ -91,7 +92,7 @@ func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd.Env = slices.Concat(os.Environ(), e.Env, c.Env)
 	if c.Stdin != "" {
 		cmd.Stdin = strings.NewReader(c.Stdin)
-	} else if c.Stream {
+	} else if c.Stream && !e.NoStdin {
 		cmd.Stdin = os.Stdin
 	}
 
