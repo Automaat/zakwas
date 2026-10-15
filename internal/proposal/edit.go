@@ -268,6 +268,11 @@ func addBrew(data []byte, name string, cask bool) ([]byte, error) {
 			return nil, fmt.Errorf("%s %q is already in the Brewfile", kind, name)
 		}
 	}
+	for line := range strings.Lines(string(data)) {
+		if g := singleQuoted.FindStringSubmatch(strings.TrimSpace(line)); g != nil && g[1] == kind && g[2] == name {
+			return nil, fmt.Errorf("%s %q is already in the Brewfile", kind, name)
+		}
+	}
 	if err := plainBrewfile(data); err != nil {
 		return nil, err
 	}
@@ -301,6 +306,7 @@ func addBrew(data []byte, name string, cask bool) ([]byte, error) {
 }
 
 var (
+	singleQuoted = regexp.MustCompile(`^(tap|brew|cask)\s+'([^']+)'`)
 	rubyBlock    = regexp.MustCompile(`^\s*(if|unless|else|elsif|end|case|when|begin|while|until|for)\b|\bdo(\s*\|[^|]*\|)?\s*$`)
 	quotedString = regexp.MustCompile(`"[^"]*"|'[^']*'`)
 )

@@ -36,8 +36,11 @@ type gitRunner struct {
 }
 
 func (g gitRunner) Run(ctx context.Context, c runner.Cmd) (runner.Result, error) {
-	if c.Name == "git" {
+	switch c.Name {
+	case "git":
 		return g.exec.Run(ctx, c)
+	case "brew":
+		return runner.Result{}, nil
 	}
 	return g.Fake.Run(ctx, c)
 }
@@ -56,13 +59,20 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 
 func proposeSetup(t *testing.T) (Env, string) {
 	t.Helper()
+	return proposeSetupConfig(t, proposeConfig)
+}
+
+func proposeSetupConfig(t *testing.T, cfg string) (Env, string) {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	env, home := setup(t, proposeConfig)
+	env, home := setup(t, cfg)
 	root := env.Cwd
-	if err := os.WriteFile(filepath.Join(root, "opencode.json.tmpl"), []byte(opencodeTemplate), 0o644); err != nil {
-		t.Fatal(err)
+	for name, body := range map[string]string{"opencode.json.tmpl": opencodeTemplate, "Brewfile": "brew \"git\"\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	gitIn(t, root, "init", "-q", "-b", "main")
 	gitIn(t, root, "config", "user.email", "t@example.com")
@@ -417,5 +427,50 @@ func TestForgedProposalTextIsNotTrusted(t *testing.T) {
 	}
 	if body := gitIn(t, env.Cwd, "log", "-1", "--format=%b"); !strings.Contains(body, "(high risk)") {
 		t.Errorf("commit body = %q", body)
+	}
+}
+
+func TestApproveChecksTheConfigFileEvenWhenItIsNotEdited(t *testing.T) {
+	env, _ := proposeSetupConfig(t, proposeConfig+"brew: {file: Brewfile}\n")
+	p := propose(t, env, "add-brew", "jq")
+	env.StdinTTY = true
+	path := filepath.Join(env.Cwd, "zakwas.yaml")
+	if err := os.WriteFile(path, []byte(readFile(t, path)+"# wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := invoke(env, "y\n", "approve", p.ID)
+	if r.code != ExitErr || !strings.Contains(r.stderr, "zakwas.yaml, Brewfile has uncommitted changes") {
+		t.Errorf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+	if strings.Contains(readFile(t, filepath.Join(env.Cwd, "Brewfile")), "jq") {
+		t.Error("the refused approve edited the Brewfile")
+	}
+}
+
+func TestApproveRefusesAnIgnoredFile(t *testing.T) {
+	env, _ := proposeSetupConfig(t, proposeConfig+"brew: {file: Brewfile}\n")
+	p := propose(t, env, "add-brew", "jq")
+	env.StdinTTY = true
+	if err := os.WriteFile(filepath.Join(env.Cwd, ".gitignore"), []byte("Brewfile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, env.Cwd, "add", ".gitignore")
+	gitIn(t, env.Cwd, "rm", "-q", "--cached", "Brewfile")
+	gitIn(t, env.Cwd, "commit", "-q", "-m", "ignore")
+	r := invoke(env, "y\n", "approve", p.ID)
+	if r.code != ExitErr || !strings.Contains(r.stderr, "Brewfile is ignored by git") {
+		t.Errorf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+}
+
+func TestApproveBrewCommitsOnlyTheBrewfile(t *testing.T) {
+	env, _ := proposeSetupConfig(t, proposeConfig+"brew: {file: Brewfile}\n")
+	p := propose(t, env, "add-brew", "jq")
+	env.StdinTTY = true
+	if r := invoke(env, "y\n", "approve", p.ID); r.code != ExitOK {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+	if files := gitIn(t, env.Cwd, "show", "--name-only", "--format=", "HEAD"); files != "Brewfile" {
+		t.Errorf("commit holds %q", files)
 	}
 }

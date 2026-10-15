@@ -93,8 +93,8 @@ func (s Sensitive) paths() []string {
 	return out
 }
 
-// Touches reports the sensitive path a change's text names, for a target or
-// detail such as "~/.claude/settings.json" or "add /etc/hosts".
+// Touches reports the sensitive path a change's text names, ignoring case
+// since macOS volumes are case-insensitive, for a target or detail such as "~/.claude/settings.json" or "add /etc/hosts".
 func (s Sensitive) Touches(text string) (string, bool) {
 	paths := s.paths()
 	for _, tok := range strings.Fields(text) {
@@ -108,9 +108,9 @@ func (s Sensitive) Touches(text string) (string, bool) {
 		if !filepath.IsAbs(tok) {
 			continue
 		}
-		tok = filepath.Clean(tok)
+		tok = strings.ToLower(filepath.Clean(tok))
 		for _, p := range paths {
-			if tok == p || strings.HasPrefix(tok, p+string(filepath.Separator)) {
+			if lower := strings.ToLower(p); tok == lower || strings.HasPrefix(tok, lower+string(filepath.Separator)) {
 				return p, true
 			}
 		}

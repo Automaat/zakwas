@@ -104,7 +104,15 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		rels = append(rels, rel)
 	}
 	slices.Sort(rels)
-	branch, err := a.checkGit(ctx, rels)
+	cfgRel, err := filepath.Rel(a.cfg.Root, a.cfg.Path)
+	if err != nil {
+		return a.fail(err)
+	}
+	checked := slices.Clone(rels)
+	if cfgRel = filepath.ToSlash(cfgRel); !slices.Contains(checked, cfgRel) {
+		checked = append([]string{cfgRel}, checked...)
+	}
+	branch, err := a.checkGit(ctx, checked)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -141,7 +149,7 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		return ExitErr
 	}
 
-	if _, err := a.checkGit(ctx, rels); err != nil {
+	if _, err := a.checkGit(ctx, checked); err != nil {
 		return a.fail(fmt.Errorf("while waiting for the answer: %w", err))
 	}
 	restore, err := writeEdits(ev.edits)
@@ -178,6 +186,11 @@ func (a *approval) checkGit(ctx context.Context, rels []string) (string, error) 
 	branch, ok := git(ctx, a.env.Runner, root, "symbolic-ref", "--short", "-q", "HEAD")
 	if !ok || branch == "" {
 		return "", errors.New("the config repo is on a detached HEAD; check out a branch first")
+	}
+	for _, rel := range rels {
+		if _, ignored := git(ctx, a.env.Runner, root, "check-ignore", "-q", "--", rel); ignored {
+			return "", fmt.Errorf("%s is ignored by git, so approve couldn't commit it", rel)
+		}
 	}
 	status, ok := git(ctx, a.env.Runner, root, append([]string{"status", "--porcelain", "--"}, rels...)...)
 	switch {

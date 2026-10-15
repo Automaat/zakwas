@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/Automaat/zakwas/internal/config"
 )
@@ -50,11 +51,12 @@ type Server struct {
 }
 
 var (
-	brewName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._+/-]*$`)
-	miseTool = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:@._/-]*$`)
-	miseVer  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
-	envName  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	nameRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	brewName   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9@._+/-]*$`)
+	miseTool   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:@._/-]*$`)
+	miseVer    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+	envName    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	pluginPart = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	nameRe     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
 
 // Validate checks the operation's own fields; whether the edit fits the
@@ -69,7 +71,7 @@ func (o Op) Validate() error {
 	switch o.Kind {
 	case AddPlugin:
 		name, mkt, ok := strings.Cut(o.Name, "@")
-		need(ok && name != "" && mkt != "" && !strings.Contains(mkt, "@"), "plugin id must be name@marketplace")
+		need(ok && pluginPart.MatchString(name) && pluginPart.MatchString(mkt), "plugin id must be name@marketplace, each made of letters, digits, . _ -")
 	case AddPermission, RemovePermission:
 		need(slices.Contains([]string{config.PermissionAllow, config.PermissionReview, config.PermissionDeny}, o.Decision), "decision must be allow, review or deny")
 		need(len(strings.Fields(o.Command)) > 0, "a command is required")
@@ -93,7 +95,7 @@ func (o Op) Validate() error {
 		need(!o.Cask, "only add-brew takes a cask")
 	}
 	for _, s := range []string{o.Name, o.Command, o.Justification, o.Version} {
-		need(!strings.ContainsAny(s, "\r\n"), "values must be one line")
+		need(!strings.ContainsFunc(s, unicode.IsControl), "values must be one line of printable text")
 	}
 	return errors.Join(errs...)
 }
@@ -108,8 +110,8 @@ func (o Op) validateMCP() []error {
 		return append(errs, errors.New("set either a command or a url"))
 	}
 	for _, v := range append(slices.Clone(s.Args), s.Command, s.URL) {
-		if strings.ContainsAny(v, "\r\n") {
-			errs = append(errs, errors.New("values must be one line"))
+		if strings.ContainsFunc(v, unicode.IsControl) {
+			errs = append(errs, errors.New("values must be one line of printable text"))
 			break
 		}
 	}

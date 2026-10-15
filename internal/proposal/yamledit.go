@@ -32,6 +32,11 @@ func parseYAML(data []byte) (*yamlFile, error) {
 	if f.lines[len(f.lines)-1] == "" {
 		f.lines = f.lines[:len(f.lines)-1]
 	}
+	for line := range strings.Lines(string(data)) {
+		if strings.TrimRight(line, " \t\r\n") == "..." {
+			return nil, errors.New("the file has a document end marker (...), which edits don't support")
+		}
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var doc yaml.Node
 	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {

@@ -37,7 +37,7 @@ agents:
       - rm
 `
 
-const baseBrewfile = "brew \"git\"\ncask \"firefox\" # browser\n"
+const baseBrewfile = "brew \"git\"\ncask \"firefox\" # browser\nbrew 'single'\n"
 
 const baseMise = "# tools\n[settings]\nexperimental = true\n\n[tools]\nnode = \"22.1.0\" # lts\ngo = \"1.27\"\n\n[env]\nA = \"b\"\n"
 
@@ -116,7 +116,7 @@ func TestApplyBrewAndMise(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("edits = %v", got)
 	}
-	if want := "brew \"git\"\nbrew \"jq\"\ncask \"firefox\" # browser\ncask \"iterm2\"\n"; got["Brewfile"] != want {
+	if want := "brew \"git\"\ncask \"firefox\" # browser\ncask \"iterm2\"\nbrew 'single'\nbrew \"jq\"\n"; got["Brewfile"] != want {
 		t.Errorf("Brewfile:\n%s\nwant:\n%s", got["Brewfile"], want)
 	}
 	want := strings.Replace(baseMise, `"22.1.0" # lts`, `"22.2.0" # lts`, 1)
@@ -143,6 +143,9 @@ func TestApplyRejects(t *testing.T) {
 		{"bad version", Op{Kind: PinMise, Name: "node", Version: "1 2"}, "unsupported"},
 		{"args on a url server", Op{Kind: AddMCP, Name: "docs", Server: &Server{URL: "https://x", Args: []string{"a"}}}, "belong to a command"},
 		{"unknown kind", Op{Kind: "rm-rf"}, "unknown operation"},
+		{"escape in plugin name", Op{Kind: AddPlugin, Name: "\x1b[2Jx@market"}, "plugin id must be"},
+		{"control in justification", Op{Kind: AddPermission, Decision: "deny", Command: "dd", Justification: "a\x1b[8mb"}, "printable"},
+		{"single quoted duplicate", Op{Kind: AddBrew, Name: "single"}, "already in the Brewfile"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -244,6 +247,9 @@ func TestSensitiveTouches(t *testing.T) {
 		{"~/.claude.json", true},
 		{"/Users/me/.codex/config.toml", true},
 		{"~/.zshrc", true},
+		{"~/.ZSHRC", true},
+		{"~/.SSH/x", true},
+		{"/ETC/hosts", true},
 		{"~/.ssh/id_ed25519", true},
 		{"/etc/pam.d/sudo_local", true},
 		{"/work/claude/settings.json", true},
