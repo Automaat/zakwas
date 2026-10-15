@@ -8,7 +8,10 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+	"unicode"
 
 	"github.com/Automaat/zakwas/internal/config"
 )
@@ -349,6 +352,19 @@ func TestParsePrefixRule(t *testing.T) {
 		{`prefix_rule(pattern=[], decision="allow")`, nil, "", "empty"},
 		{`prefix_rule(decision="allow")`, nil, "", "alternatives"},
 		{`prefix_rule(pattern=["x"], decision="maybe")`, []string{"x"}, "", "not one zakwas declares"},
+		{`prefix_rule(pattern=["ls"], justification="the decision is pending")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(pattern=["ls"], justification="decision pending, decision=\"forbidden\"")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(justification="pattern=[\"rm\"]", pattern=["ls"], decision="prompt")`, []string{"ls"}, "review", ""},
+		{`prefix_rule(pattern=["ls"], justification="decision=\"allow\"", decision="forbidden")`, []string{"ls"}, "deny", ""},
+		{`prefix_rule(pattern=["ls"], decision=allow)`, []string{"ls"}, "", "isn't written as"},
+		{`prefix_rule(pattern=["ls"], decision='allow')`, []string{"ls"}, "", "isn't written as"},
+		{`prefix_rule(pattern=["ls"], decision=("allow"))`, []string{"ls"}, "", "isn't written as"},
+		{`prefix_rule(pattern=["ls"], justification="open (", decision="allow")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(pattern=["ls"], decision_x="allow")`, nil, "", "doesn't know"},
+		{`prefix_rule(pattern=["ls"], mydecision="forbidden")`, nil, "", "doesn't know"},
+		{`prefix_rule(pattern=["ls"], "allow")`, nil, "", "doesn't know"},
+		{`prefix_rule(pattern=["ls"], match=[["ls"]], not_match=[["rm"]], decision="allow")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(pattern=["ls"], justification="unclosed, decision="allow")`, nil, "", "spans lines"},
 	}
 	for _, tt := range tests {
 		words, decision, why := parsePrefixRule(tt.line)
@@ -518,6 +534,31 @@ func TestLooksSecret(t *testing.T) {
 		{"foo", "123e4567-e89b-12d3-a456-426614174000"},
 		{"-e", "DB_PASS=VALUE"},
 		{"foo", "PATTOKEN=VALUE"},
+		{"--apiKey", "VALUE"},
+		{"-e", "DBPASS=VALUE"},
+		{"--dbpass", "VALUE"},
+		{"-e", "MYSQLPWD=VALUE"},
+		{"-e", "GITHUBPAT=VALUE"},
+		{"-e", "HMACKEY=VALUE"},
+		{"--deploykey", "VALUE"},
+		{"--passcode", "VALUE"},
+		{"--passkey", "VALUE"},
+		{"--oauth", "VALUE"},
+		{"-e", "KEY1=VALUE"},
+		{"-e", "TOKEN2=VALUE"},
+		{"--password2", "VALUE"},
+		{"--key1", "VALUE"},
+		{"--tokens", "VALUE"},
+		{"--keys", "VALUE"},
+		{"--secret-id", "VALUE"},
+		{"-e", "VAULT_SECRET_ID=VALUE"},
+		{"--secretid", "VALUE"},
+		{"--accesstoken", "VALUE"},
+		{"--auth-token", "VALUE"},
+		{"--client_secret=VALUE"},
+		{"-H", "X-Api-Key: VALUE"},
+		{"postgresql://user:hunter2@localhost/db"},
+		{"--header", "Authorization: Bearer VALUE"},
 	}
 	for _, words := range secret {
 		if !looksSecret(words) {
@@ -544,11 +585,180 @@ func TestLooksSecret(t *testing.T) {
 		{"/usr/local/bin/some-tool", "--flag"},
 		{"docker", "run", "--rm", "-it", "alpine"},
 		{"cargo", "test", "--workspace"},
+		{"npx", "task-tools"},
+		{"disk-usage"},
+		{"risk-marketplace"},
+		{"@scope/Task-tools", "TASK-TOOLS"},
+		{"--max-tokens", "1000"},
+		{"--max-tokens=1000"},
+		{"--tokenizer", "x"},
+		{"--password-file", "/etc/p"},
+		{"--password-file=/etc/p"},
+		{"--key-file", "/x"},
+		{"--keyfile", "/x"},
+		{"--key-size", "4096"},
+		{"--keyboard", "us"},
+		{"--author", "bob"},
+		{"--passthrough", "x"},
+		{"-H", "Content-Type: application/json"},
+		{"bypass", "x"},
+		{"auth-service", "start"},
+		{"MAX_TOKENS=1000"},
+		{"--token-id", "x"},
+		{"--monkey", "x"},
+		{"--compat", "x"},
+		{"--tokenize", "x"},
+		{"--key-name", "x"},
 	}
 	for _, words := range plain {
 		if looksSecret(words) {
 			t.Errorf("%q is refused", words)
 		}
+	}
+}
+
+type nameForm struct {
+	name  string
+	words []string
+}
+
+func nameForms(name string) []nameForm {
+	upper := strings.ToUpper(name)
+	return []nameForm{
+		{name, []string{"--" + name, "VALUE"}},
+		{name, []string{"--" + name + "=VALUE"}},
+		{name, []string{"-e", name + "=VALUE"}},
+		{upper, []string{"-e", upper + "=VALUE"}},
+		{name, []string{name, "VALUE"}},
+		{name, []string{"-H", name + ": VALUE"}},
+		{name, []string{"--" + name + ":VALUE"}},
+		{name, []string{"/" + name + ":VALUE"}},
+		{name, []string{"-" + name, "VALUE"}},
+	}
+}
+
+func TestPlainNamesAreTheOnlyNamesNotScreened(t *testing.T) {
+	plain := []string{
+		"max-tokens", "MAX_TOKENS", "tokens-limit", "tokenizer", "tokenize", "keyboard", "keyword", "author", "authors",
+		"pattern", "patch", "monkey", "compat", "bypass", "passthrough", "compass", "password-file", "password_file",
+		"PASSWORD.FILE", "key-file", "keyfile", "passwordfile", "key-id", "token-id", "token-path", "key-size",
+		"secret-path", "secret-name", "cookie-ttl", "api-key-file", "auth-token-url",
+	}
+	for _, name := range plain {
+		if !plainName(name) || !plainName("--"+name) {
+			t.Errorf("%q isn't a plain name", name)
+		}
+		for _, f := range nameForms(name)[:3] {
+			if looksSecret(f.words) {
+				t.Errorf("%q is refused", f.words)
+			}
+		}
+	}
+	credential := []string{
+		"credit-card", "credit_card_number", "credit", "DBPwData", "toKen", "secret-id", "secretid",
+		"SECRET_ID", "keyfile-password", "key-file-password", "keyid-secret", "tokenx", "tokenfile", "passwordvalue",
+		"secretvalue", "SECRETKEYBASE", "dbpasses", "max-tokens-x", "x-max-tokens", "tokens", "token", "keys", "key1",
+		"password-file-value", "password-file-password", "my-ssh-key-file", "db-password-file", "tokenId", "oauth",
+	}
+	for _, name := range credential {
+		if plainName(name) {
+			t.Errorf("%q is a plain name", name)
+		}
+		for _, f := range nameForms(name)[:3] {
+			if !looksSecret(f.words) {
+				t.Errorf("%q isn't recognized", f.words)
+			}
+		}
+	}
+}
+
+func caseVariants(name string) []string {
+	var alt, toggled []rune
+	for i, r := range name {
+		if i%2 == 0 {
+			toggled = append(toggled, unicode.ToUpper(r))
+		} else {
+			toggled = append(toggled, r)
+		}
+		alt = append(alt, r)
+	}
+	long := strings.ReplaceAll(name, "s", "\u017f")
+	title := strings.ToUpper(name[:1]) + name[1:]
+	return []string{name, strings.ToUpper(name), title, string(toggled), long, strings.ToLower(string(alt))}
+}
+
+func TestNoNameIsScreenedLessThanOnMainExceptThePlainNames(t *testing.T) {
+	roots := []string{
+		"pass", "password", "pw", "secret", "token", "tokens", "key", "apikey", "credentials", "auth", "pat", "credit",
+		"author", "tokenizer",
+	}
+	suffixes := []string{
+		"", "value", "b64", "x", "file", "File", "id", "name", "path", "size", "Pw", "password", "key",
+	}
+	prefixes := []string{"", "DB", "api"}
+	loosened := map[string]bool{}
+	checked := 0
+	for _, root := range roots {
+		for _, suffix := range suffixes {
+			for _, prefix := range prefixes {
+				for _, sep := range []string{"", "-", "_", "."} {
+					parts := []string{}
+					if prefix != "" {
+						parts = append(parts, prefix)
+					}
+					parts = append(parts, root)
+					if suffix != "" {
+						parts = append(parts, suffix)
+					}
+					for _, name := range caseVariants(strings.Join(parts, sep)) {
+						for _, f := range nameForms(name) {
+							checked++
+							if refLooksSecret(f.words) && !looksSecret(f.words) {
+								loosened[strings.ToLower(strings.NewReplacer("_", "-", ".", "-").Replace(f.name))] = true
+								if !plainName(f.name) {
+									t.Errorf("%q is screened on main and not here", f.words)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	for name := range loosened {
+		if !plainNames[name] {
+			t.Errorf("%q is loosened and not on the list", name)
+		}
+	}
+	if len(loosened) < 20 || checked < 20000 {
+		t.Errorf("the generator is too small: %d names loosened, %d cases", len(loosened), checked)
+	}
+}
+
+func TestCaptureFailsCodexScanOnASpecialRulesFile(t *testing.T) {
+	m, fake := newCodexModule(t, config.Agents{})
+	rules := filepath.Join(m.CodexHome, "rules", "default.rules")
+	if err := os.MkdirAll(filepath.Dir(rules), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(rules, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(m.CodexHome, "config.toml"), "")
+	fake.OnOK(codexMarketList, `{"marketplaces":[]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.Capture(context.Background())
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "codex:") || !strings.Contains(err.Error(), "not a regular file") {
+			t.Errorf("error = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("capture blocks on a FIFO")
 	}
 }
 

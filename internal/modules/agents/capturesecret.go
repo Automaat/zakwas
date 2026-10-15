@@ -64,7 +64,7 @@ func looksSecret(words []string) bool {
 		if tokenLike(t) || shortPass.MatchString(t) || strings.Contains(strings.ToLower(t), "authorization") {
 			return true
 		}
-		if m := assignment.FindStringSubmatch(t); m != nil && m[2] != "" && credName.MatchString(m[1]) && !strings.EqualFold(m[1], "path") {
+		if m := assignment.FindStringSubmatch(t); m != nil && m[2] != "" && credName.MatchString(m[1]) && !strings.EqualFold(m[1], "path") && !plainName(m[1]) {
 			return true
 		}
 		switch {
@@ -74,15 +74,56 @@ func looksSecret(words []string) bool {
 			return true
 		case (t == "-H" || t == "--header" || t == "--headers") && credName.MatchString(next):
 			return true
-		case strings.HasPrefix(t, "-") && !strings.Contains(t, "=") && credName.MatchString(t) && !strings.HasSuffix(t, "-path") && next != "" && !strings.HasPrefix(next, "-"):
+		case strings.HasPrefix(t, "-") && !strings.Contains(t, "=") && credName.MatchString(t) && !strings.HasSuffix(t, "-path") && !plainName(t) && next != "" && !strings.HasPrefix(next, "-"):
 			return true
-		case !strings.HasPrefix(t, "-") && bareName.MatchString(t) && next != "" && !strings.HasPrefix(next, "-") && t != "auth":
+		case !strings.HasPrefix(t, "-") && bareName.MatchString(t) && !plainName(t) && next != "" && !strings.HasPrefix(next, "-") && t != "auth":
 			return true
 		case strings.EqualFold(t, "login") && next != "" && !strings.HasPrefix(next, "-"):
 			return true
 		}
 	}
 	return false
+}
+
+var plainNames = buildPlainNames()
+
+func buildPlainNames() map[string]bool {
+	names := map[string]bool{}
+	for _, w := range []string{
+		"tokenizer", "tokenize", "tokenized", "tokenization", "keyboard", "keyword", "keymap", "keystroke",
+		"author", "authors", "authored", "pattern", "patch", "monkey", "compat", "bypass", "passthrough",
+		"passthru", "compass", "keyfile", "passwordfile",
+	} {
+		names[w] = true
+	}
+	for _, c := range []string{"max", "min", "num", "total", "budget", "context", "output", "input", "prompt", "thinking", "completion", "max-output", "max-input", "max-prompt", "max-completion", "max-thinking", "max-context"} {
+		names[c+"-tokens"] = true
+	}
+	for _, c := range []string{"limit", "count", "budget", "per-minute", "used"} {
+		names["tokens-"+c] = true
+	}
+	roots := []string{
+		"pass", "password", "passwd", "passphrase", "passcode", "pwd", "secret", "token", "key", "cred", "credential",
+		"auth", "bearer", "cookie", "pat", "api-key", "access-key", "secret-key", "private-key", "ssh-key", "signing-key",
+		"auth-token", "access-token",
+	}
+	for _, root := range roots {
+		for _, q := range []string{"file", "path", "dir", "name", "url", "uri", "env", "size", "length", "type", "limit", "count", "ttl", "timeout", "id"} {
+			if q != "id" || !strings.Contains(root, "secret") {
+				names[root+"-"+q] = true
+			}
+		}
+	}
+	return names
+}
+
+// plainName reports a flag or variable name that holds no credential though
+// it contains a credential word: it must equal, whole and with - _ or . as
+// separators, one of plainNames. Anything else, glued or camel-cased
+// included, keeps the substring screen.
+func plainName(name string) bool {
+	name = strings.TrimLeft(name, "-/$")
+	return plainNames[strings.ToLower(strings.NewReplacer("_", "-", ".", "-").Replace(name))]
 }
 
 // tokenLike reports a word that looks like a generated secret rather than a

@@ -494,6 +494,19 @@ func claudeBashPrefix(rule string) (string, string) {
 	return strings.Join(words, " "), ""
 }
 
+// readRulesFile reads the file a path or a symlink at it leads to, but not a
+// FIFO or device, which would block or never end.
+func readRulesFile(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("not a regular file")
+	}
+	return os.ReadFile(path)
+}
+
 var codexRuleDecisions = map[string]string{
 	"allow":     config.PermissionAllow,
 	"prompt":    config.PermissionReview,
@@ -505,7 +518,7 @@ var codexRuleDecisions = map[string]string{
 // The rules file zakwas writes is another file.
 func (m *Module) captureCodexRules() ([]Candidate, error) {
 	path := filepath.Join(m.codexBackend().home, "rules", "default.rules")
-	data, err := os.ReadFile(path)
+	data, err := readRulesFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("codex: %s: %w", m.Paths.Pretty(path), err)
 	}
@@ -541,11 +554,56 @@ func (m *Module) captureCodexRules() ([]Candidate, error) {
 }
 
 var (
-	ruleDecision = regexp.MustCompile(`decision\s*=\s*"([a-z]+)"`)
-	rulePattern  = regexp.MustCompile(`pattern\s*=\s*\[((?:[^\]"\[]|"(?:[^"\\]|\\.)*")*)\]`)
+	ruleDecision = regexp.MustCompile(`^"([a-z]+)"$`)
+	rulePattern  = regexp.MustCompile(`^\[((?:[^\]"\[]|"(?:[^"\\]|\\.)*")*)\]$`)
 	ruleString   = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
 	ruleEscape   = strings.NewReplacer(`\\`, `\`, `\"`, `"`)
 )
+
+var ruleKeys = map[string]bool{"pattern": true, "decision": true, "justification": true, "match": true, "not_match": true}
+
+// ruleArguments splits the arguments of a one-line prefix_rule into its
+// keyword values, so text inside a string, such as a justification, is never
+// read as an argument. It reports false for text that isn't balanced.
+func ruleArguments(line string) (map[string]string, bool) {
+	body := strings.TrimSuffix(strings.TrimPrefix(line, "prefix_rule("), ")")
+	args := map[string]string{}
+	var quote rune
+	depth, start := 0, 0
+	add := func(end int) {
+		key, value, _ := strings.Cut(body[start:end], "=")
+		if key = strings.TrimSpace(key); key != "" {
+			if _, seen := args[key]; !seen {
+				args[key] = strings.TrimSpace(value)
+			}
+		}
+		start = end + 1
+	}
+	for i := 0; i < len(body); i++ {
+		c := rune(body[i])
+		switch {
+		case quote != 0 && c == '\\':
+			i++
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '[' || c == '(' || c == '{':
+			depth++
+		case c == ']' || c == ')' || c == '}':
+			depth--
+		case c == ',' && depth == 0:
+			add(i)
+		}
+		if depth < 0 {
+			return nil, false
+		}
+	}
+	add(len(body))
+	return args, quote == 0 && depth == 0
+}
 
 // parsePrefixRule reads a one-line prefix_rule: the words of its pattern,
 // its decision as a zakwas decision. Its justification is not read: it is
@@ -556,7 +614,16 @@ func parsePrefixRule(line string) (words []string, decision, reason string) {
 	if !strings.HasSuffix(line, ")") {
 		return nil, "", "the rule spans lines, which capture can't read"
 	}
-	m := rulePattern.FindStringSubmatch(line)
+	args, ok := ruleArguments(line)
+	if !ok {
+		return nil, "", "the rule spans lines, which capture can't read"
+	}
+	for key := range args {
+		if !ruleKeys[key] {
+			return nil, "", "the rule has an argument capture doesn't know"
+		}
+	}
+	m := rulePattern.FindStringSubmatch(args["pattern"])
 	if m == nil {
 		return nil, "", "its pattern has alternatives or spans lines, which capture can't declare"
 	}
@@ -566,14 +633,16 @@ func parsePrefixRule(line string) (words []string, decision, reason string) {
 	if len(words) == 0 {
 		return nil, "", "its pattern is empty"
 	}
-	d := ruleDecision.FindStringSubmatch(line)
-	if d == nil && strings.Contains(line, "decision") {
-		return words, "", "its decision isn't written as decision=\"...\", which capture can't read"
-	}
-	if d == nil {
+	raw, hasDecision := args["decision"]
+	switch d := ruleDecision.FindStringSubmatch(raw); {
+	case !hasDecision:
 		decision = config.PermissionAllow
-	} else if decision = codexRuleDecisions[d[1]]; decision == "" {
-		return words, "", "its decision is not one zakwas declares"
+	case d == nil:
+		return words, "", "its decision isn't written as decision=\"...\", which capture can't read"
+	default:
+		if decision = codexRuleDecisions[d[1]]; decision == "" {
+			return words, "", "its decision is not one zakwas declares"
+		}
 	}
 	return words, decision, ""
 }
