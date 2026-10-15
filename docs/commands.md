@@ -170,6 +170,20 @@ After a yes it does what [`approve`](#approve) does: the same checks, files writ
 
 Only people should start this server with `--enable-apply`: the [guard](config.md#guard) denies the managed agents `zakwas mcp`, since an agent that ran it in a shell would be the client that answers the form.
 
+### Teach agents the flow
+
+The `zakwas` plugin in this repo's marketplace holds one skill. It tells an agent that zakwas manages agent config, `zakwas.yaml`, the Brewfile and the mise config, so it proposes changes (`zakwas_propose`, or `zakwas propose -json` without the MCP server) instead of editing them or running `apply`, and gives the user `zakwas approve ID` for a high-risk proposal. It works with or without the MCP server. Install it through `agents`:
+
+```yaml
+agents:
+  marketplaces:
+    zakwas: Automaat/zakwas
+  plugins:
+    - zakwas@zakwas
+```
+
+Claude Code and Codex install the plugin; opencode gets the skill linked. The plugin version is the zakwas release it was published with: the release workflow stops when `plugins/zakwas/.claude-plugin/plugin.json` differs from the tag. Pin the marketplace with `Automaat/zakwas#vX.Y.Z` to follow one release; the default branch can be ahead of the binary you run.
+
 ## init
 
 ```
