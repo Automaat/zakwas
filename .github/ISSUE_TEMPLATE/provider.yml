@@ -1,0 +1,42 @@
+name: Agent provider request
+description: Support for a coding agent zakwas does not manage yet
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Supported today: Claude Code, Codex, opencode, Gemini CLI and Copilot CLI ([docs/agents.md](https://github.com/Automaat/zakwas/blob/main/docs/agents.md#providers)). A provider needs files or a CLI zakwas can write to without clobbering the agent's own state, so the answers below decide what is possible.
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and version
+      description: "Name, version, and where its docs are."
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Where its configuration lives
+      description: "User-level config directory and file formats (JSON, TOML, Markdown), and whether the agent rewrites any of them itself."
+    validations:
+      required: true
+  - type: textarea
+    id: features
+    attributes:
+      label: What you want zakwas to manage
+      description: "Which of these the agent supports: plugins or marketplaces, MCP servers, global instructions, skills, hooks, permission rules, subagents or profiles. Give the config key or CLI command for each."
+    validations:
+      required: true
+  - type: textarea
+    id: cli
+    attributes:
+      label: CLI commands for plugins or MCP servers
+      description: "Commands that list, add and remove them, and whether the list command starts anything or needs a network."
+      render: text
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I can test a build against my setup
+        - label: I would like to write the provider (see CONTRIBUTING.md)

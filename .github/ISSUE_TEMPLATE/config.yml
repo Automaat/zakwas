@@ -3,3 +3,6 @@ contact_links:
   - name: Security vulnerability
     url: https://github.com/Automaat/zakwas/security/advisories/new
     about: Report privately, not as an issue.
+  - name: First-use problems
+    url: https://github.com/Automaat/zakwas/blob/main/docs/troubleshooting.md
+    about: Backups, immutable files, missing config, agent guard, how to stop managing a file.

@@ -20,7 +20,7 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `examples/` | example config repo; CI plans and applies it |
 | `schema/` | generated `zakwas.schema.json` (embedded for `zakwas schema`); generator in `internal/schemagen` |
 | `internal/selfupdate/` | release download + verification for `self-update` |
-| `docs/` | user docs: config reference, commands, examples, security |
+| `docs/` | user docs: config reference, commands, examples, agents guide, security, troubleshooting |
 | `.goreleaser.yaml` | darwin release binaries, published on `v*` tags |
 
 ## Commands
