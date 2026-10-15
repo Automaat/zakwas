@@ -30,6 +30,7 @@ These four read `zakwas.yaml` and share one set of flags.
 | `--json` | all four | machine-readable output: one plan document (`plan`, `check`) or JSON lines events (`apply`, `upgrade`) |
 | `--no-color` | all four | disable colors (also `NO_COLOR`, or stdout not a terminal) |
 | `-y` | `apply`, `upgrade` | apply without asking for confirmation |
+| `--no-wait` | `apply`, `upgrade` | exit 1 at once when another zakwas run holds the lock, instead of waiting for it |
 | `-out FILE` | `plan` | also save the plan to FILE, for `apply -plan` |
 | `-plan FILE` | `apply` | apply a saved plan if the machine still matches it, without prompting; can't be combined with `--only` |
 
@@ -54,6 +55,8 @@ zakwas apply
 zakwas apply -y
 zakwas apply -plan plan.json
 ```
+
+Only one `apply` or `upgrade` runs at a time, so two of them never overwrite each other's state. A second one waits, printing the command and pid it waits for, then plans against what the first left behind; with `--no-wait` it exits 1 instead. The lock is held from before the plan until the run ends, including while the confirmation prompt is open. It is an `flock` on `~/.local/state/zakwas/lock`, so a crashed or killed run releases it and the next run needs no cleanup. `plan` and `check` take no lock and can run at any time: zakwas replaces its state files atomically, so they never read a half-written one.
 
 ### upgrade
 

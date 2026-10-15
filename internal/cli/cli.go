@@ -18,6 +18,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/lock"
 	"github.com/Automaat/zakwas/internal/modules/agents"
 	"github.com/Automaat/zakwas/internal/modules/brew"
 	"github.com/Automaat/zakwas/internal/modules/commands"
@@ -135,7 +136,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		fs.Usage()
 		return ExitUsage
 	}
-	if msg := flagConflict(cmd, o.asJSON, o.yes, o.outFile, o.planFile, o.only); msg != "" {
+	if msg := flagConflict(cmd, o); msg != "" {
 		errOut.print("zakwas: " + msg + "\n")
 		return ExitUsage
 	}
@@ -162,6 +163,14 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 	if o.asJSON {
 		toolOutputToStderr(env)
+	}
+
+	if cmd == "apply" || cmd == "upgrade" {
+		held, code, ok := acquireLock(ctx, env, cmd, o.noWait, errOut)
+		if !ok {
+			return code
+		}
+		defer func() { _ = held.Release() }()
 	}
 
 	if cmd == "upgrade" {
@@ -273,6 +282,26 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	return ExitOK
 }
 
+// acquireLock serializes the commands that change the system: a second one
+// waits for the first, so it plans against what the first left behind. plan
+// and check take no lock; state files are replaced atomically, so they never
+// read a half-written one.
+func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, int, bool) {
+	held, err := lock.Acquire(ctx, env.Home, "zakwas "+cmd, lock.Options{
+		NoWait: noWait,
+		OnWait: func(h lock.Holder) {
+			errOut.print("zakwas: waiting for " + h.String() + " to finish\n")
+		},
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			errOut.fail(err)
+		}
+		return nil, ExitErr, false
+	}
+	return held, ExitOK, true
+}
+
 // refresh fetches new package and plugin versions for `zakwas upgrade`:
 // Homebrew's package list and the declared agent marketplaces, for the
 // selected modules. plan and apply never fetch.
@@ -310,6 +339,7 @@ func refresh(ctx context.Context, env Env, cfg *config.Config, mods []engine.Mod
 type options struct {
 	cfgPath, only, outFile, planFile string
 	yes, diff, noColor, asJSON       bool
+	noWait                           bool
 }
 
 // newFlags defines the flags of plan, apply, upgrade and check.
@@ -327,6 +357,7 @@ func newFlags(errOut io.Writer) (*flag.FlagSet, *options) {
 	fs.BoolVar(&o.diff, "diff", false, "show file content diffs and command scripts")
 	fs.BoolVar(&o.noColor, "no-color", false, "disable colors (also NO_COLOR)")
 	fs.BoolVar(&o.asJSON, "json", false, "machine-readable output: a plan document, or JSON lines events for apply")
+	fs.BoolVar(&o.noWait, "no-wait", false, "apply: exit 1 at once when another zakwas run holds the lock, instead of waiting for it")
 	fs.StringVar(&o.outFile, "out", "", "plan: also save the plan to this file, for apply -plan")
 	fs.StringVar(&o.planFile, "plan", "", "apply: apply this saved plan if the machine still matches it, without prompting")
 	return fs, &o
@@ -334,9 +365,12 @@ func newFlags(errOut io.Writer) (*flag.FlagSet, *options) {
 
 // flagConflict rejects flag combinations that would silently do the wrong
 // thing, e.g. a JSON consumer stuck at a confirmation prompt.
-func flagConflict(cmd string, asJSON, yes bool, outFile, planFile, only string) string {
+func flagConflict(cmd string, o *options) string {
 	apply := cmd == "apply" || cmd == "upgrade"
+	asJSON, yes, outFile, planFile, only := o.asJSON, o.yes, o.outFile, o.planFile, o.only
 	switch {
+	case o.noWait && !apply:
+		return "-no-wait only works with apply and upgrade"
 	case outFile != "" && cmd != "plan":
 		return "-out only works with plan"
 	case planFile != "" && cmd != "apply":

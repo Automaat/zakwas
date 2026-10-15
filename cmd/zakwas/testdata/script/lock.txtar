@@ -1,0 +1,32 @@
+exec zakwas apply -y &first&
+exec sh -c 'until [ -e home/started ]; do sleep 0.1; done'
+
+! zakwas apply -y --no-wait
+stderr 'another run is in progress: "zakwas apply" \(pid \d+\); not waiting'
+! stdout .
+
+zakwas plan
+stdout 'slow'
+! zakwas check
+stdout 'slow'
+
+zakwas apply -y
+stderr 'waiting for "zakwas apply" \(pid \d+\) to finish'
+stdout 'up to date'
+
+wait first
+exec cat home/log
+cmp stdout expected-log
+zakwas check
+
+-- zakwas.yaml --
+commands:
+  - name: slow
+    check: test -e done
+    run: |
+      touch started
+      sleep 2
+      echo ran >> log
+      touch done
+-- expected-log --
+ran
