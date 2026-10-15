@@ -57,6 +57,7 @@ func run() int {
 		Stderr:  os.Stderr,
 		Home:    home,
 		Cwd:     cwd,
+		UID:     os.Getuid(),
 		Runner:  runner.NewExec(),
 		PAMFile: os.Getenv("ZAKWAS_PAM_FILE"),
 

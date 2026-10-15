@@ -141,18 +141,17 @@ Commands stop at the first failure, so put ones that need manual action (importi
 
 ## Daily drift notification
 
-A launchd agent that runs `zakwas check` every morning and notifies you when the Mac drifted. launchd starts agents from `/` with a minimal `PATH`, so the script sets both.
+A launchd agent that runs `zakwas check` every weekday morning and notifies you when the Mac drifted. launchd starts agents from `/` with a minimal `PATH`, so the job sets `env.PATH` and the script sets the config location.
 
 ```yaml
 files:
   - {src: dotfiles/bin/zakwas-check-notify, dst: ~/.local/bin/zakwas-check-notify}
-templates:
-  files:
-    - {src: dotfiles/launchd/dev.zakwas.check.plist.tmpl, dst: ~/Library/LaunchAgents/dev.zakwas.check.plist}
-commands:
-  - name: drift check agent
-    check: launchctl print "gui/$(id -u)/dev.zakwas.check" > /dev/null 2>&1
-    run: launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/dev.zakwas.check.plist"
+launchd:
+  - label: dev.example.zakwas-check
+    program: [~/.local/bin/zakwas-check-notify]
+    schedule: {at: "10:00", weekdays: [mon, tue, wed, thu, fri]}
+    env: {PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+    log: ~/Library/Logs/zakwas-check.log
 ```
 
 `dotfiles/bin/zakwas-check-notify` (adjust `ZAKWAS_CONFIG` to your repo; drop `mise exec --` if zakwas comes from Homebrew or `~/.local/bin`):
@@ -173,33 +172,7 @@ esac
 osascript -e "display notification \"$message\" with title \"zakwas\""
 ```
 
-`dotfiles/launchd/dev.zakwas.check.plist.tmpl` (a template, so `{{.Home}}` becomes your home directory):
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>dev.zakwas.check</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>{{.Home}}/.local/bin/zakwas-check-notify</string>
-	</array>
-	<key>StartCalendarInterval</key>
-	<dict>
-		<key>Hour</key>
-		<integer>10</integer>
-		<key>Minute</key>
-		<integer>0</integer>
-	</dict>
-	<key>StandardErrorPath</key>
-	<string>{{.Home}}/Library/Logs/zakwas-check.log</string>
-</dict>
-</plist>
-```
-
-After changing the plist, `launchctl bootout "gui/$(id -u)/dev.zakwas.check"` so the `commands` entry loads the new version on the next apply. A complete working setup is in [environment-as-code](https://github.com/Automaat/environment-as-code).
+`zakwas apply` writes `~/Library/LaunchAgents/dev.example.zakwas-check.plist` and loads it. Editing the schedule reloads the job on the next apply, and deleting the `launchd` entry unloads it and removes the plist. See [`launchd`](config.md#launchd) for every key.
 
 ## CI: review before apply
 
