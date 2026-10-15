@@ -359,6 +359,10 @@ func TestParsePrefixRule(t *testing.T) {
 		{`prefix_rule(pattern=["ls"], decision='allow')`, []string{"ls"}, "", "isn't written as"},
 		{`prefix_rule(pattern=["ls"], decision=("allow"))`, []string{"ls"}, "", "isn't written as"},
 		{`prefix_rule(pattern=["ls"], justification="open (", decision="allow")`, []string{"ls"}, "allow", ""},
+		{`prefix_rule(pattern=["ls"], decision_x="allow")`, nil, "", "doesn't know"},
+		{`prefix_rule(pattern=["ls"], mydecision="forbidden")`, nil, "", "doesn't know"},
+		{`prefix_rule(pattern=["ls"], "allow")`, nil, "", "doesn't know"},
+		{`prefix_rule(pattern=["ls"], match=[["ls"]], not_match=[["rm"]], decision="allow")`, []string{"ls"}, "allow", ""},
 		{`prefix_rule(pattern=["ls"], justification="unclosed, decision="allow")`, nil, "", "spans lines"},
 	}
 	for _, tt := range tests {
@@ -609,6 +613,97 @@ func TestLooksSecret(t *testing.T) {
 	for _, words := range plain {
 		if looksSecret(words) {
 			t.Errorf("%q is refused", words)
+		}
+	}
+}
+
+func nameForms(name string) [][]string {
+	return [][]string{
+		{"--" + name, "VALUE"},
+		{"--" + name + "=VALUE"},
+		{"-e", name + "=VALUE"},
+		{"-e", strings.ToUpper(name) + "=VALUE"},
+		{"export", name, "VALUE"},
+		{"-H", name + ": VALUE"},
+	}
+}
+
+func TestCredentialNames(t *testing.T) {
+	secret := []string{
+		"DBPASS", "HMACKEY", "KEY1", "TOKEN2", "keys", "oauth", "secret-id", "pass", "passphrase", "tokens",
+		"passwordvalue", "secretvalue", "tokenvalue", "keyvalue", "apikeyvalue", "secretkeybase", "SECRETKEYBASE",
+		"secretdata", "secretstring", "tokenstring", "privatekeydata", "authheader", "credentialsjson",
+		"passwordb64", "tokenb64", "secretjson", "authtoken", "apikey", "password", "tokenx", "dbpasses",
+		"accesstoken", "api_key", "access-key", "auth", "key", "secret-key", "SECRET_ID",
+		"keyfile-password", "keyfile-passphrase", "passwordfile-password", "keyid-passphrase", "keyid-secret",
+		"tokenfile-key", "authid-token", "key-file-password", "password-file-value", "secretid", "client-secret-id",
+		"keyfilevalue", "tokenxfile", "password-file-key", "keyboardkey", "mypassword", "x-api-key",
+	}
+	plain := []string{
+		"max-tokens", "tokenizer", "password-file", "keyboard", "author", "key-id", "token-id", "key-file",
+		"token-path", "keyfile", "passwordfile", "key-size", "secret-name", "tokenid", "cookie-jar",
+		"max-tokens-per-minute", "pattern", "bypass", "passthrough", "monkey", "compat",
+	}
+	for _, name := range secret {
+		for _, words := range nameForms(name) {
+			if words[0] == "export" || name == "tokens" && words[0] == "-H" {
+				continue
+			}
+			if !looksSecret(words) {
+				t.Errorf("%q isn't recognized", words)
+			}
+		}
+	}
+	for _, name := range plain {
+		for _, words := range nameForms(name) {
+			if words[0] == "export" || words[0] == "-H" {
+				continue
+			}
+			if looksSecret(words) {
+				t.Errorf("%q is refused", words)
+			}
+		}
+	}
+}
+
+func TestCredentialNamesWithGluedWordsAreSkippedUnlessTheyAreOnTheBenignList(t *testing.T) {
+	roots := []string{
+		"pass", "password", "passwd", "passphrase", "passcode", "pwd", "secret", "token", "key", "apikey", "cred",
+		"credential", "auth", "bearer", "cookie", "pat", "authtoken", "accesskey", "privatekey", "secretkey",
+		"clientsecret", "dbpass", "oauth", "accesstoken",
+	}
+	suffixes := []string{
+		"", "value", "data", "string", "json", "b64", "s", "x", "base", "header", "file", "id", "name", "path",
+		"url", "size", "type", "1", "2", "val", "text", "raw", "env", "dir", "length", "bits", "ttl", "jar",
+		"format", "hash", "pem", "store", "manager", "var",
+	}
+	plainRoots := map[string]bool{
+		"pass": true, "password": true, "passwd": true, "passphrase": true, "passcode": true, "pwd": true,
+		"secret": true, "token": true, "key": true, "apikey": true, "cred": true, "credential": true, "auth": true,
+		"bearer": true, "cookie": true, "pat": true, "authtoken": true, "accesskey": true, "privatekey": true,
+		"secretkey": true, "accesstoken": true,
+	}
+	qualifiers := map[string]bool{
+		"file": true, "id": true, "name": true, "path": true, "url": true, "size": true, "type": true, "env": true,
+		"dir": true, "length": true, "bits": true, "ttl": true, "jar": true, "format": true,
+	}
+	for _, root := range roots {
+		for _, suffix := range suffixes {
+			for _, sep := range []string{"", "-", "_"} {
+				name := root + sep + suffix
+				if root == "pat" && strings.HasPrefix(suffix, "h") {
+					continue
+				}
+				benign := plainRoots[root] && qualifiers[suffix] && !(strings.Contains(root, "secret") && suffix == "id")
+				for _, words := range nameForms(name) {
+					if words[0] == "export" || words[0] == "-H" {
+						continue
+					}
+					if got := looksSecret(words); got == benign {
+						t.Errorf("%q: skipped = %v, benign list says %v", words, got, benign)
+					}
+				}
+			}
 		}
 	}
 }

@@ -560,6 +560,8 @@ var (
 	ruleEscape   = strings.NewReplacer(`\\`, `\`, `\"`, `"`)
 )
 
+var ruleKeys = map[string]bool{"pattern": true, "decision": true, "justification": true, "match": true, "not_match": true}
+
 // ruleArguments splits the arguments of a one-line prefix_rule into its
 // keyword values, so text inside a string, such as a justification, is never
 // read as an argument. It reports false for text that isn't balanced.
@@ -569,8 +571,9 @@ func ruleArguments(line string) (map[string]string, bool) {
 	var quote rune
 	depth, start := 0, 0
 	add := func(end int) {
-		if key, value, ok := strings.Cut(body[start:end], "="); ok {
-			if key = strings.TrimSpace(key); args[key] == "" {
+		key, value, _ := strings.Cut(body[start:end], "=")
+		if key = strings.TrimSpace(key); key != "" {
+			if _, seen := args[key]; !seen {
 				args[key] = strings.TrimSpace(value)
 			}
 		}
@@ -614,6 +617,11 @@ func parsePrefixRule(line string) (words []string, decision, reason string) {
 	args, ok := ruleArguments(line)
 	if !ok {
 		return nil, "", "the rule spans lines, which capture can't read"
+	}
+	for key := range args {
+		if !ruleKeys[key] {
+			return nil, "", "the rule has an argument capture doesn't know"
+		}
 	}
 	m := rulePattern.FindStringSubmatch(args["pattern"])
 	if m == nil {
