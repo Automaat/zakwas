@@ -1,6 +1,6 @@
 ---
 name: zakwas
-description: Use when the user wants to add or remove an agent plugin, permission rule, MCP server, Homebrew package or mise tool pin, or when you are about to edit agent config (~/.claude, ~/.codex, ~/.config/opencode, ~/.agents), zakwas.yaml, a Brewfile or a mise config. zakwas manages these files; change them by proposing, never by editing.
+description: Use when the user wants to add or remove an agent plugin, permission rule, MCP server, Homebrew package or mise tool pin, or when you are about to edit agent config (~/.claude, ~/.codex, ~/.config/opencode, ~/.agents, ~/.gemini, ~/.copilot), zakwas.yaml, a Brewfile or a mise config. zakwas manages these files; change them by proposing, never by editing.
 ---
 
 # zakwas
@@ -9,7 +9,7 @@ zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent set
 
 ## Never
 
-- Edit agent config: `~/.claude/settings.json`, `~/.claude.json`, `~/.codex/config.toml`, `~/.codex/rules/`, `~/.config/opencode/opencode.json`, `~/.agents/`.
+- Edit agent config: `~/.claude/settings.json`, `~/.claude.json`, `~/.codex/config.toml`, `~/.codex/rules/`, `~/.config/opencode/opencode.json`, `~/.agents/`, `~/.gemini/`, `~/.copilot/`.
 - Edit `zakwas.yaml`, the Brewfile or the mise config in the config repo.
 - Run `zakwas apply`, `upgrade`, `approve`, `self-update` or `mcp`. The guard denies them, and a workaround (`sh -c`, a script, another tool) defeats the point of the approval.
 - Run `claude plugin install`, `codex plugin add`, `brew install`, `mise use` or similar to get the same result outside zakwas.
