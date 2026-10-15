@@ -149,6 +149,7 @@ var agentPermissionsCall = regexp.MustCompile("agentPermissions\\s+[\"`]opencode
 // what each profile asks of a provider that can't express it.
 func (m *Module) Warnings(context.Context) []string {
 	out := append(m.profileWarnings(), m.opencodePromptWarnings()...)
+	out = append(out, m.geminiWarnings()...)
 	out = append(out, m.copilotWarnings()...)
 	if !m.Guard {
 		return out

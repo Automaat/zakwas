@@ -390,12 +390,13 @@
               "claude",
               "codex",
               "opencode",
+              "gemini",
               "copilot"
             ]
           },
           "minItems": 1,
           "uniqueItems": true,
-          "description": "Providers zakwas manages: claude, codex, opencode, copilot. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex and copilot are converged only when named here or in an entry's 'providers'. A provider whose CLI is missing fails its plan; the others still converge. Default: claude, codex and opencode, with codex and copilot opt-in.",
+          "description": "Providers zakwas manages: claude, codex, opencode, gemini, copilot. Marketplaces target these unless they set their own 'providers'; prune only touches these. codex, gemini and copilot are converged only when named here or in an entry's 'providers'; gemini has no plugin marketplaces, so only its instructions, MCP servers, skills, hooks, permissions and profiles are converged. A provider whose CLI is missing fails its plan; the others still converge. Default: claude, codex and opencode, with codex, gemini and copilot opt-in.",
           "type": [
             "array",
             "null"
@@ -508,7 +509,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Global instructions: one file in the config repo, or a list joined in order, each relative to the directory holding zakwas.yaml (or absolute). Every file is a template that sees '{{ .Provider }}' (claude, codex, opencode, copilot or shared), '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Each managed provider gets its own rendered, protected copy: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named), copilot ${COPILOT_HOME:-~/.copilot}/instructions/zakwas.instructions.md (only when copilot is named, with 'applyTo: \"**\"' added). Claude keeps its '@path' imports, the others get them inlined; a missing import fails the plan, as does a copy over the provider's size limit (codex: 32768 bytes). A file already there is backed up, a link zakwas made is replaced; copies of providers no longer managed are removed.",
+          "description": "Global instructions: one file in the config repo, or a list joined in order, each relative to the directory holding zakwas.yaml (or absolute). Every file is a template that sees '{{ .Provider }}' (claude, codex, opencode, gemini, copilot or shared), '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Each managed provider gets its own rendered, protected copy: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named), gemini the context file of its zakwas extension, ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/GEMINI.md (only when gemini is named; ~/.gemini/GEMINI.md is never written), copilot ${COPILOT_HOME:-~/.copilot}/instructions/zakwas.instructions.md (only when copilot is named, with 'applyTo: \"**\"' added). Claude keeps its '@path' imports, the others get them inlined; a missing import fails the plan, as does a copy over the provider's size limit (codex: 32768 bytes). A file already there is backed up, a link zakwas made is replaced; copies of providers no longer managed are removed.",
           "type": [
             "string",
             "array",
@@ -558,12 +559,13 @@
                         "claude",
                         "codex",
                         "opencode",
+                        "gemini",
                         "copilot"
                       ]
                     },
                     "minItems": 1,
                     "uniqueItems": true,
-                    "description": "Providers for this hook; must be in agents.providers. Default: agents.providers, with Codex and Copilot opt-in as for plugins.",
+                    "description": "Providers for this hook; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins.",
                     "type": [
                       "array",
                       "null"
@@ -608,12 +610,13 @@
                         "claude",
                         "codex",
                         "opencode",
+                        "gemini",
                         "copilot"
                       ]
                     },
                     "minItems": 1,
                     "uniqueItems": true,
-                    "description": "Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex and Copilot opt-in as for plugins.",
+                    "description": "Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins.",
                     "type": [
                       "array",
                       "null"
@@ -622,7 +625,7 @@
                   "justification": {
                     "minLength": 1,
                     "pattern": "\\S",
-                    "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it.",
+                    "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Gemini CLI shows it for deny rules. Other providers ignore it.",
                     "type": [
                       "string",
                       "null"
@@ -639,7 +642,7 @@
                   "object"
                 ]
               },
-              "description": "Commands the agents run without asking: Claude Code permissions.allow, Codex decision allow (runs outside the sandbox without approval), opencode allow.",
+              "description": "Commands the agents run without asking: Claude Code permissions.allow, Codex decision allow (runs outside the sandbox without approval), Gemini CLI decision allow, opencode allow.",
               "type": [
                 "array",
                 "null"
@@ -660,12 +663,13 @@
                         "claude",
                         "codex",
                         "opencode",
+                        "gemini",
                         "copilot"
                       ]
                     },
                     "minItems": 1,
                     "uniqueItems": true,
-                    "description": "Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex and Copilot opt-in as for plugins.",
+                    "description": "Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins.",
                     "type": [
                       "array",
                       "null"
@@ -674,7 +678,7 @@
                   "justification": {
                     "minLength": 1,
                     "pattern": "\\S",
-                    "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it.",
+                    "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Gemini CLI shows it for deny rules. Other providers ignore it.",
                     "type": [
                       "string",
                       "null"
@@ -691,7 +695,7 @@
                   "object"
                 ]
               },
-              "description": "Commands that need a review before they run: Codex decision prompt, opencode ask. Not written for Claude Code, whose auto mode already reviews every command it doesn't allow.",
+              "description": "Commands that need a review before they run: Codex decision prompt, Gemini CLI decision ask_user, opencode ask. Not written for Claude Code, whose auto mode already reviews every command it doesn't allow.",
               "type": [
                 "array",
                 "null"
@@ -712,12 +716,13 @@
                         "claude",
                         "codex",
                         "opencode",
+                        "gemini",
                         "copilot"
                       ]
                     },
                     "minItems": 1,
                     "uniqueItems": true,
-                    "description": "Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex and Copilot opt-in as for plugins.",
+                    "description": "Providers for this entry; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins.",
                     "type": [
                       "array",
                       "null"
@@ -726,7 +731,7 @@
                   "justification": {
                     "minLength": 1,
                     "pattern": "\\S",
-                    "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Other providers ignore it.",
+                    "description": "One-line reason Codex shows the agent when the rule prompts for or forbids a command, e.g. 'use git push --force-with-lease'. Gemini CLI shows it for deny rules. Other providers ignore it.",
                     "type": [
                       "string",
                       "null"
@@ -743,7 +748,7 @@
                   "object"
                 ]
               },
-              "description": "Commands the agents must never run: Claude Code permissions.deny, Codex decision forbidden, opencode deny.",
+              "description": "Commands the agents must never run: Claude Code permissions.deny, Codex decision forbidden, Gemini CLI decision deny, opencode deny.",
               "type": [
                 "array",
                 "null"
@@ -751,7 +756,7 @@
             }
           },
           "additionalProperties": false,
-          "description": "Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function. Copilot CLI has no user-level shell rules (only root-owned managed settings), so the plan reports them as unsupported for copilot.",
+          "description": "Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file and a Gemini CLI user policy file, and to opencode through the agentPermissions template function. Copilot CLI has no user-level shell rules (only root-owned managed settings), so the plan reports them as unsupported for copilot.",
           "type": [
             "object",
             "null"
@@ -798,7 +803,7 @@
                   "type": "string"
                 },
                 "uniqueItems": true,
-                "description": "Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, opencode environment NAME={env:NAME}.",
+                "description": "Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env or headers hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so.",
                 "type": [
                   "array",
                   "null"
@@ -865,12 +870,13 @@
                     "claude",
                     "codex",
                     "opencode",
+                    "gemini",
                     "copilot"
                   ]
                 },
                 "minItems": 1,
                 "uniqueItems": true,
-                "description": "Providers to register this server with; must be in agents.providers. Default: agents.providers, with Codex and Copilot opt-in as for plugins.",
+                "description": "Providers to register this server with; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins.",
                 "type": [
                   "array",
                   "null"
@@ -880,7 +886,7 @@
             "additionalProperties": false,
             "type": "object"
           },
-          "description": "MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json), Codex (config.toml, edited in place) and Copilot CLI (${COPILOT_HOME:-~/.copilot}/mcp-config.json, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added.",
+          "description": "MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json), Codex (config.toml, edited in place) and Copilot CLI (${COPILOT_HOME:-~/.copilot}/mcp-config.json, edited in place), in the zakwas extension of Gemini CLI, and in opencode through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added.",
           "type": [
             "object",
             "null"
@@ -1000,12 +1006,13 @@
                     "claude",
                     "codex",
                     "opencode",
+                    "gemini",
                     "copilot"
                   ]
                 },
                 "minItems": 1,
                 "uniqueItems": true,
-                "description": "Providers to render the profile for; must be in agents.providers. Default: agents.providers, with Codex and Copilot opt-in as for plugins.",
+                "description": "Providers to render the profile for; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins.",
                 "type": [
                   "array",
                   "null"
@@ -1086,6 +1093,31 @@
                   "null"
                 ]
               },
+              "gemini": {
+                "properties": {
+                  "model": {
+                    "minLength": 1,
+                    "description": "Model for this provider, in its own spelling, e.g. 'sonnet' for Claude Code, 'gpt-5' for Codex, 'anthropic/claude-sonnet-4' for opencode.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "overrides": {
+                    "description": "Extra top-level frontmatter keys (Claude Code, opencode) or settings (Codex), written as is. Values are re-typed by YAML, so quote ones that must stay strings (dates, versions). A key zakwas sets from the profile's own fields is rejected.",
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Gemini CLI only: model and extra frontmatter of its subagent file, such as temperature or max_turns.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "copilot": {
                 "properties": {
                   "model": {
@@ -1118,7 +1150,7 @@
               "description"
             ]
           },
-          "description": "Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named) and a Copilot CLI agent file ${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md ('copilot --agent <name>', only when copilot is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered.",
+          "description": "Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named) a Gemini CLI subagent file ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md (delegate with '@<name>', only when gemini is named) and a Copilot CLI agent file ${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md ('copilot --agent <name>', only when copilot is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered.",
           "type": [
             "object",
             "null"
@@ -1155,12 +1187,13 @@
                     "claude",
                     "codex",
                     "opencode",
+                    "gemini",
                     "copilot"
                   ]
                 },
                 "minItems": 1,
                 "uniqueItems": true,
-                "description": "Providers to link this skill for; must be in agents.providers. Default: agents.providers, with Codex and Copilot opt-in as for plugins. Codex, opencode and Copilot share ~/.agents/skills.",
+                "description": "Providers to link this skill for; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins. Codex, opencode and Copilot share ~/.agents/skills.",
                 "type": [
                   "array",
                   "null"
@@ -1177,7 +1210,7 @@
               "object"
             ]
           },
-          "description": "Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex and opencode, and for Copilot CLI too unless COPILOT_HOME is set, which then reads ${COPILOT_HOME}/skills only. Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them.",
+          "description": "Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex, opencode and Gemini CLI (${GEMINI_CLI_HOME:-~}/.agents/skills when GEMINI_CLI_HOME is set), and for Copilot CLI too unless COPILOT_HOME is set, which then reads ${COPILOT_HOME}/skills only. Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them.",
           "type": [
             "array",
             "null"
@@ -1202,7 +1235,7 @@
           ]
         },
         "guard": {
-          "description": "Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected, such as Copilot CLI, which has no user-level deny rules and is covered only by the refusal. Default true; false removes the rules zakwas added.",
+          "description": "Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected, such as Copilot CLI, which has no user-level deny rules and is covered only by the refusal. Default true; false removes the rules zakwas added.",
           "default": true,
           "type": [
             "boolean",

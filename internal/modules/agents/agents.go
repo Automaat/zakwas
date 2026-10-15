@@ -1,5 +1,6 @@
 // Package agents converges coding-agent plugins and marketplaces per
-// provider. Claude Code, Codex, opencode and Copilot CLI have backends.
+// provider. Claude Code, Codex, opencode and Copilot CLI have backends; Gemini CLI, which
+// has no plugins, has the extension of gemini.go.
 package agents
 
 import (
@@ -19,8 +20,8 @@ import (
 
 // Module converges the agents section. ClaudeConfigDir is an absolute
 // $CLAUDE_CONFIG_DIR, or empty for Claude's default ~/.claude; CodexHome
-// likewise for $CODEX_HOME and ~/.codex, and CopilotHome for $COPILOT_HOME
-// and ~/.copilot.
+// likewise for $CODEX_HOME and ~/.codex, GeminiHome for $GEMINI_CLI_HOME and ~, and
+// CopilotHome for $COPILOT_HOME and ~/.copilot.
 type Module struct {
 	Agents          config.Agents
 	Paths           config.Paths
@@ -28,6 +29,7 @@ type Module struct {
 	ClaudeConfigDir string
 	CodexHome       string
 	CopilotHome     string
+	GeminiHome      string
 	// Guard is set when the zakwas.yaml has an agents section that leaves
 	// the guard on: the managed agents are then kept from applying the
 	// config, see config.Agents.Guard. TemplateSources are the absolute
@@ -44,6 +46,7 @@ type Module struct {
 	installer     *install.Installer
 	profiles      *install.Installer
 	hooks         *install.Installer
+	gemini        *install.Installer
 	klaudiushPath string
 }
 
@@ -153,6 +156,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	errs = append(errs, profileErr)
 	skills, skillFailed, skillErr := m.planSkills()
 	errs = append(errs, skillErr)
+	geminiChanges, geminiErr := m.planGemini()
 	var changes []engine.Change
 	var klaudiushChange *engine.Change
 	var klaudiushErr error
@@ -173,8 +177,12 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		if p == config.ProviderCodex {
 			providerSettingsErr = settingsErr
 		}
-		if err := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p], profileFailed[p], skillFailed[p], providerSettingsErr); err != nil {
-			errs = append(errs, err)
+		failure := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p], profileFailed[p], skillFailed[p], providerSettingsErr)
+		if p == config.ProviderGemini {
+			failure = errors.Join(failure, geminiErr)
+		}
+		if failure != nil {
+			errs = append(errs, failure)
 			delete(instructions, p)
 			delete(profiles, p)
 			delete(skills, p)
@@ -192,6 +200,10 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		delete(profiles, p)
 		changes = append(changes, skills[p]...)
 		delete(skills, p)
+		if p == config.ProviderGemini {
+			changes = append(changes, geminiChanges...)
+			continue
+		}
 		b, ok := backends[p]
 		if !ok {
 			continue

@@ -39,13 +39,16 @@ const orphanProfiles = "profiles"
 // profilePath is where a provider loads the profile from: Claude Code scans
 // its agents dir recursively, so zakwas keeps its files in a subdirectory of
 // their own; Codex reads <name>.config.toml from its home for --profile;
-// Copilot reads agents/<name>.agent.md; opencode loads agents/<name>.md.
+// Copilot reads agents/<name>.agent.md; opencode loads agents/<name>.md and Gemini the
+// extension's agents/<name>.md.
 func (m *Module) profilePath(provider, name string) string {
 	switch provider {
 	case config.ProviderClaude:
 		return filepath.Join(m.claudeBackend().dir, "agents", "zakwas", name+".md")
 	case config.ProviderCodex:
 		return filepath.Join(m.codexBackend().home, name+".config.toml")
+	case config.ProviderGemini:
+		return filepath.Join(m.geminiExtDir(), "agents", name+".md")
 	case config.ProviderCopilot:
 		return filepath.Join(m.copilotBackend().home, "agents", name+".agent.md")
 	}

@@ -22,7 +22,7 @@ mise:
   prune: true
 
 # agents:
-#   providers: [claude, codex, opencode]  # copilot is opt-in too: name it here to converge Copilot CLI
+#   providers: [claude, codex, opencode]  # codex, gemini and copilot are opt-in: name them to converge them
 #   codex:
 #     settings:  # global config.toml values, independent of profiles
 #       agents:
@@ -39,7 +39,7 @@ mise:
 #   skills:  # linked into every agent's skills directory
 #     - dotfiles/skills/review
 #     - {git: owner/skills, path: skills/pdf, ref: v1}
-#   profiles:  # claude --agent review, codex --profile review, opencode --agent review, copilot --agent review
+#   profiles:  # claude --agent review, codex --profile review, opencode --agent review, @review in gemini, copilot --agent review
 #     review:
 #       description: Read-only change review
 #       tools: [read, search, shell]

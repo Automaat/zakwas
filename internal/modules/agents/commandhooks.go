@@ -168,7 +168,7 @@ func (m *Module) planSharedCommandHooks() (map[string][]engine.Change, map[strin
 	changes := map[string][]engine.Change{}
 	failed := map[string]error{}
 	for _, provider := range config.Providers {
-		if provider == config.ProviderCopilot {
+		if provider == config.ProviderGemini || provider == config.ProviderCopilot {
 			continue
 		}
 		want := m.desiredCommandHooks(provider)
