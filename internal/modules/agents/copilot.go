@@ -158,6 +158,21 @@ func (cur copilotMarketplace) differs(refs map[string]string, src string) bool {
 	return known && ref != "" && added != ref
 }
 
+func (cur copilotMarketplace) recorded(refs map[string]string, src string) string {
+	added, known := refs[cur.Name]
+	switch {
+	case !known:
+		return cur.source()
+	case added != "":
+		return cur.source() + "#" + added
+	}
+	base, ref := splitRef(src)
+	if ref != "" && canonical(cur.source()) == canonical(base) {
+		return cur.source() + " (added without a ref)"
+	}
+	return cur.source()
+}
+
 func (c *copilot) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 	if !c.runner.Installed("copilot") {
 		return nil, errors.New("copilot: Copilot CLI is not installed (no copilot on PATH); install it, or remove copilot from agents.providers")
@@ -186,7 +201,7 @@ func (c *copilot) plan(ctx context.Context, d desired) ([]engine.Change, error) 
 			continue
 		}
 		if cur.differs(refs, src) {
-			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; remove it with `copilot plugin marketplace remove %s` (add --force when its plugins are installed) and apply again", name, cur.source(), src, name))
+			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; remove it with `copilot plugin marketplace remove %s` (add --force when its plugins are installed) and apply again", name, cur.recorded(refs, src), src, name))
 		}
 	}
 
@@ -290,7 +305,7 @@ func (c *copilot) refresh(ctx context.Context, d desired) error {
 		switch {
 		case !ok:
 		case cur.differs(refs, src):
-			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; not refreshing it", n, cur.source(), src))
+			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; not refreshing it", n, cur.recorded(refs, src), src))
 		default:
 			names = append(names, n)
 		}

@@ -190,16 +190,18 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 		declared string
 		settings string
 		conflict bool
+		from     string
 	}{
 		{name: "no settings file", declared: "o/sai#v2"},
 		{name: "unreadable settings", declared: "o/sai#v2", settings: `{not json`},
 		{name: "no entry for the marketplace", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"other":{"source":{"source":"github","repo":"o/x","ref":"v1"}}}}`},
-		{name: "entry without a ref, declared ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`, conflict: true},
+		{name: "entry without a ref, declared ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`, conflict: true, from: "comes from o/sai (added without a ref), but"},
 		{name: "entry without a ref, no declared ref", declared: "o/sai", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`},
-		{name: "another ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true},
+		{name: "another ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true, from: "comes from o/sai#v1, but"},
 		{name: "null entry for the marketplace", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":null}}`},
-		{name: "malformed sibling entry", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"x":{"source":"str"},"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true},
+		{name: "malformed sibling entry", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"x":{"source":"str"},"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true, from: "comes from o/sai#v1, but"},
 		{name: "same ref", declared: "o/sai#v1", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
+		{name: "empty declared ref, entry with one", declared: "o/sai#", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
 		{name: "no declared ref, entry with one", declared: "o/sai", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
 	}
 	for _, tt := range tests {
@@ -214,7 +216,7 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 			fake.OnOK(copilotPluginList, `[]`)
 			changes, err := m.Plan(t.Context())
 			if tt.conflict {
-				if err == nil || !strings.Contains(err.Error(), "declares "+tt.declared) || !strings.Contains(err.Error(), "copilot plugin marketplace remove sai") {
+				if err == nil || !strings.Contains(err.Error(), "declares "+tt.declared) || !strings.Contains(err.Error(), "copilot plugin marketplace remove sai") || !strings.Contains(err.Error(), tt.from) {
 					t.Fatalf("err = %v", err)
 				}
 				return
@@ -223,6 +225,59 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 				t.Fatalf("plan = %v, %v; want converged", targets(changes), err)
 			}
 			assertCopilotReadOnly(t, fake)
+		})
+	}
+}
+
+func TestCopilotConflictNamesTheRecordedRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared string
+		listed   string
+		settings string
+		want     string
+	}{
+		{
+			name: "github ref", declared: "o/sai#v2", listed: "GitHub: o/sai",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`,
+			want:     "comes from o/sai#v1, but zakwas.yaml declares o/sai#v2;",
+		},
+		{
+			name: "url ref", declared: "https://example.com/sai.git#v2", listed: "URL: https://example.com/sai.git",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"git","url":"https://example.com/sai.git","ref":"v1"}}}}`,
+			want:     "comes from https://example.com/sai.git#v1, but zakwas.yaml declares https://example.com/sai.git#v2;",
+		},
+		{
+			name: "source differs, entry without a ref", declared: "o/other#v2", listed: "GitHub: o/sai",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`,
+			want:     "comes from o/sai, but zakwas.yaml declares o/other#v2;",
+		},
+		{
+			name: "local source differs", declared: "o/sai#v2", listed: "Local: /x/sai",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"directory","path":"/x/sai"}}}}`,
+			want:     "comes from /x/sai, but zakwas.yaml declares o/sai#v2;",
+		},
+		{
+			name: "source differs, no entry", declared: "o/other#v2", listed: "GitHub: o/sai",
+			want: "comes from o/sai, but zakwas.yaml declares o/other#v2;",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, fake := newCopilotModule(t, config.Agents{
+				Marketplaces: map[string]config.Marketplace{"sai": {Source: tt.declared}},
+			})
+			if tt.settings != "" {
+				writeFile(t, filepath.Join(m.CopilotHome, "settings.json"), tt.settings)
+			}
+			fake.OnOK(copilotMarketList, `[{"name":"sai","source":"`+tt.listed+`","isDefault":false}]`)
+			fake.OnOK(copilotPluginList, `[]`)
+			if _, err := m.Plan(t.Context()); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("plan err = %v, want %q", err, tt.want)
+			}
+			if err := m.Refresh(t.Context()); err == nil || !strings.Contains(err.Error(), strings.TrimSuffix(tt.want, ";")) {
+				t.Errorf("refresh err = %v, want %q", err, tt.want)
+			}
 		})
 	}
 }
@@ -276,7 +331,7 @@ func TestCopilotRefreshSkipsAMarketplaceWithAnotherRef(t *testing.T) {
 	fake.OnOK(copilotMarketList, `[{"name":"sai","source":"GitHub: o/sai","isDefault":false}]`)
 	fake.OnOK(copilotPluginList, `[]`)
 	err := m.Refresh(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "not refreshing it") {
+	if err == nil || !strings.Contains(err.Error(), "not refreshing it") || !strings.Contains(err.Error(), "comes from o/sai (added without a ref), but") {
 		t.Fatalf("err = %v", err)
 	}
 	for _, l := range fake.Lines() {
