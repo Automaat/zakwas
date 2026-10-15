@@ -1,0 +1,205 @@
+chmod 755 bin/gemini
+env CLAUDE_CONFIG_DIR=$WORK/claude
+
+zakwas plan --only agents
+! stdout gemini
+! exists home/.gemini
+
+cp zakwas-gemini.yaml zakwas.yaml
+zakwas plan --only agents
+stdout '\+ ~/\.gemini/zakwas/GEMINI\.md'
+stdout '\+ ~/\.gemini/zakwas/agents/review\.md'
+stdout '\+ ~/\.gemini/zakwas/gemini-extension\.json'
+stdout '\+ ~/\.gemini/zakwas/hooks/hooks\.json'
+stdout '\+ ~/\.gemini/policies/zakwas\.toml'
+stdout '\+ ~/\.agents/skills/mine'
+stdout '\+ gemini extension zakwas  +link ~/\.gemini/zakwas'
+stdout 'gemini leaves out mcp server wiki: Gemini redacts \$WIKI_TOKEN'
+stdout 'gemini profile review can''t express: reviewer: auto'
+! exists home/.gemini
+! exists calls
+
+zakwas apply -y --only agents
+stdout 'Applied 7 of 7 steps'
+cmp home/.gemini/zakwas/gemini-extension.json manifest.golden
+cmp home/.gemini/zakwas/hooks/hooks.json hooks.golden
+cmp home/.gemini/policies/zakwas.toml policy.golden
+cmp home/.gemini/zakwas/agents/review.md review.golden
+grep 'Hello gemini' home/.gemini/zakwas/GEMINI.md
+linkto home/.agents/skills/mine skills/mine
+grep -count=1 '^gemini extensions link '$WORK'/home/\.gemini/zakwas --consent$' calls
+! exists home/.gemini/settings.json
+! exists home/.gemini/GEMINI.md
+exists home/.local/state/zakwas/gemini-files.json
+
+zakwas check --only agents
+stdout 'No changes|up to date: agents'
+rm calls
+
+cp zakwas-claude.yaml zakwas.yaml
+zakwas plan --only agents
+stdout '- gemini extension zakwas'
+zakwas apply -y --only agents
+grep '^gemini extensions uninstall zakwas$' calls
+! exists home/.gemini/zakwas/gemini-extension.json
+! exists home/.gemini/zakwas/GEMINI.md
+! exists home/.gemini/policies/zakwas.toml
+! exists home/.agents/skills/mine
+! exists home/.local/state/zakwas/gemini-files.json
+zakwas check --only agents
+
+cp zakwas-gemini.yaml zakwas.yaml
+rm bin/gemini
+! zakwas plan --only agents
+stdout 'gemini: gemini is not installed'
+! stdout 'zakwas/GEMINI.md'
+
+-- zakwas.yaml --
+agents:
+  guard: false
+  providers: [claude]
+-- zakwas-claude.yaml --
+agents:
+  guard: false
+  providers: [claude]
+-- zakwas-gemini.yaml --
+agents:
+  guard: false
+  providers: [gemini]
+  instructions: [INSTR.md]
+  mcp:
+    docs: {command: npx, args: [-y, docs-mcp], envVars: [DOCS_REGION]}
+    wiki: {url: 'https://example.com/mcp', bearerTokenEnv: WIKI_TOKEN}
+  skills: [skills/mine]
+  hooks:
+    commands:
+      - {event: stop, command: /usr/local/bin/record-stop}
+      - {event: beforeTool, command: /usr/local/bin/check}
+  permissions:
+    allow: [git status]
+    review: [git push]
+    deny:
+      - {command: git push --force, justification: use --force-with-lease}
+  profiles:
+    review:
+      description: Read-only review
+      prompt: review.md
+      tools: [read, search, shell]
+      shell: ask
+      reviewer: auto
+      mcp: {docs: allow}
+      gemini: {model: gemini-2.5-pro}
+-- INSTR.md --
+Hello {{ .Provider }}
+-- review.md --
+Review as {{ .Provider }}.
+-- skills/mine/SKILL.md --
+---
+name: mine
+description: mine
+---
+Body
+-- manifest.golden --
+{
+  "name": "zakwas",
+  "version": "1.0.0",
+  "description": "Managed by zakwas from the agents section of zakwas.yaml; edit it there.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "docs": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "docs-mcp"
+      ],
+      "env": {
+        "DOCS_REGION": "$DOCS_REGION"
+      }
+    }
+  }
+}
+-- hooks.golden --
+{
+  "hooks": {
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/record-stop"
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/check"
+          }
+        ]
+      }
+    ]
+  }
+}
+-- policy.golden --
+[[rule]]
+toolName = 'run_shell_command'
+commandPrefix = 'git status'
+decision = 'allow'
+priority = 500
+
+[[rule]]
+toolName = 'run_shell_command'
+commandPrefix = 'git push'
+decision = 'ask_user'
+priority = 700
+
+[[rule]]
+toolName = 'run_shell_command'
+commandPrefix = 'git push --force'
+decision = 'deny'
+priority = 900
+denyMessage = 'use --force-with-lease'
+
+[[rule]]
+toolName = 'run_shell_command'
+subagent = 'review'
+decision = 'ask_user'
+priority = 400
+
+[[rule]]
+toolName = '*'
+subagent = 'review'
+mcpName = 'docs'
+decision = 'allow'
+priority = 400
+-- review.golden --
+---
+name: review
+description: Read-only review
+kind: local
+model: gemini-2.5-pro
+tools:
+  - read_file
+  - read_many_files
+  - list_directory
+  - glob
+  - grep_search
+  - run_shell_command
+  - mcp_docs_*
+---
+
+Review as gemini.
+-- bin/gemini --
+#!/bin/sh
+echo "gemini $*" >> "$WORK/calls"
+dir="${GEMINI_CLI_HOME:-$HOME}/.gemini/extensions/zakwas"
+case "$1 $2" in
+  "extensions link")
+    mkdir -p "$dir"
+    printf '{"source":"%s","type":"link"}' "$3" > "$dir/.gemini-extension-install.json" ;;
+  "extensions uninstall")
+    rm -rf "$dir" ;;
+esac

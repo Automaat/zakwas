@@ -147,7 +147,7 @@ var agentPermissionsCall = regexp.MustCompile("agentPermissions\\s+[\"`]opencode
 // agentPermissions function, and zakwas can't tell otherwise. It also names
 // what each profile asks of a provider that can't express it.
 func (m *Module) Warnings(context.Context) []string {
-	out := m.profileWarnings()
+	out := append(m.profileWarnings(), m.geminiWarnings()...)
 	if !m.Guard {
 		return out
 	}

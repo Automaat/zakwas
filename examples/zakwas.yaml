@@ -22,7 +22,7 @@ mise:
   prune: true
 
 # agents:
-#   providers: [claude, codex, opencode]
+#   providers: [claude, codex, opencode]  # codex and gemini are opt-in: name them to converge them
 #   instructions: [dotfiles/AGENTS.md]  # one rendered copy per agent
 #   hooks:
 #     commands:
@@ -34,7 +34,7 @@ mise:
 #   skills:  # linked into every agent's skills directory
 #     - dotfiles/skills/review
 #     - {git: owner/skills, path: skills/pdf, ref: v1}
-#   profiles:  # claude --agent review, codex --profile review, opencode --agent review
+#   profiles:  # claude --agent review, codex --profile review, opencode --agent review, @review in gemini
 #     review:
 #       description: Read-only change review
 #       tools: [read, search, shell]

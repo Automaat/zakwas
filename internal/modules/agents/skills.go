@@ -95,11 +95,14 @@ func (st skillsState) owner(link string) (string, skillLink, bool) {
 
 // skillsDir is where a provider loads user skills from: Claude Code only
 // from its own config dir, Codex and opencode, like Gemini CLI and Copilot
-// CLI, from ~/.agents/skills. opencode's own skillsDir, which holds plugin
-// skills, is not used.
+// CLI, from ~/.agents/skills, which GEMINI_CLI_HOME moves for Gemini.
+// opencode's own skillsDir, which holds plugin skills, is not used.
 func (m *Module) skillsDir(provider string) string {
-	if provider == config.ProviderClaude {
+	switch {
+	case provider == config.ProviderClaude:
 		return filepath.Join(m.claudeBackend().dir, "skills")
+	case provider == config.ProviderGemini && m.GeminiHome != "":
+		return filepath.Join(m.GeminiHome, ".agents", "skills")
 	}
 	return m.Paths.Dst("~/.agents/skills")
 }
