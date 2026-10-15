@@ -341,9 +341,8 @@ func TestSkillsGitSource(t *testing.T) {
 	changes := plan(t, m)
 	got := targets(changes)
 	want := []string{
-		"+ skills source https://github.com/owner/skills.git#v1 (clone https://github.com/owner/skills.git#v1)",
-		"+ claude skills (link docx, pdf once fetched)",
-		"+ codex skills (link docx, pdf once fetched)",
+		"+ claude skills (clone https://github.com/owner/skills.git#v1, link docx, pdf)",
+		"+ codex skills (clone https://github.com/owner/skills.git#v1, link docx, pdf)",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v\nwant %v", got, want)
@@ -511,5 +510,72 @@ func TestSkillMDName(t *testing.T) {
 		if got, ok := skillMDName([]byte(tt.in)); got != tt.want || ok != tt.ok {
 			t.Errorf("skillMDName(%q) = %q, %v; want %q, %v", tt.in, got, ok, tt.want, tt.ok)
 		}
+	}
+}
+
+func TestSkillsMovedToAFailingSourceKeepTheOldClone(t *testing.T) {
+	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/a", Path: "pdf"}}})
+	r.repos["https://github.com/o/a.git"] = skillRepo(t, map[string]string{"pdf": "pdf"})
+	apply(t, plan(t, m))
+	link := filepath.Join(m.Paths.Home, ".claude", "skills", "pdf")
+
+	m.Agents.Skills = []config.Skill{{Git: "o/gone", Path: "pdf"}}
+	if err := runApply(plan(t, m)); err == nil {
+		t.Fatal("apply of an unknown repository succeeded")
+	}
+	if _, err := os.Stat(filepath.Join(link, "SKILL.md")); err != nil {
+		t.Errorf("the skill that worked is dangling: %v", err)
+	}
+
+	r.repos["https://github.com/o/gone.git"] = skillRepo(t, map[string]string{"pdf": "pdf"})
+	apply(t, plan(t, m))
+	if _, err := os.Stat(filepath.Join(link, "SKILL.md")); err != nil {
+		t.Errorf("the moved skill is dangling: %v", err)
+	}
+	if entries, _ := os.ReadDir(m.skillsCacheDir()); len(entries) != 1 {
+		t.Errorf("cache holds %v, want only the new clone", entries)
+	}
+	assertConverged(t, m)
+}
+
+func TestSkillsSharedCloneSurvivesAFailingProvider(t *testing.T) {
+	m, r := newSkills(t, config.Agents{
+		Providers: []string{config.ProviderClaude, config.ProviderCodex},
+		Skills:    []config.Skill{{Git: "o/skills", Path: "pdf"}},
+	})
+	r.repos["https://github.com/o/skills.git"] = skillRepo(t, map[string]string{"pdf": "pdf"})
+	writeFile(t, filepath.Join(m.Paths.Home, ".claude", "skills", "pdf", "SKILL.md"), skillMD("pdf"))
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "claude: skills") {
+		t.Fatalf("plan error = %v", err)
+	}
+	apply(t, changes)
+	cache := filepath.Join(m.skillsCacheDir(), newSkillSource(m.Agents.Skills[0]).id)
+	assertLink(t, filepath.Join(m.Paths.Home, ".agents", "skills", "pdf"), filepath.Join(cache, "pdf"))
+}
+
+func TestSkillsForeignLinkFailsBeforeTheClone(t *testing.T) {
+	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "pdf"}}})
+	writeFile(t, filepath.Join(m.Paths.Home, ".claude", "skills", "pdf", "SKILL.md"), skillMD("pdf"))
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "already exists and zakwas did not link it") {
+		t.Fatalf("plan error = %v", err)
+	}
+	if len(changes) != 0 || len(r.Calls) != 0 {
+		t.Errorf("planned %v, ran %v", targets(changes), r.Lines())
+	}
+}
+
+func TestSkillsBestEffortSkipsAForeignDirWhenApplying(t *testing.T) {
+	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "pdf"}}})
+	m.Agents.Providers = nil
+	r.Missing("codex")
+	r.repos["https://github.com/o/skills.git"] = skillRepo(t, map[string]string{"pdf": "pdf"})
+	writeFile(t, filepath.Join(m.Paths.Home, ".agents", "skills", "pdf", "SKILL.md"), skillMD("pdf"))
+	apply(t, plan(t, m))
+	cache := filepath.Join(m.skillsCacheDir(), newSkillSource(m.Agents.Skills[0]).id)
+	assertLink(t, filepath.Join(m.Paths.Home, ".claude", "skills", "pdf"), filepath.Join(cache, "pdf"))
+	if info, err := os.Lstat(filepath.Join(m.Paths.Home, ".agents", "skills", "pdf")); err != nil || !info.IsDir() {
+		t.Errorf("the foreign skill directory changed: %v", err)
 	}
 }

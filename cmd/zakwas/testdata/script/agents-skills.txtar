@@ -16,7 +16,7 @@ cmpenv stdout plan.golden
 ! exists home/.local/share/zakwas
 
 zakwas apply -y --only agents
-stdout 'Applied 5 of 5 steps'
+stdout 'Applied 4 of 4 steps'
 linkto claude/skills/mine skills/mine
 linkto home/.agents/skills/mine skills/mine
 linkto claude/skills/pdf home/.local/share/zakwas/skills/github-com-owner-skills-v1-a92e86fb/skills/pdf
@@ -116,13 +116,12 @@ description: test
 ---
 -- plan.golden --
 agents
-  + skills source owner/skills#v1             clone owner/skills#v1
   + $WORK/claude/skills/mine  → $WORK/skills/mine
-  + claude skills                             link pdf once fetched
+  + claude skills                             clone owner/skills#v1, link pdf
   + ~/.agents/skills/mine                     → $WORK/skills/mine
-  + codex skills                              link pdf once fetched
+  + codex skills                              clone owner/skills#v1, link pdf
 
-Plan: 5 to add, 0 to change, 0 to remove, 0 to run.
+Plan: 4 to add, 0 to change, 0 to remove, 0 to run.
 -- drop.golden --
 agents
   - $WORK/claude/skills/pdf  skill pdf no longer declared

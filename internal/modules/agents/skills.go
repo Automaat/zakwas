@@ -226,9 +226,8 @@ func (m *Module) planSkills() (map[string][]engine.Change, map[string]error, err
 
 	changes := map[string][]engine.Change{}
 	failed := map[string]error{}
-	fetching := map[string]bool{}
 	for _, ps := range providers {
-		out, err := m.planProviderSkills(ps, st, fetching)
+		out, err := m.planProviderSkills(ps, st)
 		if err != nil {
 			failed[ps.provider] = fmt.Errorf("%s: skills: %w", ps.provider, err)
 			continue
@@ -271,11 +270,12 @@ func (m *Module) checkSkillsOwnDirs() error {
 }
 
 // planProviderSkills plans the links of one provider. A best-effort skill
-// that can't be linked is skipped; any other fails the provider. A clone
-// already planned for another provider is not planned again, but this
-// provider's own last step waits for it all the same.
-func (m *Module) planProviderSkills(ps providerSkills, st skillsState, fetching map[string]bool) ([]engine.Change, error) {
-	var fetches, links []engine.Change
+// that can't be linked is skipped; any other fails the provider. Skills of a
+// missing clone wait for the provider's last step, which clones before it
+// links, so no provider depends on another's changes; their link paths are
+// checked now all the same.
+func (m *Module) planProviderSkills(ps providerSkills, st skillsState) ([]engine.Change, error) {
+	var links []engine.Change
 	var waiting []skillWant
 	var errs []error
 	fail := func(w skillWant, err error) {
@@ -284,13 +284,14 @@ func (m *Module) planProviderSkills(ps providerSkills, st skillsState, fetching 
 		}
 	}
 	for _, w := range ps.wants {
+		cloned := w.source == nil || m.fetched(st, *w.source)
 		switch {
 		case w.source == nil:
 			if err := m.checkSkillDir(w, ""); err != nil {
 				fail(w, err)
 				continue
 			}
-		case m.fetched(st, *w.source):
+		case cloned:
 			if err := m.checkSkillDir(w, filepath.Join(m.skillsCacheDir(), w.source.id)); err != nil {
 				fail(w, err)
 				continue
@@ -298,41 +299,54 @@ func (m *Module) planProviderSkills(ps providerSkills, st skillsState, fetching 
 		case !m.Runner.Installed("git"):
 			fail(w, fmt.Errorf("skill %q needs git to fetch %s, and git is not installed", w.name, w.source.src))
 			continue
-		default:
-			if !fetching[w.source.id] {
-				fetching[w.source.id] = true
-				fetches = append(fetches, m.planFetch(*w.source, st))
-			}
-			waiting = append(waiting, w)
-			continue
 		}
 		c, err := m.planSkillLink(w, st)
 		if err != nil {
 			fail(w, err)
 			continue
 		}
-		if c != nil {
+		if !cloned {
+			waiting = append(waiting, w)
+		} else if c != nil {
 			links = append(links, *c)
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
-	out := slices.Concat(fetches, links)
+	out := links
 	if len(waiting) > 0 {
-		names := make([]string, len(waiting))
-		for i, w := range waiting {
-			names[i] = w.name
-		}
-		out = append(out, engine.Change{
-			Action: engine.Create, Target: ps.provider + " skills", Detail: "link " + strings.Join(names, ", ") + " once fetched",
-			Apply: func(context.Context) error { return m.linkFetched(waiting) },
-		})
+		out = append(out, m.planFetchedLinks(ps.provider, waiting, st))
 	}
 	for i := range out {
 		out[i].Group = ps.provider
 	}
 	return out, nil
+}
+
+// planFetchedLinks is the last step of a provider with skills in clones that
+// are missing: it clones them, checks every skill and links them.
+func (m *Module) planFetchedLinks(provider string, waiting []skillWant, st skillsState) engine.Change {
+	var clones, names []string
+	seen := map[string]bool{}
+	for _, w := range waiting {
+		names = append(names, w.name)
+		if !seen[w.source.id] {
+			seen[w.source.id] = true
+			clones = append(clones, w.source.src)
+		}
+	}
+	action := engine.Create
+	for _, w := range waiting {
+		if _, ok := st.Sources[w.source.id]; ok {
+			action = engine.Update
+		}
+	}
+	return engine.Change{
+		Action: action, Target: provider + " skills",
+		Detail: "clone " + strings.Join(clones, ", ") + ", link " + strings.Join(names, ", "),
+		Apply:  func(ctx context.Context) error { return m.linkFetched(ctx, waiting) },
+	}
 }
 
 // fetched reports whether src was cloned by zakwas and is still there.
@@ -345,51 +359,71 @@ func (m *Module) fetched(st skillsState, s skillSource) bool {
 	return err == nil && info.IsDir()
 }
 
-func (m *Module) planFetch(s skillSource, st skillsState) engine.Change {
-	c := engine.Change{
-		Action: engine.Create, Target: "skills source " + s.src, Detail: "clone " + s.src,
-		Apply: func(ctx context.Context) error {
-			if err := gitClone(ctx, m.Runner, m.skillsCacheDir(), s.id, s.src); err != nil {
-				return err
-			}
-			return m.updateSkills(func(st *skillsState) { st.Sources[s.id] = s.src })
-		},
-	}
-	if _, ok := st.Sources[s.id]; ok {
-		c.Action, c.Detail = engine.Update, "clone "+s.src+" again"
-	}
-	return c
-}
-
-// linkFetched checks every skill that waited for a clone before linking any,
-// so a bad one doesn't leave the others half done.
-func (m *Module) linkFetched(waiting []skillWant) error {
+// clone fetches s unless it is already cloned, and records it.
+func (m *Module) clone(ctx context.Context, s skillSource) error {
 	st, err := m.loadSkills()
 	if err != nil {
 		return err
 	}
+	if m.fetched(st, s) {
+		return nil
+	}
+	if err := gitClone(ctx, m.Runner, m.skillsCacheDir(), s.id, s.src); err != nil {
+		return fmt.Errorf("skills source %s: %w", s.src, err)
+	}
+	return m.updateSkills(func(st *skillsState) { st.Sources[s.id] = s.src })
+}
+
+// linkFetched clones what is missing, checks every skill that waited for a
+// clone before linking any, so a bad one doesn't leave the others half done.
+// Best-effort skills that can't be linked are skipped, as the plan does.
+func (m *Module) linkFetched(ctx context.Context, waiting []skillWant) error {
 	var errs []error
+	cloned := map[string]bool{}
 	for _, w := range waiting {
-		if !m.fetched(st, *w.source) {
-			errs = append(errs, fmt.Errorf("skill %q: %s was not cloned", w.name, w.source.src))
+		if cloned[w.source.id] {
 			continue
 		}
-		if err := m.checkSkillDir(w, filepath.Join(m.skillsCacheDir(), w.source.id)); err != nil {
+		cloned[w.source.id] = true
+		if err := m.clone(ctx, *w.source); err != nil && w.strict {
 			errs = append(errs, err)
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
+	st, err := m.loadSkills()
+	if err != nil {
+		return err
+	}
+	var ready []skillWant
 	for _, w := range waiting {
+		err := m.checkSkillDir(w, filepath.Join(m.skillsCacheDir(), w.source.id))
+		if err == nil && !m.fetched(st, *w.source) {
+			err = fmt.Errorf("skill %q: %s was not cloned", w.name, w.source.src)
+		}
+		switch {
+		case err == nil:
+			ready = append(ready, w)
+		case w.strict:
+			errs = append(errs, err)
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	for _, w := range ready {
 		c, err := m.planSkillLink(w, st)
 		if err != nil {
-			return err
+			if w.strict {
+				return err
+			}
+			continue
 		}
 		if c == nil {
 			continue
 		}
-		if err := c.Apply(context.Background()); err != nil {
+		if err := c.Apply(ctx); err != nil {
 			return fmt.Errorf("%s: %w", c.Target, err)
 		}
 		if st, err = m.loadSkills(); err != nil {
@@ -550,7 +584,9 @@ func (m *Module) planSkillRemove(link string, l skillLink) engine.Change {
 	}
 }
 
-// planSourceRemove removes a clone zakwas made that no skill uses anymore.
+// planSourceRemove removes a clone zakwas made that no skill uses anymore,
+// unless a link zakwas made still points into it, as after a failed clone
+// of the source the skill moved to.
 // A name in the state that isn't a plain directory name is only forgotten.
 func (m *Module) planSourceRemove(id, src string) engine.Change {
 	forget := func(st *skillsState) { delete(st.Sources, id) }
@@ -564,6 +600,15 @@ func (m *Module) planSourceRemove(id, src string) engine.Change {
 	return engine.Change{
 		Action: engine.Remove, Target: "skills source " + src, Detail: m.Paths.Pretty(dir), Destructive: true,
 		Apply: func(context.Context) error {
+			st, err := m.loadSkills()
+			if err != nil {
+				return err
+			}
+			for _, l := range st.Links {
+				if within(filepath.Clean(l.Target), dir) {
+					return nil
+				}
+			}
 			if err := os.RemoveAll(dir); err != nil {
 				return err
 			}
