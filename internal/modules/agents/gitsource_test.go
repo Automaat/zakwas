@@ -153,6 +153,14 @@ func TestReplaceDirFallsBackAndRecovers(t *testing.T) {
 			wantNew: true,
 		},
 		{
+			name:     "exchange refused as not empty (FAT) falls back to renaming aside",
+			existing: true,
+			exchange: func(string) func(a, b string) error {
+				return func(a, b string) error { return syscall.ENOTEMPTY }
+			},
+			wantNew: true,
+		},
+		{
 			name:     "other exchange errors are returned and keep the old copy",
 			existing: true,
 			exchange: func(string) func(a, b string) error {
@@ -205,5 +213,21 @@ func TestReplaceDirFallsBackAndRecovers(t *testing.T) {
 				t.Errorf("leftovers: %v", entries)
 			}
 		})
+	}
+}
+
+func TestRenameAsideKeepsOldCopyWhenNextIsGone(t *testing.T) {
+	root := t.TempDir()
+	dir, next := filepath.Join(root, "sai"), filepath.Join(root, ".sai.zakwas-1")
+	writeFile(t, filepath.Join(dir, "old.txt"), "old")
+	err := replaceDirWith(func(a, b string) error { return syscall.ENOTEMPTY }, next, dir)
+	if err == nil {
+		t.Fatal("want an error when the new copy is missing")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old.txt")); err != nil {
+		t.Errorf("old copy lost: %v", err)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 1 {
+		t.Errorf("leftovers: %v", entries)
 	}
 }
