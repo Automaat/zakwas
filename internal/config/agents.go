@@ -39,6 +39,7 @@ type Agents struct {
 	Hooks              *AgentHooks            `yaml:"hooks" jsonschema_description:"Global agent hooks. Commands are declared once and registered with each selected provider; klaudiush remains an optional managed integration."`
 	Permissions        *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
 	MCP                map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
+	Profiles           map[string]Profile     `yaml:"profiles" jsonschema_description:"Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) and an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named). A profile exposes only the MCP servers it lists. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered."`
 	Opencode           *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
 	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
 }
@@ -138,6 +139,102 @@ func (a *Agents) MCPFor(provider string) []NamedMCPServer {
 		}
 	}
 	return out
+}
+
+// Profile is one agents.profiles entry: what a profile may do, declared once
+// for every provider.
+type Profile struct {
+	Description string            `yaml:"description" jsonschema:"required,minLength=1" jsonschema_description:"One line on what the profile is for. Claude Code and opencode show it; Codex profiles carry no description."`
+	Prompt      string            `yaml:"prompt" jsonschema:"minLength=1" jsonschema_description:"File in the config repo (relative to the directory holding zakwas.yaml, or absolute) with the profile's instructions. A template that sees '{{ .Provider }}', '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Written as the body of the Claude Code and opencode agent files and as Codex developer_instructions. Claude Code replaces its default system prompt with it."`
+	Tools       []string          `yaml:"tools" jsonschema:"uniqueItems=true,enum=read,enum=search,enum=edit,enum=shell,enum=web" jsonschema_description:"Abstract tools the profile may use: read, search (glob and grep), edit, shell, web. Omit for all of them. Claude Code gets a tools list and opencode denies the others; Codex cannot restrict tools."`
+	Edit        string            `yaml:"edit" jsonschema:"enum=allow,enum=ask,enum=deny" jsonschema_description:"File edits: allow, ask or deny. Claude Code: acceptEdits, default, or the edit tools removed. opencode: its edit permission. Codex: sandbox read-only for deny, workspace-write for allow; ask is not expressible."`
+	Shell       string            `yaml:"shell" jsonschema:"enum=allow,enum=ask,enum=deny" jsonschema_description:"Shell commands: allow, ask or deny. opencode: bash permission, with agents.permissions applied; Claude Code: ask is its default, deny removes Bash, allow is not expressible. Codex: approval_policy never for allow and on-request for ask; deny is not expressible."`
+	Sandbox     string            `yaml:"sandbox" jsonschema:"enum=read-only,enum=workspace-write,enum=danger-full-access" jsonschema_description:"Codex sandbox mode. Default: read-only when edit is deny, workspace-write when it is allow. Claude Code and opencode have no sandbox."`
+	Network     *bool             `yaml:"network" jsonschema_description:"Network access. Codex: sandbox_workspace_write.network_access. Claude Code and opencode: false removes the web tools, but their shell commands stay unrestricted."`
+	Reviewer    string            `yaml:"reviewer" jsonschema:"enum=user,enum=auto" jsonschema_description:"Who approves what needs approval: user, or auto, an automatic reviewer. Claude Code: permission mode auto; Codex: approvals_reviewer auto_review; opencode has none."`
+	MCP         map[string]string `yaml:"mcp" jsonschema_description:"Access to each MCP server declared under 'mcp': allow, ask or deny. A server not listed is denied, so a profile exposes only what it names. Codex: enabled and default_tools_approval_mode; Claude Code: the server's tools in or out of the profile (allow is not expressible, its tools ask); opencode: a '<server>_*' permission."`
+	Providers   []string          `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to render the profile for; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins."`
+	Claude      *ProfileProvider  `yaml:"claude" jsonschema_description:"Claude Code only: model and extra frontmatter."`
+	Codex       *ProfileProvider  `yaml:"codex" jsonschema_description:"Codex only: model and extra profile settings."`
+	Opencode    *ProfileProvider  `yaml:"opencode" jsonschema_description:"opencode only: model and extra frontmatter."`
+}
+
+// ProfileProvider is one provider's share of a profile.
+type ProfileProvider struct {
+	Model     string         `yaml:"model" jsonschema:"minLength=1" jsonschema_description:"Model for this provider, in its own spelling, e.g. 'sonnet' for Claude Code, 'gpt-5' for Codex, 'anthropic/claude-sonnet-4' for opencode."`
+	Overrides map[string]any `yaml:"overrides" jsonschema_description:"Extra top-level frontmatter keys (Claude Code, opencode) or settings (Codex), written as is. A key zakwas sets from the profile's own fields is rejected."`
+}
+
+// Profile tool categories, the values of Profile.Tools.
+var ProfileTools = []string{"read", "search", "edit", "shell", "web"}
+
+// Profile decisions, the values of edit, shell and the mcp entries.
+var profileDecisions = []string{PermissionAllow, "ask", PermissionDeny}
+
+// ProfileControlled are the keys a provider's file gets from the profile's
+// own fields, which overrides must not set.
+var ProfileControlled = map[string][]string{
+	ProviderClaude:   {"name", "description", "model", "tools", "disallowedTools", "permissionMode"},
+	ProviderCodex:    {"model", "approval_policy", "approvals_reviewer", "sandbox_mode", "sandbox_workspace_write", "developer_instructions", "mcp_servers"},
+	ProviderOpencode: {"description", "model", "permission"},
+}
+
+// NamedProfile is one agents.profiles entry resolved for a provider.
+type NamedProfile struct {
+	Name string
+	Profile
+}
+
+// share is the provider's own block, nil when the profile has none.
+func (p Profile) share(provider string) *ProfileProvider {
+	switch provider {
+	case ProviderClaude:
+		return p.Claude
+	case ProviderCodex:
+		return p.Codex
+	case ProviderOpencode:
+		return p.Opencode
+	}
+	return nil
+}
+
+// Share returns the provider's own block, an empty one when there is none.
+func (p Profile) Share(provider string) ProfileProvider {
+	if s := p.share(provider); s != nil {
+		return *s
+	}
+	return ProfileProvider{}
+}
+
+// ProfilesFor returns the agents.profiles targeting provider, sorted by
+// name. Like plugins, a profile without its own providers reaches Codex only
+// when zakwas.yaml names codex.
+func (a *Agents) ProfilesFor(provider string) []NamedProfile {
+	if a == nil {
+		return nil
+	}
+	var out []NamedProfile
+	for _, name := range slices.Sorted(maps.Keys(a.Profiles)) {
+		p := a.Profiles[name]
+		if slices.Contains(a.targets(p.Providers), provider) {
+			out = append(out, NamedProfile{Name: name, Profile: p})
+		}
+	}
+	return out
+}
+
+// NamesInProfile reports whether a profile lists provider in its own
+// providers, which makes the provider strict for profiles.
+func (a *Agents) NamesInProfile(provider string) bool {
+	if a == nil {
+		return false
+	}
+	for _, p := range a.Profiles {
+		if slices.Contains(p.Providers, provider) {
+			return true
+		}
+	}
+	return a.Names(provider)
 }
 
 // Permission decisions, the keys of agents.permissions.
@@ -481,6 +578,7 @@ func (a *Agents) validate() []error {
 	}
 	errs = append(errs, a.validatePermissions(checkProviders)...)
 	errs = append(errs, a.validateMCP(checkProviders)...)
+	errs = append(errs, a.validateProfiles(checkProviders)...)
 	seen := map[string]int{}
 	for i, p := range a.Plugins {
 		what := fmt.Sprintf("agents.plugins[%d]", i)
@@ -653,6 +751,92 @@ func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []st
 			if strings.ContainsFunc(text, func(r rune) bool { return unicode.IsControl(r) && r != '\t' }) || !utf8.ValidString(text) {
 				fail("values may not hold control characters or invalid UTF-8")
 				break
+			}
+		}
+	}
+	return errs
+}
+
+var profileName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+func (a *Agents) validateProfiles(checkProviders func(what string, list, allowed []string, allowedWhat string)) []error {
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(a.Profiles)) {
+		p := a.Profiles[name]
+		what := "agents.profiles." + name
+		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		if !profileName.MatchString(name) {
+			fail("name may only contain lowercase letters, digits and '-', and must start with a letter")
+		}
+		switch {
+		case strings.TrimSpace(p.Description) == "":
+			fail("description is required")
+		case strings.ContainsFunc(p.Description, unicode.IsControl):
+			fail("description must be one line, without control characters")
+		}
+		if p.Prompt != "" && (strings.TrimSpace(p.Prompt) != p.Prompt || p.Prompt == "~" || strings.HasPrefix(p.Prompt, "~/")) {
+			fail("prompt %q must be a file relative to the directory holding zakwas.yaml, or absolute", p.Prompt)
+		}
+		for i, t := range p.Tools {
+			switch {
+			case !slices.Contains(ProfileTools, t):
+				fail("tools[%d]: unknown tool %q (want %s)", i, t, strings.Join(ProfileTools, ", "))
+			case slices.Contains(p.Tools[:i], t):
+				fail("tools lists %q twice", t)
+			}
+		}
+		if p.Tools != nil && len(p.Tools) == 0 {
+			fail("list at least one tool, or omit tools for all of them")
+		}
+		decision := func(field, v string) {
+			if v != "" && !slices.Contains(profileDecisions, v) {
+				fail("%s %q is not one of %s", field, v, strings.Join(profileDecisions, ", "))
+			}
+		}
+		decision("edit", p.Edit)
+		decision("shell", p.Shell)
+		for _, c := range []struct{ tool, decision string }{{"edit", p.Edit}, {"shell", p.Shell}} {
+			if (c.decision == PermissionAllow || c.decision == "ask") && p.Tools != nil && !slices.Contains(p.Tools, c.tool) {
+				fail("%s is %s but tools leaves out %s", c.tool, c.decision, c.tool)
+			}
+		}
+		if p.Sandbox != "" && !slices.Contains([]string{"read-only", "workspace-write", "danger-full-access"}, p.Sandbox) {
+			fail("sandbox %q is not one of read-only, workspace-write, danger-full-access", p.Sandbox)
+		}
+		if p.Reviewer != "" && p.Reviewer != "user" && p.Reviewer != "auto" {
+			fail("reviewer %q is not one of user, auto", p.Reviewer)
+		}
+		for _, server := range slices.Sorted(maps.Keys(p.MCP)) {
+			if _, ok := a.MCP[server]; !ok {
+				fail("mcp.%s: server is not declared in agents.mcp", server)
+			}
+			decision("mcp."+server, p.MCP[server])
+			if p.MCP[server] == "" {
+				fail("mcp.%s: set allow, ask or deny", server)
+			}
+		}
+		checkProviders(what+".providers", p.Providers, a.DefaultProviders(), "agents.providers")
+		for _, provider := range Providers {
+			if p.share(provider) == nil {
+				continue
+			}
+			share := p.Share(provider)
+			if share.Model == "" && len(share.Overrides) == 0 {
+				fail("%s: set a model or overrides, or remove it", provider)
+			}
+			if !a.Manages(provider) || (p.Providers != nil && !slices.Contains(p.Providers, provider)) {
+				fail("%s: the profile is not rendered for %s", provider, provider)
+			}
+			if strings.ContainsFunc(share.Model, unicode.IsControl) || strings.TrimSpace(share.Model) != share.Model {
+				fail("%s.model %q must be one line without surrounding whitespace", provider, share.Model)
+			}
+			for key := range share.Overrides {
+				if key == "" {
+					fail("%s.overrides: empty key", provider)
+				}
+				if slices.Contains(ProfileControlled[provider], key) {
+					fail("%s.overrides.%s: zakwas sets it from the profile's own fields", provider, key)
+				}
 			}
 		}
 	}

@@ -269,6 +269,7 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `hooks.klaudiush` | bool | no | `false` | Register klaudiush's enabled providers. See below. |
 | `permissions.allow`, `permissions.review`, `permissions.deny` | list | no | | Shell command prefixes the agents may run without asking, must have reviewed, or must never run. Each is a command string, or `{command, providers, justification}`. See [permissions](#permissions). |
 | `mcp` | map | no | | MCP server name → `{command, args, env, envVars}` for a stdio server or `{url, headers, headerEnv, bearerTokenEnv, oauth}` for an HTTP one, each with optional `providers`. See [mcp](#mcp). |
+| `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex and opencode: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode` blocks. See [profiles](#profiles). |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 | `guard` | bool | no | `true` | Keep the managed agents from applying this config. See [guard](#guard). |
 
@@ -464,6 +465,70 @@ A server targets opencode through its `providers` or, without them, `agents.prov
 - When the config dir moves (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the servers zakwas registered in the old file are removed there.
 
 `plan` and `check` only read the two files: they start no MCP server and open no browser. A server with `oauth: true` shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
+
+### profiles
+
+`agents.profiles` declares a permission profile, such as "read-only review" or "build without network", once. zakwas renders it in each provider's own format, so the copies cannot drift. Each profile starts a session in its provider:
+
+| Provider | File | Start with |
+|---|---|---|
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md` (a subagent file; Claude Code scans the directory recursively) | `claude --agent <name>` |
+| Codex | `${CODEX_HOME:-~/.codex}/<name>.config.toml` (layered over `config.toml`) | `codex --profile <name>` |
+| opencode | `~/.config/opencode/agents/<name>.md` | `opencode --agent <name>` |
+
+```yaml
+agents:
+  mcp:
+    datadog: {url: https://mcp.example.com/mcp}
+    devtools: {command: devtools-mcp}
+  profiles:
+    review:
+      description: Read-only change review
+      prompt: dotfiles/agents/review.md
+      tools: [read, search, shell]
+      edit: deny
+      shell: ask
+      network: false
+      mcp: {datadog: allow}
+      claude: {model: sonnet}
+      codex: {model: gpt-5, overrides: {model_reasoning_effort: high}}
+    build:
+      description: Implement and validate changes
+      edit: allow
+      shell: ask
+      sandbox: workspace-write
+      mcp: {devtools: ask}
+```
+
+| Field | Description |
+|---|---|
+| `description` | Required, one line. Codex profiles carry none. |
+| `prompt` | A file relative to the directory holding `zakwas.yaml`, rendered as a template that sees `{{ .Provider }}`, `{{ .Home }}` and `{{ .Vars }}`. It is the body of the Claude Code and opencode files (Claude Code replaces its default system prompt with it) and Codex's `developer_instructions`. |
+| `tools` | Any of `read`, `search`, `edit`, `shell`, `web`. Omit for all. |
+| `edit`, `shell` | `allow`, `ask` or `deny`. A profile that sets `edit` or `shell` to `allow` or `ask` can't leave that tool out of `tools`. |
+| `sandbox` | `read-only`, `workspace-write` or `danger-full-access`: Codex's sandbox mode. Without it, Codex gets `read-only` for `edit: deny` and `workspace-write` for `edit: allow`. |
+| `network` | `true` or `false`. |
+| `reviewer` | `user`, or `auto` for an automatic reviewer. |
+| `mcp` | Server name → `allow`, `ask` or `deny`. Every server must be declared under [`mcp`](#mcp); one the profile doesn't list is denied, so a profile exposes only what it names. |
+| `providers` | Providers to render for; default `agents.providers`, with Codex opt-in as for plugins. |
+| `claude`, `codex`, `opencode` | `model` in the provider's own spelling, and `overrides`: extra top-level keys written as is. A key zakwas sets from the profile's own fields (`tools`, `permission`, `sandbox_mode`, …) is rejected. |
+
+How each field maps:
+
+| Field | Claude Code | Codex | opencode |
+|---|---|---|---|
+| `tools` | `tools` allowlist | not expressible | other tools `deny` in `permission` |
+| `edit` | `deny` removes the edit tools; `allow` is `permissionMode: acceptEdits`; `ask` is `default` | `deny` is sandbox `read-only`, `allow` is `workspace-write`; `ask` is not expressible | `permission.edit` |
+| `shell` | `deny` removes `Bash`; `ask` is `default`; `allow` is not expressible | `ask` is `approval_policy = "on-request"`, `allow` is `"never"`; `deny` is not expressible | `permission.bash`: `deny`, or the [`agents.permissions`](#permissions) rules with `allow` or `ask` as the catch-all, the guard's deny rules last |
+| `sandbox` | not expressible | `sandbox_mode` | not expressible |
+| `network` | `false` removes `WebFetch` and `WebSearch`; shell commands stay unrestricted | `sandbox_workspace_write.network_access` | `false` denies `webfetch` and `websearch`; shell commands stay unrestricted |
+| `reviewer` | `auto` is `permissionMode: auto`, `user` is `default` | `approvals_reviewer`: `user` or `auto_review` | `auto` is not expressible |
+| `mcp` | `mcp__<server>` in `tools` or `disallowedTools`; `allow` is not expressible, the server's tools still ask | `enabled` and `default_tools_approval_mode` (`approve` for `allow`, `prompt` for `ask`) | `<server>_*` in `permission` |
+
+- The plan lists, per provider and profile, every field the provider cannot express (`claude profile review can't express: …`), the same way as the guard's warnings: it is not a change, so `check` stays clean.
+- A profile name an opencode template defines under `agent` (a template that renders to the `opencode.json`) fails the opencode plan: the two would define one agent twice.
+- The files are protected copies, like [`instructions`](#instructions): a file already there is backed up first. zakwas records their hashes in `~/.local/state/zakwas/agent-profiles.json`. Removing a profile, a provider, or the whole `agents` section removes only the files zakwas rendered (destructive in the plan; one edited since is backed up instead).
+- Claude Code and every named provider are strict, failing their own plan when a profile can't be rendered; Codex gets profiles only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, written only once `opencode` is on `PATH`.
 
 ### guard
 

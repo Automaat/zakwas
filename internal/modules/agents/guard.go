@@ -144,12 +144,13 @@ var agentPermissionsCall = regexp.MustCompile("agentPermissions\\s+[\"`]opencode
 
 // Warnings names the managed providers the guard can't protect: opencode
 // reads its rules from the opencode.json a template renders with the
-// agentPermissions function, and zakwas can't tell otherwise.
+// agentPermissions function, and zakwas can't tell otherwise. It also names
+// what each profile asks of a provider that can't express it.
 func (m *Module) Warnings(context.Context) []string {
+	out := m.profileWarnings()
 	if !m.Guard {
-		return nil
+		return out
 	}
-	var out []string
 	if m.Agents.GuardsProvider(config.ProviderClaude) {
 		if _, warning := m.guardedDirs(); warning != "" {
 			out = append(out, "claude is only partly protected: "+warning)
