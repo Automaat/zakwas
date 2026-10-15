@@ -2,10 +2,12 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -112,6 +114,94 @@ func TestRenameAsideReplacesDir(t *testing.T) {
 				t.Errorf("new copy not in place: %v", err)
 			}
 			if entries, _ := os.ReadDir(root); len(entries) != 1 {
+				t.Errorf("leftovers: %v", entries)
+			}
+		})
+	}
+}
+
+func TestReplaceDirFallsBackAndRecovers(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing bool
+		exchange func(dir string) func(a, b string) error
+		wantErr  error
+		wantNew  bool
+	}{
+		{
+			name:     "exchange not supported falls back to renaming aside",
+			existing: true,
+			exchange: func(string) func(a, b string) error {
+				return func(a, b string) error { return syscall.ENOTSUP }
+			},
+			wantNew: true,
+		},
+		{
+			name:     "exchange rejected as invalid falls back to renaming aside",
+			existing: true,
+			exchange: func(string) func(a, b string) error {
+				return func(a, b string) error { return syscall.EINVAL }
+			},
+			wantNew: true,
+		},
+		{
+			name:     "exchange unsupported on the platform falls back",
+			existing: true,
+			exchange: func(string) func(a, b string) error {
+				return func(a, b string) error { return errors.ErrUnsupported }
+			},
+			wantNew: true,
+		},
+		{
+			name:     "other exchange errors are returned and keep the old copy",
+			existing: true,
+			exchange: func(string) func(a, b string) error {
+				return func(a, b string) error { return syscall.EPERM }
+			},
+			wantErr: syscall.EPERM,
+		},
+		{
+			name:     "dir pruned after the check is renamed into place",
+			existing: true,
+			exchange: func(dir string) func(a, b string) error {
+				return func(a, b string) error {
+					if err := os.RemoveAll(dir); err != nil {
+						return err
+					}
+					return syscall.ENOENT
+				}
+			},
+			wantNew: true,
+		},
+		{
+			name: "missing dir is renamed into place without an exchange",
+			exchange: func(string) func(a, b string) error {
+				return func(a, b string) error { return errors.New("exchange must not run") }
+			},
+			wantNew: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir, next := filepath.Join(root, "sai"), filepath.Join(root, ".sai.zakwas-1")
+			writeFile(t, filepath.Join(next, "new.txt"), "new")
+			if tt.existing {
+				writeFile(t, filepath.Join(dir, "old.txt"), "old")
+			}
+			err := replaceDirWith(tt.exchange(dir), next, dir)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			_, newErr := os.Stat(filepath.Join(dir, "new.txt"))
+			_, oldErr := os.Stat(filepath.Join(dir, "old.txt"))
+			if tt.wantNew && (newErr != nil || oldErr == nil) {
+				t.Errorf("new copy not in place: new %v, old %v", newErr, oldErr)
+			}
+			if !tt.wantNew && (newErr == nil || oldErr != nil) {
+				t.Errorf("old copy not kept: new %v, old %v", newErr, oldErr)
+			}
+			if entries, _ := os.ReadDir(root); tt.wantNew && len(entries) != 1 {
 				t.Errorf("leftovers: %v", entries)
 			}
 		})

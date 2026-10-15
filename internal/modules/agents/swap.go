@@ -10,19 +10,35 @@ import (
 // already there is exchanged atomically, so dir is never missing for a
 // concurrent plan; next then holds the old copy, which the caller removes.
 func replaceDir(next, dir string) error {
-	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
-		return os.Rename(next, dir)
-	}
-	err := exchangeDirs(next, dir)
-	if errors.Is(err, errors.ErrUnsupported) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EINVAL) {
-		return renameAside(next, dir)
+	return replaceDirWith(exchangeDirs, next, dir)
+}
+
+func replaceDirWith(exchange func(a, b string) error, next, dir string) error {
+	var err error
+	for range 2 {
+		if _, serr := os.Lstat(dir); errors.Is(serr, os.ErrNotExist) {
+			if err = os.Rename(next, dir); !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
+				return err
+			}
+			continue
+		}
+		err = exchange(next, dir)
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, errors.ErrUnsupported), errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EINVAL):
+			return renameAside(next, dir)
+		case !errors.Is(err, os.ErrNotExist):
+			return err
+		}
 	}
 	return err
 }
 
 // renameAside is the fallback for filesystems without an atomic exchange:
 // it renames the old copy to next+".old", renames next in, and removes the
-// old copy last, so dir is missing only between the two renames.
+// old copy last, so dir is missing only between the two renames. A failed
+// removal is left for the next fetch to clean up.
 func renameAside(next, dir string) error {
 	aside := next + ".old"
 	if err := os.Rename(dir, aside); err != nil {
@@ -31,5 +47,6 @@ func renameAside(next, dir string) error {
 	if err := os.Rename(next, dir); err != nil {
 		return errors.Join(err, os.Rename(aside, dir))
 	}
-	return os.RemoveAll(aside)
+	_ = os.RemoveAll(aside)
+	return nil
 }
