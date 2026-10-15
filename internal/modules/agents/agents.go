@@ -43,6 +43,9 @@ type Module struct {
 	// TemplateFiles are the templates, whose opencode.json can define agents
 	// that agents.profiles must not repeat.
 	TemplateFiles []config.TemplateFile
+	// Destinations are what the files, links and templates entries write;
+	// instructions and profile files may not share them.
+	Destinations  []config.Destination
 	installer     *install.Installer
 	profiles      *install.Installer
 	hooks         *install.Installer

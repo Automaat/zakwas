@@ -9,7 +9,7 @@ import (
 )
 
 // ModuleNames lists every module in apply order, for --only completion.
-var ModuleNames = []string{"system", "files", "links", "templates", "brew", "mise", "agents", "commands", "defaults"}
+var ModuleNames = []string{"system", "files", "links", "templates", "brew", "mise", "agents", "commands", "launchd", "defaults"}
 
 var shells = []string{"zsh", "bash", "fish"}
 
