@@ -98,6 +98,34 @@ func TestApplyEditsOnlyTheEntries(t *testing.T) {
 	}
 }
 
+func TestApplyMarketplaceThenItsPlugin(t *testing.T) {
+	cfg, home := newRepo(t, baseConfig)
+	_, err := Apply([]Op{
+		{Kind: AddPlugin, Name: "tool@fresh", Providers: []string{"claude"}},
+		{Kind: AddMarketplace, Name: "fresh", Source: "o/fresh#v2", Providers: []string{"claude"}},
+		{Kind: AddMarketplace, Name: "local", Source: "~/mp"},
+	}, cfg, home)
+	if err == nil || !strings.Contains(err.Error(), `marketplace "fresh" is not declared`) {
+		t.Fatalf("a plugin before its marketplace: %v", err)
+	}
+	res, err := Apply([]Op{
+		{Kind: AddMarketplace, Name: "fresh", Source: "o/fresh#v2", Providers: []string{"claude"}},
+		{Kind: AddMarketplace, Name: "local", Source: "~/mp"},
+		{Kind: AddPlugin, Name: "tool@fresh", Providers: []string{"claude"}},
+	}, cfg, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(baseConfig, "    market: owner/repo\n", "    market: owner/repo\n    fresh:\n      source: o/fresh#v2\n      providers: [claude]\n    local:\n      source: ~/mp\n", 1)
+	want = strings.Replace(want, "    - first@market\n", "    - first@market\n    - id: tool@fresh\n      providers: [claude]\n", 1)
+	if got := string(res.Edits[0].New); got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if m := res.Config.Agents.Marketplaces["fresh"]; m.Source != "o/fresh#v2" {
+		t.Errorf("parsed marketplace = %+v", m)
+	}
+}
+
 func TestApplyBrewAndMise(t *testing.T) {
 	cfg, home := newRepo(t, baseConfig)
 	res, err := Apply([]Op{
@@ -146,6 +174,10 @@ func TestApplyRejects(t *testing.T) {
 		{"escape in plugin name", Op{Kind: AddPlugin, Name: "\x1b[2Jx@market"}, "plugin id must be"},
 		{"control in justification", Op{Kind: AddPermission, Decision: "deny", Command: "dd", Justification: "a\x1b[8mb"}, "printable"},
 		{"single quoted duplicate", Op{Kind: AddBrew, Name: "single"}, "already in the Brewfile"},
+		{"duplicate marketplace", Op{Kind: AddMarketplace, Name: "market", Source: "o/r"}, "already declared"},
+		{"marketplace without source", Op{Kind: AddMarketplace, Name: "x"}, "source is required"},
+		{"source on a plugin", Op{Kind: AddPlugin, Name: "a@market", Source: "o/r"}, "only add-marketplace"},
+		{"marketplace for a provider that isn't managed", Op{Kind: AddMarketplace, Name: "x", Source: "o/r", Providers: []string{"codex"}}, "invalid"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -223,6 +255,7 @@ func TestClassify(t *testing.T) {
 		{"mise pin", Op{Kind: PinMise, Name: "node", Version: "22"}, TierLow},
 		{"mise backend tool", Op{Kind: PinMise, Name: "npm:left-pad", Version: "1.0.0"}, TierHigh},
 		{"mcp", Op{Kind: AddMCP, Name: "docs"}, TierHigh},
+		{"marketplace", Op{Kind: AddMarketplace, Name: "m", Source: "o/r"}, TierHigh},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

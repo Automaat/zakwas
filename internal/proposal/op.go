@@ -16,6 +16,7 @@ import (
 
 // Operation kinds.
 const (
+	AddMarketplace   = "add-marketplace"
 	AddPlugin        = "add-plugin"
 	AddPermission    = "add-permission"
 	RemovePermission = "remove-permission"
@@ -25,10 +26,10 @@ const (
 )
 
 // Kinds lists the operations in the order they are documented.
-var Kinds = []string{AddPlugin, AddPermission, RemovePermission, AddBrew, PinMise, AddMCP}
+var Kinds = []string{AddMarketplace, AddPlugin, AddPermission, RemovePermission, AddBrew, PinMise, AddMCP}
 
 // Op is one typed edit. Which fields it uses depends on Kind: Name is the
-// plugin id, MCP server name, brew package or mise tool.
+// marketplace name, plugin id, MCP server name, brew package or mise tool.
 type Op struct {
 	Kind          string   `json:"kind"`
 	Name          string   `json:"name,omitempty"`
@@ -36,6 +37,7 @@ type Op struct {
 	Command       string   `json:"command,omitempty"`
 	Justification string   `json:"justification,omitempty"`
 	Version       string   `json:"version,omitempty"`
+	Source        string   `json:"source,omitempty"`
 	Cask          bool     `json:"cask,omitempty"`
 	Providers     []string `json:"providers,omitempty"`
 	Server        *Server  `json:"server,omitempty"`
@@ -74,6 +76,9 @@ func (o Op) Validate() error {
 		}
 	}
 	switch o.Kind {
+	case AddMarketplace:
+		need(pluginPart.MatchString(o.Name), "marketplace name must be made of letters, digits, . _ -")
+		need(strings.TrimSpace(o.Source) == o.Source && o.Source != "", "a source is required, without surrounding spaces")
 	case AddPlugin:
 		name, mkt, ok := strings.Cut(o.Name, "@")
 		need(ok && pluginPart.MatchString(name) && pluginPart.MatchString(mkt), "plugin id must be name@marketplace, each made of letters, digits, . _ -")
@@ -99,7 +104,10 @@ func (o Op) Validate() error {
 	if o.Kind != AddBrew {
 		need(!o.Cask, "only add-brew takes a cask")
 	}
-	for _, s := range []string{o.Name, o.Command, o.Justification, o.Version} {
+	if o.Kind != AddMarketplace {
+		need(o.Source == "", "only add-marketplace takes a source")
+	}
+	for _, s := range []string{o.Name, o.Command, o.Justification, o.Version, o.Source} {
 		need(!strings.ContainsFunc(s, Hidden), "values must be one line of printable text")
 	}
 	return errors.Join(errs...)
@@ -137,6 +145,8 @@ func (o Op) validateMCP() []error {
 // Summary is the operation in one line.
 func (o Op) Summary() string {
 	switch o.Kind {
+	case AddMarketplace:
+		return "add marketplace " + o.Name
 	case AddPlugin:
 		return "add plugin " + o.Name
 	case AddPermission:
@@ -161,7 +171,7 @@ func (o Op) Modules() []string {
 	switch o.Kind {
 	case AddPermission, RemovePermission, AddMCP:
 		return []string{"templates", "agents"}
-	case AddPlugin:
+	case AddPlugin, AddMarketplace:
 		return []string{"agents"}
 	case AddBrew:
 		return []string{"brew"}

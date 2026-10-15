@@ -2,6 +2,7 @@ stdin requests.jsonl
 zakwas mcp
 stdout -count=1 '"protocolVersion":"2025-06-18"'
 stdout '"name":"zakwas_config"'
+stdout '"name":"zakwas_capture"'
 stdout '"name":"zakwas_propose"'
 stdout '"name":"zakwas_discard"'
 ! stdout '"name":"zakwas_apply"'

@@ -28,7 +28,8 @@ const mcpUsage = `Usage: zakwas mcp [-c zakwas.yaml] [--enable-apply]
 
 Serves zakwas to a coding agent over MCP on stdin and stdout. The tools read
 the config (zakwas_config), plan and check it (zakwas_plan, zakwas_check),
-and save, list and drop proposals (zakwas_propose, zakwas_proposals,
+scan the agents for what the config doesn't declare (zakwas_capture), and
+save, list and drop proposals (zakwas_propose, zakwas_proposals,
 zakwas_discard). None of them changes the config repo or the system.
 
 With --enable-apply the server also offers zakwas_apply, which applies a low
@@ -44,6 +45,7 @@ Flags:
 
 const mcpInstructions = `zakwas keeps this Mac's setup in a config repo. Read it with zakwas_config, zakwas_plan and zakwas_check.
 To change the setup, never edit agent config files or zakwas.yaml: call zakwas_propose, which saves a proposal and changes nothing.
+To record what was added in an agent by hand, call zakwas_capture and pass the operations it returns to zakwas_propose.
 Then tell the user the proposal's id and tier. A proposal applies only after the user confirms it; when zakwas_apply isn't offered, or for a high risk proposal, give the user the command in the proposal's "next" field to run in a terminal.
 Drop a proposal that is no longer wanted with zakwas_discard.`
 
@@ -150,6 +152,12 @@ func (t *mcpTools) tools() []mcp.Tool {
 			Handler:     func(ctx context.Context, c *mcp.Call) (mcp.Result, error) { return t.plan(ctx, c, true) },
 		},
 		{
+			Name: "zakwas_capture", Title: "Scan for undeclared agent changes", ReadOnly: true,
+			Description: "What the managed agents have that zakwas.yaml doesn't declare: plugins, marketplaces and MCP servers added in the agents, Claude allow rules and Codex approvals. " +
+				"Returns the findings, the ones that can't be declared with the reason, and in \"ops\" the proposal operations that declare the rest, each valid for zakwas_propose. Changes nothing.",
+			Handler: t.capture,
+		},
+		{
 			Name: "zakwas_propose", Title: "Propose a config change", Schema: proposeSchema(),
 			Description: "Saves a change to the config repo as a proposal, with its diff, plan and risk tier, and changes nothing else. Operations: " +
 				strings.Join(proposal.Kinds, ", ") + ". Returns the proposal and what to do next.",
@@ -187,7 +195,8 @@ func proposeSchema() map[string]any {
 	})
 	return objectSchema(map[string]any{
 		"kind":          map[string]any{"type": "string", "enum": proposal.Kinds, "description": "The operation."},
-		"name":          stringProp("add-plugin: NAME@MARKETPLACE. add-brew: package. pin-mise: tool. add-mcp: server name."),
+		"name":          stringProp("add-marketplace: marketplace name. add-plugin: NAME@MARKETPLACE. add-brew: package. pin-mise: tool. add-mcp: server name."),
+		"source":        stringProp("add-marketplace: GitHub owner/repo, a git URL, or a local path."),
 		"decision":      map[string]any{"type": "string", "enum": []string{config.PermissionAllow, config.PermissionReview, config.PermissionDeny}, "description": "add-permission and remove-permission: the rule list."},
 		"command":       stringProp("add-permission and remove-permission: the command prefix, e.g. \"git status\"."),
 		"justification": stringProp("add-permission: one-line reason Codex shows for a prompting or forbidden command."),
@@ -278,6 +287,23 @@ func (t *mcpTools) plan(ctx context.Context, c *mcp.Call, check bool) (mcp.Resul
 		res.Text += "\n" + planErr.Error()
 	}
 	return res, nil
+}
+
+func (t *mcpTools) capture(ctx context.Context, _ *mcp.Call) (mcp.Result, error) {
+	cfg, err := t.load()
+	if err != nil {
+		return mcp.Result{}, err
+	}
+	doc, scanErr := scanCapture(ctx, t.env, cfg)
+	if errors.Is(scanErr, errNoAgents) {
+		return mcp.Result{}, scanErr
+	}
+	res, err := jsonResult(doc)
+	if err == nil && scanErr != nil {
+		res.IsError = true
+		res.Text += "\n" + scanErr.Error()
+	}
+	return res, err
 }
 
 func (t *mcpTools) next(p *proposal.Proposal) string {

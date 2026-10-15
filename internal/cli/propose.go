@@ -28,6 +28,7 @@ Nothing is edited: review it with 'zakwas proposals' and apply it with
 'zakwas approve ID' in a terminal.
 
 Operations:
+  add-marketplace NAME SOURCE [--providers claude,codex]
   add-plugin NAME@MARKETPLACE [--providers claude,codex]
   add-permission allow|review|deny COMMAND... [--providers ...] [--justification TEXT]
   remove-permission allow|review|deny COMMAND...
@@ -145,6 +146,7 @@ func parseSub(fs *flag.FlagSet, out *console, args []string) (pos []string, code
 }
 
 var opFlags = map[string][]string{
+	proposal.AddMarketplace:   {"providers"},
 	proposal.AddPlugin:        {"providers"},
 	proposal.AddPermission:    {"providers", "justification"},
 	proposal.RemovePermission: {},
@@ -194,6 +196,11 @@ func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string) (proposal.Op,
 			return op, err
 		}
 		op.Name, op.Version = rest[0], rest[1]
+	case proposal.AddMarketplace:
+		if err := need(2, "NAME SOURCE"); err != nil {
+			return op, err
+		}
+		op.Name, op.Source = rest[0], rest[1]
 	default:
 		if len(rest) < 2 {
 			return op, fmt.Errorf("%s needs a decision (allow, review or deny) and a command", kind)
@@ -237,6 +244,12 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 		out.print(mustIndent(p))
 		return ExitOK
 	}
+	return printProposal(out, env, p, ev)
+}
+
+// printProposal shows a saved proposal: why it is rated as it is, its diff
+// and the plan it will run.
+func printProposal(out *console, env Env, p *proposal.Proposal, ev *evaluation) int {
 	style := engine.Style{Color: env.Color, ShowDiffs: true}
 	out.printf("Proposal %s: %s (%s risk)\n", p.ID, p.Summary, p.Tier)
 	for _, r := range p.Reasons {
@@ -250,9 +263,10 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 	return ExitOK
 }
 
-// saveProposal rates op against the config repo and saves it as a proposal.
-func saveProposal(ctx context.Context, env Env, cfg *config.Config, op proposal.Op) (*proposal.Proposal, *evaluation, error) {
-	ev, err := evaluate(ctx, env, cfg, []proposal.Op{op})
+// saveProposal rates ops against the config repo and saves them as one
+// proposal.
+func saveProposal(ctx context.Context, env Env, cfg *config.Config, ops ...proposal.Op) (*proposal.Proposal, *evaluation, error) {
+	ev, err := evaluate(ctx, env, cfg, ops)
 	if err != nil {
 		return nil, nil, err
 	}
