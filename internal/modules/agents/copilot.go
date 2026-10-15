@@ -107,8 +107,9 @@ func (c *copilot) state(ctx context.Context) (copilotState, error) {
 }
 
 // refs reads the ref each marketplace was added with from Copilot's
-// settings.json, which the list omits. A missing or unreadable file
-// reads as no refs.
+// settings.json, which the list omits. A marketplace added without a ref
+// has an entry with an empty ref; one without an entry, or a missing or
+// unreadable file, has no known ref and is left out.
 func (c *copilot) refs() map[string]string {
 	data, err := os.ReadFile(c.settingsPath())
 	if err != nil {
@@ -140,6 +141,20 @@ func splitRef(src string) (base, ref string) {
 	return base, ref
 }
 
+// differs reports whether the added marketplace cur is not the declared
+// src: another source, or another ref than the one settings.json records
+// for it. A declared ref counts against an entry with no ref, which was
+// added at the default branch; a marketplace with no entry is not judged
+// by ref.
+func (cur copilotMarketplace) differs(refs map[string]string, src string) bool {
+	base, ref := splitRef(src)
+	if canonical(cur.source()) != canonical(base) {
+		return true
+	}
+	added, known := refs[cur.Name]
+	return known && ref != "" && added != ref
+}
+
 func (c *copilot) plan(ctx context.Context, d desired) ([]engine.Change, error) {
 	if !c.runner.Installed("copilot") {
 		return nil, errors.New("copilot: Copilot CLI is not installed (no copilot on PATH); install it, or remove copilot from agents.providers")
@@ -167,8 +182,7 @@ func (c *copilot) plan(ctx context.Context, d desired) ([]engine.Change, error) 
 			})
 			continue
 		}
-		base, ref := splitRef(src)
-		if canonical(cur.source()) != canonical(base) || (ref != "" && refs[name] != "" && refs[name] != ref) {
+		if cur.differs(refs, src) {
 			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; remove it with `copilot plugin marketplace remove %s` and apply again", name, cur.source(), src, name))
 		}
 	}
@@ -270,10 +284,9 @@ func (c *copilot) refresh(ctx context.Context, d desired) error {
 	var errs []error
 	for n, src := range d.sources {
 		cur, ok := st.marketplaces[n]
-		base, ref := splitRef(src)
 		switch {
 		case !ok:
-		case canonical(cur.source()) != canonical(base) || (ref != "" && refs[n] != "" && refs[n] != ref):
+		case cur.differs(refs, src):
 			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; not refreshing it", n, cur.source(), src))
 		default:
 			names = append(names, n)

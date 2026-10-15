@@ -28,9 +28,6 @@ func (copilotMCP) removeHint(name string) string { return "copilot mcp remove " 
 // copilotEntry normalizes the spellings Copilot reads alike: stdio is local,
 // a missing type of a command is local, and a missing tools list means all.
 func copilotEntry(v map[string]any) (mcpEntry, error) {
-	if v == nil {
-		return mcpEntry{}, errors.New("server entry is null")
-	}
 	if v["type"] == "stdio" || (v["type"] == nil && v["command"] != nil) {
 		v["type"] = "local"
 	}
@@ -61,6 +58,9 @@ func (c copilotMCP) load(path string) (mcpFile, error) {
 		var v map[string]any
 		if err := json.Unmarshal(servers.values[name], &v); err != nil {
 			return nil, fmt.Errorf("%s mcpServers.%s: %w", path, name, err)
+		}
+		if v == nil {
+			continue
 		}
 		if out[name], err = copilotEntry(v); err != nil {
 			return nil, err
