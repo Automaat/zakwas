@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -59,10 +60,11 @@ type Runner interface {
 	Installed(name string) bool
 }
 
-// Exec runs commands on the host.
+// Exec runs commands on the host. Env entries go to every command.
 type Exec struct {
 	Stdout io.Writer
 	Stderr io.Writer
+	Env    []string
 }
 
 // NewExec returns an Exec streaming to the process stdout/stderr.
@@ -86,7 +88,7 @@ func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = WaitDelay
 	cmd.Dir = c.Dir
-	cmd.Env = append(os.Environ(), c.Env...)
+	cmd.Env = slices.Concat(os.Environ(), e.Env, c.Env)
 	if c.Stdin != "" {
 		cmd.Stdin = strings.NewReader(c.Stdin)
 	} else if c.Stream {

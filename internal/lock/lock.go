@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,10 +18,12 @@ import (
 	"time"
 )
 
-// holderSettle is how long a blocked run waits before reading the holder: the
-// holder writes its identity right after locking, so reading sooner could show
-// the previous holder.
-const holderSettle = 50 * time.Millisecond
+// The holder writes its identity right after locking, so a blocked run waits
+// holderSettle before reading it and retries while the file is still empty.
+const (
+	holderSettle = 50 * time.Millisecond
+	holderReads  = 5
+)
 
 // Path is the lock file for a given home directory.
 func Path(home string) string {
@@ -51,7 +54,10 @@ func (e *BusyError) Error() string {
 }
 
 // Lock is a held lock; Release it when the run is done.
-type Lock struct{ f *os.File }
+type Lock struct {
+	f        *os.File
+	writable bool
+}
 
 // Options tune Acquire. NoWait fails with *BusyError instead of waiting.
 // OnWait is called once, with the holder, before the first wait. Poll is the
@@ -69,7 +75,12 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
+	writable := true
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if errors.Is(err, fs.ErrPermission) {
+		writable = false
+		f, err = os.Open(path)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +98,7 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 			return nil, errors.Join(err, f.Close())
 		}
 		if !waited {
-			time.Sleep(holderSettle)
-			h := readHolder(path)
+			h := settledHolder(path)
 			if opts.NoWait {
 				return nil, errors.Join(&BusyError{h}, f.Close())
 			}
@@ -103,7 +113,7 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 		case <-time.After(poll):
 		}
 	}
-	l := &Lock{f: f}
+	l := &Lock{f: f, writable: writable}
 	if err := l.writeHolder(command); err != nil {
 		return nil, errors.Join(err, l.Release())
 	}
@@ -111,6 +121,9 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 }
 
 func (l *Lock) writeHolder(command string) error {
+	if !l.writable {
+		return nil
+	}
 	if err := l.f.Truncate(0); err != nil {
 		return err
 	}
@@ -121,6 +134,17 @@ func (l *Lock) writeHolder(command string) error {
 // Release drops the lock; closing the file does it.
 func (l *Lock) Release() error {
 	return l.f.Close()
+}
+
+func settledHolder(path string) Holder {
+	var h Holder
+	for range holderReads {
+		time.Sleep(holderSettle / 2)
+		if h = readHolder(path); h.PID > 0 {
+			break
+		}
+	}
+	return h
 }
 
 func readHolder(path string) Holder {

@@ -166,3 +166,28 @@ func TestHolderString(t *testing.T) {
 		}
 	}
 }
+
+func TestReadOnlyLockFileStillLocks(t *testing.T) {
+	home := t.TempDir()
+	if err := acquire(t, home, Options{}).Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(Path(home), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can write a 0444 file")
+	}
+
+	first, err := Acquire(context.Background(), home, "zakwas apply", Options{NoWait: true})
+	if err != nil {
+		t.Fatalf("read-only lock file: %v", err)
+	}
+	defer func() { _ = first.Release() }()
+
+	_, err = Acquire(context.Background(), home, "zakwas apply", Options{NoWait: true})
+	var busy *BusyError
+	if !errors.As(err, &busy) {
+		t.Errorf("a second run got %v, want *BusyError", err)
+	}
+}

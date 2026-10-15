@@ -471,9 +471,10 @@ func TestConcurrentAppliesEndLikeSequentialOnes(t *testing.T) {
       echo ran >> log
       touch marker
 `)
-	env.Runner = runner.NewExec()
 	results := make(chan result, 2)
 	for range 2 {
+		env := env
+		env.Runner = runner.NewExec()
 		go func() { results <- invoke(env, "", "apply", "-y") }()
 	}
 	for range 2 {
@@ -488,5 +489,43 @@ func TestConcurrentAppliesEndLikeSequentialOnes(t *testing.T) {
 	}
 	if string(log) != "ran\n" {
 		t.Errorf("command ran %d times, want once: the second apply planned before the first finished", strings.Count(string(log), "ran"))
+	}
+}
+
+func TestNestedApplyFailsInsteadOfWaitingOnItsParent(t *testing.T) {
+	env, home := setup(t, linksOnly)
+	env.LockHeldBy = "4242"
+
+	r := invoke(env, "", "apply", "-y")
+
+	if r.code != ExitErr || !strings.Contains(r.stderr, "can't run apply inside a zakwas run (pid 4242") {
+		t.Errorf("exit %d, stderr: %s", r.code, r.stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".zshrc")); err == nil {
+		t.Error("a nested apply changed the system")
+	}
+	if r := invoke(env, "", "plan"); r.code != ExitOK {
+		t.Errorf("a nested plan exit %d, stderr: %s", r.code, r.stderr)
+	}
+}
+
+func TestCommandsSeeTheRunLockHolder(t *testing.T) {
+	env, home := setup(t, `commands:
+  - name: who
+    check: test -e holder
+    run: echo "$ZAKWAS_LOCK_HELD" > holder
+`)
+	env.Runner = runner.NewExec()
+
+	if r := invoke(env, "", "apply", "-y"); r.code != ExitOK {
+		t.Fatalf("exit %d\nstderr: %s", r.code, r.stderr)
+	}
+
+	got, err := os.ReadFile(filepath.Join(home, "holder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("%d\n", os.Getpid()); string(got) != want {
+		t.Errorf("command saw ZAKWAS_LOCK_HELD=%q, want %q", got, want)
 	}
 }

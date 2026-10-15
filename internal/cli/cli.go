@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +57,10 @@ func usage() string {
 	return b.String()
 }
 
+// LockHeldEnv is set for the commands an apply or upgrade runs, so a nested
+// zakwas apply fails fast instead of waiting on its parent's lock.
+const LockHeldEnv = "ZAKWAS_LOCK_HELD"
+
 // Exit codes.
 const (
 	ExitOK    = 0
@@ -88,6 +93,9 @@ type Env struct {
 	ReleaseURL      string
 	ClaudeConfigDir string
 	CodexHome       string
+	// LockHeldBy is $ZAKWAS_LOCK_HELD: the pid of the zakwas run this
+	// process was started from, which holds the run lock.
+	LockHeldBy string
 }
 
 func (e Env) now() time.Time {
@@ -287,6 +295,10 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 // and check take no lock; state files are replaced atomically, so they never
 // read a half-written one.
 func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, int, bool) {
+	if env.LockHeldBy != "" {
+		errOut.printf("zakwas: can't run %s inside a zakwas run (pid %s holds the lock and would wait for itself forever)\n", cmd, env.LockHeldBy)
+		return nil, ExitErr, false
+	}
 	held, err := lock.Acquire(ctx, env.Home, "zakwas "+cmd, lock.Options{
 		NoWait: noWait,
 		OnWait: func(h lock.Holder) {
@@ -298,6 +310,9 @@ func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *
 			errOut.fail(err)
 		}
 		return nil, ExitErr, false
+	}
+	if ex, ok := env.Runner.(*runner.Exec); ok {
+		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
 	}
 	return held, ExitOK, true
 }
