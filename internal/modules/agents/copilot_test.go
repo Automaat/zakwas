@@ -229,6 +229,59 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 	}
 }
 
+func TestCopilotConflictNamesTheRecordedRef(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared string
+		listed   string
+		settings string
+		want     string
+	}{
+		{
+			name: "github ref", declared: "o/sai#v2", listed: "GitHub: o/sai",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`,
+			want:     "comes from o/sai#v1, but zakwas.yaml declares o/sai#v2;",
+		},
+		{
+			name: "url ref", declared: "https://example.com/sai.git#v2", listed: "URL: https://example.com/sai.git",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"git","url":"https://example.com/sai.git","ref":"v1"}}}}`,
+			want:     "comes from https://example.com/sai.git#v1, but zakwas.yaml declares https://example.com/sai.git#v2;",
+		},
+		{
+			name: "source differs, entry without a ref", declared: "o/other#v2", listed: "GitHub: o/sai",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`,
+			want:     "comes from o/sai, but zakwas.yaml declares o/other#v2;",
+		},
+		{
+			name: "local source differs", declared: "o/sai#v2", listed: "Local: /x/sai",
+			settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"directory","path":"/x/sai"}}}}`,
+			want:     "comes from /x/sai, but zakwas.yaml declares o/sai#v2;",
+		},
+		{
+			name: "source differs, no entry", declared: "o/other#v2", listed: "GitHub: o/sai",
+			want: "comes from o/sai, but zakwas.yaml declares o/other#v2;",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, fake := newCopilotModule(t, config.Agents{
+				Marketplaces: map[string]config.Marketplace{"sai": {Source: tt.declared}},
+			})
+			if tt.settings != "" {
+				writeFile(t, filepath.Join(m.CopilotHome, "settings.json"), tt.settings)
+			}
+			fake.OnOK(copilotMarketList, `[{"name":"sai","source":"`+tt.listed+`","isDefault":false}]`)
+			fake.OnOK(copilotPluginList, `[]`)
+			if _, err := m.Plan(t.Context()); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("plan err = %v, want %q", err, tt.want)
+			}
+			if err := m.Refresh(t.Context()); err == nil || !strings.Contains(err.Error(), strings.TrimSuffix(tt.want, ";")) {
+				t.Errorf("refresh err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestCopilotURLMarketplaceRefAgainstSettings(t *testing.T) {
 	tests := []struct {
 		name     string

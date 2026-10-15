@@ -166,7 +166,8 @@ func (cur copilotMarketplace) recorded(refs map[string]string, src string) strin
 	case added != "":
 		return cur.source() + "#" + added
 	}
-	if _, ref := splitRef(src); ref != "" {
+	base, ref := splitRef(src)
+	if ref != "" && canonical(cur.source()) == canonical(base) {
 		return cur.source() + " (added without a ref)"
 	}
 	return cur.source()
