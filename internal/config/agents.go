@@ -933,7 +933,7 @@ func rejectNullProfileNames(data []byte) error {
 	return nil
 }
 
-const maxMergeDepth = 16
+const maxMergeDepth = 10000
 
 func resolveAlias(n *yaml.Node) *yaml.Node {
 	for depth := 0; n != nil && n.Kind == yaml.AliasNode && depth <= maxMergeDepth; depth++ {

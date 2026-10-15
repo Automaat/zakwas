@@ -46,6 +46,7 @@ type Module struct {
 	// Destinations are what the files, links and templates entries write;
 	// instructions and profile files may not share them.
 	Destinations  []config.Destination
+	destKeys      []string
 	installer     *install.Installer
 	profiles      *install.Installer
 	hooks         *install.Installer
@@ -146,6 +147,7 @@ func (m *Module) desired(provider string) desired {
 // plans nothing and doesn't hold back the others: their changes are
 // returned along with the error.
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
+	m.destKeys = nil
 	instructions, failed, err := m.planInstructions()
 	errs := []error{err}
 	commandHooks, hookFailed, hookErr := m.planCommandHooks()

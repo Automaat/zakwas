@@ -321,8 +321,15 @@ func (c *Config) Destinations(paths Paths) []Destination {
 // element is compared as written, and the part of a path that does not
 // exist yet is compared lexically.
 func PathsOverlap(a, b string) bool {
-	return overlaps(foldPath(resolveParents(a)), foldPath(resolveParents(b)))
+	return KeysOverlap(PathKey(a), PathKey(b))
 }
+
+// PathKey is the form of an absolute path PathsOverlap compares, for a
+// caller that checks one path against many and resolves each only once.
+func PathKey(path string) string { return foldPath(resolveParents(path)) }
+
+// KeysOverlap is PathsOverlap on two PathKey results.
+func KeysOverlap(a, b string) bool { return overlaps(a, b) }
 
 func resolveParents(path string) string {
 	path = filepath.Clean(path)
