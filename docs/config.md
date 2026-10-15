@@ -675,7 +675,7 @@ launchd starts jobs from `/` with a minimal `PATH` and expands neither `$VAR` no
 
 - **Changing a job** rewrites its plist and reloads it (`bootout`, then `bootstrap`).
 - **Removing a job** from the config unloads it and deletes its plist. A plist edited since zakwas wrote it is moved to `<plist>.zakwas-bak` instead of being deleted.
-- **Ownership.** zakwas records the labels it created in `~/.local/state/zakwas/launchd.json` and only ever unloads or deletes those. Other agents in `~/Library/LaunchAgents`, loaded or not, are never touched. A configured label that is already loaded from a plist zakwas did not write fails its plan; unload it or pick another label. A plist zakwas did not write at the destination is backed up like any other file, then replaced.
+- **Ownership.** zakwas records the labels it created in `~/.local/state/zakwas/launchd.json` and only ever unloads or deletes those. Other agents in `~/Library/LaunchAgents`, loaded or not, are never touched. A configured label that is already loaded, but was not created by zakwas, fails its plan; unload it or pick another label. A plist zakwas did not write at the destination of an unloaded label is backed up like any other file, then replaced.
 - The plist path takes part in the [no-overlap rule](#conventions), so `files`, `links` and `templates` can't target the same file.
 
 ```yaml

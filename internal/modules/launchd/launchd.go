@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	udiff "github.com/aymanbagabas/go-udiff"
@@ -103,6 +104,8 @@ func (s *state) forget(label string) error {
 	return s.save()
 }
 
+var errLoadedElsewhere = errors.New("already loaded from another plist; zakwas only manages jobs it created, so unload it or use another label")
+
 func (m *Module) domain() string { return "gui/" + strconv.Itoa(m.UID) }
 
 func (m *Module) plistPath(label string) string {
@@ -182,6 +185,30 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	wanted := map[string]bool{}
 	for _, j := range m.Jobs {
 		wanted[j.Label] = true
+	}
+	var gone []string
+	for label := range m.state.Jobs {
+		if !wanted[label] {
+			gone = append(gone, label)
+		}
+	}
+	slices.Sort(gone)
+	var removals []engine.Change
+	for _, label := range gone {
+		var c *engine.Change
+		var err error
+		if m.renamed(label) {
+			c, err = m.planRename(ctx, label)
+		} else {
+			c, err = m.planRemove(ctx, label)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", label, err))
+			continue
+		}
+		removals = append(removals, *c)
+	}
+	for _, j := range m.Jobs {
 		c, err := m.planJob(ctx, j)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", j.Label, err))
@@ -191,22 +218,51 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			changes = append(changes, *c)
 		}
 	}
-	var gone []string
-	for label := range m.state.Jobs {
-		if !wanted[label] {
-			gone = append(gone, label)
+	return append(removals, changes...), errors.Join(errs...)
+}
+
+// renamed reports whether a tracked label only differs in case from a
+// configured one. Both name the same plist on APFS, which is case-insensitive,
+// but launchd tells labels apart.
+func (m *Module) renamed(label string) bool {
+	return slices.ContainsFunc(m.Jobs, func(j config.LaunchdJob) bool {
+		return j.Label != label && strings.EqualFold(j.Label, label)
+	})
+}
+
+// trackedSum finds the hash recorded for label, under any spelling of its case.
+func (m *Module) trackedSum(label string) (string, bool) {
+	if sum, ok := m.state.Jobs[label]; ok {
+		return sum, true
+	}
+	for k, sum := range m.state.Jobs {
+		if strings.EqualFold(k, label) {
+			return sum, true
 		}
 	}
-	slices.Sort(gone)
-	for _, label := range gone {
-		c, err := m.planRemove(ctx, label)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", label, err))
-			continue
-		}
-		changes = append(changes, *c)
+	return "", false
+}
+
+// planRename unloads the job under its old label and drops it from the state;
+// the plist stays, since the configured job rewrites it.
+func (m *Module) planRename(ctx context.Context, label string) (*engine.Change, error) {
+	on, err := m.loaded(ctx, label)
+	if err != nil {
+		return nil, err
 	}
-	return changes, errors.Join(errs...)
+	detail := "label case changed, forget old label"
+	if on {
+		detail = "label case changed, unload old label"
+	}
+	return &engine.Change{
+		Action: engine.Remove, Target: label, Detail: detail,
+		Apply: func(ctx context.Context) error {
+			if err := m.unload(ctx, label); err != nil {
+				return err
+			}
+			return m.state.forget(label)
+		},
+	}, nil
 }
 
 func (m *Module) planJob(ctx context.Context, j config.LaunchdJob) (*engine.Change, error) {
@@ -223,7 +279,7 @@ func (m *Module) planJob(ctx context.Context, j config.LaunchdJob) (*engine.Chan
 	if err != nil {
 		return nil, err
 	}
-	recorded, tracked := m.state.Jobs[j.Label]
+	recorded, tracked := m.trackedSum(j.Label)
 	change := func(a engine.Action, detail string, apply func(context.Context) error) *engine.Change {
 		return &engine.Change{Action: a, Target: j.Label, Detail: detail, Apply: apply}
 	}
@@ -232,7 +288,7 @@ func (m *Module) planJob(ctx context.Context, j config.LaunchdJob) (*engine.Chan
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		if on && !tracked {
-			return nil, errors.New("already loaded from another plist; zakwas only manages jobs it created, so unload it or use another label")
+			return nil, errLoadedElsewhere
 		}
 		c := change(engine.Create, "write plist, load", m.writeAndLoad(j.Label, want, sum, false))
 		c.Diff = udiff.Unified("/dev/null", "repo", "", string(want))
@@ -257,6 +313,9 @@ func (m *Module) planJob(ctx context.Context, j config.LaunchdJob) (*engine.Chan
 		return nil, nil
 	}
 
+	if on && !tracked {
+		return nil, errLoadedElsewhere
+	}
 	edited := !tracked || recorded != install.Sum(have)
 	detail := "plist changed, reload"
 	if edited {
@@ -271,10 +330,15 @@ func (m *Module) planJob(ctx context.Context, j config.LaunchdJob) (*engine.Chan
 	return c, nil
 }
 
-// writeAndLoad installs the plist and reloads the job. State is recorded as
-// soon as the file is in place, so a failed load is retried by the next plan.
+// writeAndLoad installs the plist and reloads the job. The old job is
+// unloaded before anything is written, so a failed unload leaves the file and
+// state as they were and the next plan reloads again. State is recorded once
+// the file is in place, so a failed load is retried by the next plan.
 func (m *Module) writeAndLoad(label string, want []byte, sum string, backup bool) func(context.Context) error {
 	return func(ctx context.Context) error {
+		if err := m.unload(ctx, label); err != nil {
+			return err
+		}
 		path := m.plistPath(label)
 		if backup {
 			if _, err := install.Backup(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -288,9 +352,6 @@ func (m *Module) writeAndLoad(label string, want []byte, sum string, backup bool
 			return err
 		}
 		if err := m.state.record(label, sum); err != nil {
-			return err
-		}
-		if err := m.unload(ctx, label); err != nil {
 			return err
 		}
 		return m.bootstrap(ctx, label)

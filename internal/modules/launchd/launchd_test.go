@@ -147,6 +147,7 @@ func TestPlanJob(t *testing.T) {
 		{name: "plist edited in place", plist: edited, tracked: staleSum, loaded: true, action: engine.Update, detail: "edited in place, back up to com.example.check.plist.zakwas-bak, reload"},
 		{name: "foreign plist at the path", plist: stale, tracked: none, action: engine.Update, detail: "not managed yet, back up to com.example.check.plist.zakwas-bak, reload"},
 		{name: "label loaded from another plist", plist: none, tracked: none, loaded: true, wantErr: "already loaded from another plist"},
+		{name: "loaded label with a foreign plist at the path", plist: stale, tracked: none, loaded: true, wantErr: "already loaded from another plist"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -440,5 +441,67 @@ func TestSymlinkedLaunchAgentsDirIsRefused(t *testing.T) {
 	e.fake.On(printCmd(j.Label), notLoaded)
 	if _, err := e.mod.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestFailedUnloadLeavesFileAndStateForTheNextPlan(t *testing.T) {
+	j := job("com.example.check")
+	e := newEnv(t, j)
+	e.writePlist(t, j.Label, "<plist>old</plist>\n")
+	e.track(t, j.Label, "<plist>old</plist>\n")
+	e.fake.
+		On(printCmd(j.Label), loadedOK).
+		On("launchctl bootout gui/501/"+j.Label, runner.Result{ExitCode: 5, Stderr: "Boot-out failed: 5: Input/output error"})
+
+	if err := e.apply(t, e.plan(t)); err == nil || !strings.Contains(err.Error(), "Boot-out failed") {
+		t.Fatalf("apply err = %v", err)
+	}
+	if got, _ := os.ReadFile(e.plistPath(j.Label)); string(got) != "<plist>old</plist>\n" {
+		t.Errorf("plist was rewritten while the old job is still loaded: %s", got)
+	}
+	again := e.plan(t)
+	if len(again) != 1 || again[0].Detail != "plist changed, reload" {
+		t.Errorf("next plan = %v, want a reload", again)
+	}
+}
+
+func TestLabelCaseChangeKeepsThePlist(t *testing.T) {
+	j := job("com.example.check")
+	e := newEnv(t, j)
+	old := "<plist>old</plist>\n"
+	e.writePlist(t, "Com.Example.Check", old)
+	e.track(t, "Com.Example.Check", old)
+	caseInsensitive := func() bool {
+		_, err := os.Stat(e.plistPath(j.Label))
+		return err == nil
+	}()
+	if !caseInsensitive {
+		t.Skip("needs a case-insensitive file system")
+	}
+	e.fake.
+		On(printCmd("Com.Example.Check"), loadedOK).
+		On(printCmd("Com.Example.Check"), loadedOK).
+		On(printCmd("Com.Example.Check"), notLoaded).
+		On("launchctl bootout gui/501/Com.Example.Check", loadedOK).
+		On(printCmd(j.Label), notLoaded).
+		On(printCmd(j.Label), notLoaded).
+		On(printCmd(j.Label), loadedOK).
+		On("launchctl bootstrap gui/501 "+e.plistPath(j.Label), loadedOK)
+
+	changes := e.plan(t)
+	if len(changes) != 2 || changes[0].Target != "Com.Example.Check" || changes[1].Target != j.Label {
+		t.Fatalf("plan = %v, want the old label retired before the job is written", changes)
+	}
+	if err := e.apply(t, changes); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(e.plistPath(j.Label)); err != nil || string(got) != e.rendered(t, j) {
+		t.Errorf("plist = %q, %v", got, err)
+	}
+	if labels := e.trackedLabels(t); !slices.Equal(labels, []string{j.Label}) {
+		t.Errorf("tracked = %v", labels)
+	}
+	if again := e.plan(t); len(again) != 0 {
+		t.Errorf("second plan = %v, want empty", again)
 	}
 }
