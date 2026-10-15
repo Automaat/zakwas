@@ -28,21 +28,58 @@ var (
 	shortPass   = regexp.MustCompile(`^-p[^-\s]\S{3,}$`)
 	envIdent    = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 	plainSeg    = regexp.MustCompile(`^([a-z][a-z_.-]*|v[0-9]+)$`)
-	gluedCred   = regexp.MustCompile(`^(?:[a-z]*(?:token|secret|password|passwd|passphrase)|(?:api|access|auth|secret|private|ssh|client|session|license|signing|master|encryption)key)$`)
 )
 
-var credWords = map[string]bool{
-	"pass": true, "password": true, "passwords": true, "passwd": true, "pwd": true, "pw": true, "passphrase": true,
-	"secret": true, "secrets": true, "token": true, "key": true, "cred": true, "creds": true, "credential": true,
-	"credentials": true, "auth": true, "bearer": true, "cookie": true, "cookies": true, "pat": true,
+var credWords = map[string]bool{"pw": true, "creds": true, "cookies": true}
+
+// credRoots end a word that holds a credential, also when glued to another
+// word: DBPASS, accesstoken, oauth.
+var credRoots = []string{
+	"pass", "password", "passwd", "passphrase", "passcode", "pwd", "secret", "token", "key", "cred", "credential",
+	"auth", "bearer", "cookie", "pat",
+}
+
+// notCred are ordinary words that end like a credential root.
+var notCred = map[string]bool{
+	"bypass": true, "compass": true, "surpass": true, "trespass": true, "overpass": true, "underpass": true,
+	"compat": true, "monkey": true, "turkey": true, "hockey": true, "donkey": true, "jockey": true, "whiskey": true,
+}
+
+// countWords make a plural tokens a number: --max-tokens.
+var countWords = map[string]bool{
+	"max": true, "min": true, "num": true, "total": true, "limit": true, "count": true, "budget": true,
+	"context": true, "output": true, "input": true, "prompt": true, "thinking": true, "per": true,
 }
 
 // notValue ends a name whose value locates, describes or measures a
 // credential instead of being one: --password-file, --key-size.
 var notValue = map[string]bool{
 	"file": true, "path": true, "dir": true, "directory": true, "name": true, "url": true, "uri": true, "env": true,
-	"limit": true, "count": true, "size": true, "length": true, "bits": true, "type": true, "id": true, "ttl": true,
+	"limit": true, "count": true, "size": true, "length": true, "bits": true, "type": true, "ttl": true,
 	"timeout": true, "jar": true, "fd": true, "stdin": true, "format": true, "algorithm": true,
+}
+
+// credWord reports a word that is, or ends in, a credential name. Digits at
+// its end and a plural s don't hide it.
+func credWord(w string, numeric bool) bool {
+	w = strings.TrimRight(w, "0123456789")
+	if w == "tokens" {
+		return !numeric
+	}
+	for _, c := range []string{w, strings.TrimSuffix(w, "s")} {
+		if c == "" || notCred[c] {
+			continue
+		}
+		if credWords[c] {
+			return true
+		}
+		for _, root := range credRoots {
+			if strings.HasSuffix(c, root) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // nameWords splits a flag or variable name into lower-case words at
@@ -73,19 +110,39 @@ func nameWords(name string) []string {
 	return words
 }
 
-// credentialName reports a name that takes a credential as its value. Whole
-// words count, so --max-tokens, --tokenizer and --keyboard don't; a name
-// that ends in file, path or the like doesn't either. A bare word is only a
-// credential for its stronger names: auth and pat are commands and
-// abbreviations there.
+// secretWord reports a word that names a secret, whose id is one too:
+// Vault's secret_id.
+func secretWord(words []string) bool {
+	for _, w := range words {
+		if strings.HasSuffix(strings.TrimRight(w, "0123456789s"), "secret") {
+			return true
+		}
+	}
+	return false
+}
+
+// credentialName reports a name that takes a credential as its value. Words
+// count, so --max-tokens, --tokenizer and --keyboard don't; a name that ends
+// in file, path or the like doesn't either. A bare word is only a credential
+// for its stronger names: auth and pat are commands and abbreviations there.
 func credentialName(name string, bare bool) bool {
 	words := nameWords(name)
 	if len(words) == 0 || notValue[words[len(words)-1]] {
 		return false
 	}
+	if words[len(words)-1] == "id" && !secretWord(words) {
+		return false
+	}
+	numeric := false
 	for _, w := range words {
+		numeric = numeric || countWords[w]
+	}
+	for _, w := range words {
+		if rest, ok := strings.CutSuffix(w, "id"); ok && rest != "" && credWord(rest, numeric) && !secretWord([]string{rest}) {
+			return false
+		}
 		for suffix := range notValue {
-			if rest, ok := strings.CutSuffix(w, suffix); ok && rest != "" && (credWords[rest] || gluedCred.MatchString(rest)) {
+			if rest, ok := strings.CutSuffix(w, suffix); ok && rest != "" && credWord(rest, numeric) {
 				return false
 			}
 		}
@@ -94,7 +151,10 @@ func credentialName(name string, bare bool) bool {
 		if bare && (w == "auth" || w == "pat") {
 			continue
 		}
-		if credWords[w] || gluedCred.MatchString(w) {
+		if credWord(w, numeric) {
+			return true
+		}
+		if rest, ok := strings.CutSuffix(w, "id"); ok && secretWord([]string{rest}) {
 			return true
 		}
 	}
