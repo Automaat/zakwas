@@ -14,6 +14,7 @@ Every section is optional. Unknown keys are errors, and zakwas reports every pro
 - [mise](#mise)
 - [system](#system)
 - [commands](#commands)
+- [launchd](#launchd)
 - [defaults](#defaults)
 - [Full example](#full-example)
 
@@ -110,7 +111,7 @@ Other editors (Helix, JetBrains, Sublime) that run yaml-language-server honor th
 
 **Backups.** When zakwas replaces a file it didn't write, or one that was edited in place, it moves it to `<file>.zakwas-bak` (`.zakwas-bak.N` if taken) first. It never deletes or overwrites such a file.
 
-**Module order**: system → files → links → templates → brew → mise → agents → commands → defaults. `--only brew,defaults` runs a subset.
+**Module order**: system → files → links → templates → brew → mise → agents → commands → launchd → defaults. `--only brew,defaults` runs a subset.
 
 ## protect
 
@@ -679,6 +680,39 @@ commands:
     check: /usr/bin/pgrep -q oahd
     run: softwareupdate --install-rosetta --agree-to-license
 ```
+
+## launchd
+
+Scheduled jobs as launchd user agents, such as a daily drift check. zakwas writes each job's plist to `~/Library/LaunchAgents/<label>.plist` and loads it with `launchctl bootstrap`. Plan only reads launchd (`launchctl print`); it never loads or unloads anything.
+
+| Key | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `label` | string | yes | | Job name, e.g. `com.example.drift-check`. Letters, digits, `.`, `_` and `-`. Unique, compared case-insensitively. |
+| `program` | list of strings | yes | | Program and arguments. The first entry is an absolute path or starts with `~/`; the rest are written as is. |
+| `schedule.every` | duration | one of `every`, `at` | | Interval of at least `1m`, e.g. `30m`, `6h`. |
+| `schedule.at` | string | one of `every`, `at` | | Local time of day as `HH:MM`, 24-hour clock. |
+| `schedule.weekdays` | list | no | every day | Days for `at`: `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`. |
+| `runAtLoad` | bool | no | `false` | Also run once whenever the job is loaded: at login and after each change to it. |
+| `env` | map | no | | Environment variables for the job. Values are not expanded. |
+| `log` | string | no | discarded | File for stdout and stderr: absolute or `~/…`. Its directory must exist. |
+
+launchd starts jobs from `/` with a minimal `PATH` and expands neither `$VAR` nor `~`, so point `program` at a script, or at `/bin/sh -c`, and set `env.PATH` when the job needs more. A Mac that sleeps through a scheduled time runs the job once on wake. `program`, `env` and `log` may not contain control characters other than tab and newline. `plan` fails when `launchctl print` fails for any reason other than "not loaded", so a job is never unloaded or deleted on a guess.
+
+- **Changing a job** rewrites its plist and reloads it (`bootout`, then `bootstrap`).
+- **Removing a job** from the config unloads it and deletes its plist. A plist edited since zakwas wrote it is moved to `<plist>.zakwas-bak` instead of being deleted.
+- **Ownership.** zakwas records the labels it created in `~/.local/state/zakwas/launchd.json` and only ever unloads or deletes those. Other agents in `~/Library/LaunchAgents`, loaded or not, are never touched. A configured label that is already loaded, but was not created by zakwas, fails its plan; unload it or pick another label. A plist zakwas did not write at the destination of an unloaded label is backed up like any other file, then replaced.
+- The plist path takes part in the [no-overlap rule](#conventions), so `files`, `links` and `templates` can't target the same file.
+
+```yaml
+launchd:
+  - label: com.example.drift-check
+    program: [~/.local/bin/zakwas-check-notify]
+    schedule: {at: "10:00", weekdays: [mon, tue, wed, thu, fri]}
+    env: {PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+    log: ~/Library/Logs/zakwas-check.log
+```
+
+The [daily drift notification](examples.md#daily-drift-notification) recipe builds on this.
 
 ## defaults
 

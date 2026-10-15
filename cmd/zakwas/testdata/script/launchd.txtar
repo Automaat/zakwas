@@ -1,0 +1,109 @@
+chmod 755 bin/launchctl
+
+zakwas plan --only launchd
+cmpenv stdout create.golden
+! exists home/Library
+! exists home/.local/state/zakwas/launchd.json
+! exists state/launchd/dev.example.check
+
+! zakwas check --only launchd
+zakwas apply -y --only launchd
+stdout 'Applied 1 of 1 steps'
+grep '<string>dev.example.check</string>' home/Library/LaunchAgents/dev.example.check.plist
+grep '<string>'$WORK'/home/.local/bin/check-notify</string>' home/Library/LaunchAgents/dev.example.check.plist
+grep '<integer>10</integer>' home/Library/LaunchAgents/dev.example.check.plist
+exists state/launchd/dev.example.check
+exists home/.local/state/zakwas/launchd.json
+zakwas check --only launchd
+stdout 'up to date: launchd'
+
+cp zakwas-11.yaml zakwas.yaml
+zakwas plan --only launchd
+stdout 'dev.example.check  plist changed, reload'
+rm calls
+zakwas apply -y --only launchd
+cmpenv calls reload.golden
+grep '<integer>11</integer>' home/Library/LaunchAgents/dev.example.check.plist
+! exists home/Library/LaunchAgents/dev.example.check.plist.zakwas-bak
+zakwas check --only launchd
+
+mkdir home/Library/LaunchAgents
+cp home/Library/LaunchAgents/dev.example.check.plist home/Library/LaunchAgents/com.other.plist
+cp zakwas-label-loaded.yaml zakwas.yaml
+mkdir state/launchd
+exec sh -c 'echo loaded > state/launchd/com.foreign'
+! zakwas plan --only launchd
+stdout 'com.foreign: already loaded from another plist'
+
+cp zakwas-none.yaml zakwas.yaml
+zakwas plan --only launchd
+cmpenv stdout remove.golden
+rm calls
+zakwas apply -y --only launchd
+cmpenv calls remove.golden.calls
+! exists home/Library/LaunchAgents/dev.example.check.plist
+! exists state/launchd/dev.example.check
+! exists home/.local/state/zakwas/launchd.json
+exists home/Library/LaunchAgents/com.other.plist
+exists state/launchd/com.foreign
+zakwas check
+! stdout launchd
+
+-- zakwas.yaml --
+launchd:
+  - label: dev.example.check
+    program: [~/.local/bin/check-notify]
+    schedule: {at: '10:00'}
+-- zakwas-11.yaml --
+launchd:
+  - label: dev.example.check
+    program: [~/.local/bin/check-notify]
+    schedule: {at: '11:00'}
+-- zakwas-label-loaded.yaml --
+launchd:
+  - label: dev.example.check
+    program: [~/.local/bin/check-notify]
+    schedule: {at: '11:00'}
+  - label: com.foreign
+    program: [/bin/true]
+    schedule: {every: 1h}
+-- zakwas-none.yaml --
+protect: {}
+-- create.golden --
+launchd
+  + dev.example.check  write plist, load
+
+Plan: 1 to add, 0 to change, 0 to remove, 0 to run.
+-- reload.golden --
+launchctl print gui/UID/dev.example.check
+launchctl print gui/UID/dev.example.check
+launchctl bootout gui/UID/dev.example.check
+launchctl print gui/UID/dev.example.check
+launchctl bootstrap gui/UID $WORK/home/Library/LaunchAgents/dev.example.check.plist
+-- remove.golden --
+launchd
+  - dev.example.check  unload, delete plist
+
+⚠ destructive: dev.example.check
+
+Plan: 0 to add, 0 to change, 1 to remove, 0 to run.
+-- remove.golden.calls --
+launchctl print gui/UID/dev.example.check
+launchctl print gui/UID/dev.example.check
+launchctl bootout gui/UID/dev.example.check
+launchctl print gui/UID/dev.example.check
+-- bin/launchctl --
+#!/bin/sh
+echo "launchctl $*" | sed 's#gui/[0-9][0-9]*#gui/UID#' >> "$WORK/calls"
+dir="$WORK/state/launchd"
+mkdir -p "$dir"
+case "$1" in
+  print) [ -f "$dir/${2##*/}" ] || exit 113 ;;
+  bootstrap)
+    [ -f "$3" ] || exit 5
+    label=$(basename "$3" .plist)
+    [ -f "$dir/$label" ] && exit 37
+    cp "$3" "$dir/$label" ;;
+  bootout) rm -f "$dir/${2##*/}" ;;
+  *) echo "unexpected launchctl $*" >&2; exit 99 ;;
+esac

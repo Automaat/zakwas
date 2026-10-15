@@ -364,6 +364,111 @@
         "null"
       ]
     },
+    "launchd": {
+      "items": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "Reverse-DNS style job name, e.g. 'com.example.drift-check'. Letters, digits, '.', '_' and '-'. The plist is written to ~/Library/LaunchAgents/<label>.plist. zakwas only unloads or deletes jobs it created, so a label already loaded from another plist is an error."
+          },
+          "program": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "description": "Program and arguments (launchd ProgramArguments). The first entry must be an absolute path or start with '~/'. launchd starts jobs from '/' with a minimal PATH and does not expand '$VAR' or '~', so call a script or '/bin/sh -c' and set 'env' as needed."
+          },
+          "schedule": {
+            "properties": {
+              "every": {
+                "description": "Run at this interval, a Go duration of at least 1m such as '30m' or '6h'. A Mac that was asleep runs the job once on wake, not once per missed interval.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "at": {
+                "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                "description": "Run at this local time of day, 'HH:MM' on a 24-hour clock. A Mac that was asleep runs the job on wake.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "weekdays": {
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "mon",
+                    "tue",
+                    "wed",
+                    "thu",
+                    "fri",
+                    "sat",
+                    "sun"
+                  ]
+                },
+                "minItems": 1,
+                "uniqueItems": true,
+                "description": "Limit 'at' to these days: mon, tue, wed, thu, fri, sat, sun. Default: every day.",
+                "type": [
+                  "array",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "description": "When the job runs: set exactly one of 'every' and 'at'."
+          },
+          "runAtLoad": {
+            "description": "Also run the job once whenever it is loaded: at login and after every change to the job. Default false.",
+            "default": false,
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "description": "Environment variables for the job, e.g. PATH. Values are written as is, with no expansion.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "log": {
+            "description": "File receiving the job's stdout and stderr: absolute or starting with '~/'. launchd creates the file but not its directory. Default: output is discarded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "program",
+          "schedule"
+        ]
+      },
+      "description": "launchd user agents for scheduled jobs, such as a daily drift check. Each job's plist is written to ~/Library/LaunchAgents and loaded; changing a job reloads it, and removing it unloads it and deletes its plist. Only jobs zakwas created are ever unloaded or deleted. Labels must be unique.",
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "agents": {
       "properties": {
         "codex": {
@@ -1218,7 +1323,7 @@
   },
   "additionalProperties": false,
   "title": "zakwas.yaml",
-  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands.",
+  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands, launchd.",
   "type": [
     "object",
     "null"

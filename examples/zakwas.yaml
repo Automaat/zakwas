@@ -60,6 +60,13 @@ commands:
     check: /usr/bin/pgrep -q oahd
     run: softwareupdate --install-rosetta --agree-to-license
 
+# launchd:
+#   - label: com.example.drift-check
+#     program: [~/.local/bin/zakwas-check-notify]
+#     schedule: {at: "10:00", weekdays: [mon, tue, wed, thu, fri]}
+#     env: {PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
+#     log: ~/Library/Logs/zakwas-check.log
+
 defaults:
   - {domain: com.apple.dock, key: autohide, value: true}
   - {domain: NSGlobalDomain, key: KeyRepeat, value: 2}
