@@ -143,7 +143,7 @@ func (j LaunchdJob) checkText(what string) []error {
 	check("log", j.Log)
 	for k, v := range j.Env {
 		check("env name", k)
-		check(fmt.Sprintf("env %s", k), v)
+		check("env "+k, v)
 	}
 	return errs
 }
