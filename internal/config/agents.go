@@ -915,8 +915,9 @@ var profileName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 // limit on agent names.
 const MaxProfileName = 64
 
-// rejectNullProfileNames fails a profile declared under a null key (null:,
-// ~: or an empty key), which the decoder drops without a trace.
+// rejectNullProfileNames fails a profile declared under a null key (null: or
+// ~:), which the decoder drops without a trace, however the mapping is
+// reached: directly, through an alias or through a merge key.
 func rejectNullProfileNames(data []byte) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -926,15 +927,42 @@ func rejectNullProfileNames(data []byte) error {
 		return nil
 	}
 	profiles := mappingValue(mappingValue(doc.Content[0], "agents"), "profiles")
-	if profiles == nil || profiles.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(profiles.Content); i += 2 {
-		if k := profiles.Content[i]; k.Kind == yaml.ScalarNode && k.Tag == "!!null" {
-			return fmt.Errorf("line %d: agents.profiles: a profile cannot be named null; quote the name (\"null\") or choose another", k.Line)
-		}
+	if line := nullKeyLine(profiles, 0); line > 0 {
+		return fmt.Errorf("line %d: agents.profiles: a profile cannot be named null; quote the name (\"null\") or choose another", line)
 	}
 	return nil
+}
+
+const maxMergeDepth = 16
+
+func nullKeyLine(n *yaml.Node, depth int) int {
+	for n != nil && n.Kind == yaml.AliasNode {
+		n = n.Alias
+	}
+	if n == nil || depth > maxMergeDepth {
+		return 0
+	}
+	switch n.Kind {
+	case yaml.SequenceNode:
+		for _, item := range n.Content {
+			if line := nullKeyLine(item, depth+1); line > 0 {
+				return line
+			}
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i]
+			switch {
+			case k.Kind == yaml.ScalarNode && k.Tag == "!!null":
+				return k.Line
+			case k.Tag == "!!merge":
+				if line := nullKeyLine(n.Content[i+1], depth+1); line > 0 {
+					return line
+				}
+			}
+		}
+	}
+	return 0
 }
 
 func mappingValue(n *yaml.Node, key string) *yaml.Node {

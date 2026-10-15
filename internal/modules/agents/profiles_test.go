@@ -491,3 +491,27 @@ func TestAgentFilesAcceptNeighbouringDestinations(t *testing.T) {
 	}
 	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "x")
 }
+
+func TestSharedDestinationSkipsBestEffortOpencodeWhenMissing(t *testing.T) {
+	m, fake := newModule(t, config.Agents{
+		Instructions: config.InstructionFiles{"AGENTS.md"},
+		Profiles:     map[string]config.Profile{"p": {Description: "d"}},
+	})
+	m.Agents.Providers = nil
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "x")
+	m.Destinations = []config.Destination{
+		{What: "links[0]", Dst: "~/.config/opencode", Path: filepath.Join(m.Paths.Home, ".config", "opencode")},
+	}
+	fake.Missing("opencode")
+	for _, g := range groups(plan(t, m)) {
+		if strings.HasPrefix(g, "opencode:") {
+			t.Errorf("planned %s for an opencode that is not installed", g)
+		}
+	}
+
+	fake.Install("opencode")
+	_, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "is also written by links[0]") {
+		t.Fatalf("err = %v, want the shared destination once opencode is installed", err)
+	}
+}

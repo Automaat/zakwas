@@ -90,6 +90,10 @@ func (m *Module) planProfiles() (map[string][]engine.Change, map[string]error, e
 		for _, prof := range list {
 			keep[samePath(m.profilePath(p, prof.Name))] = true
 		}
+		strict := p == config.ProviderClaude || m.Agents.NamesInProfile(p)
+		if !strict && !m.Runner.Installed(p) {
+			continue
+		}
 		var errs []error
 		for _, prof := range list {
 			if err := m.sharedDestination(m.profilePath(p, prof.Name)); err != nil {
@@ -98,10 +102,6 @@ func (m *Module) planProfiles() (map[string][]engine.Change, map[string]error, e
 		}
 		if err := errors.Join(errs...); err != nil {
 			failed[p] = fmt.Errorf("%s: profiles: %w", p, err)
-			continue
-		}
-		strict := p == config.ProviderClaude || m.Agents.NamesInProfile(p)
-		if !strict && !m.Runner.Installed(p) {
 			continue
 		}
 		var conflicts map[string]string
