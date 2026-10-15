@@ -166,8 +166,14 @@ func (m *Module) planProfiles() (map[string][]engine.Change, map[string]error, e
 // links or templates entry writes the same path, or one inside it, which
 // would make both rewrite it on every apply.
 func (m *Module) sharedDestination(path string) error {
-	for _, d := range m.Destinations {
-		if config.PathsOverlap(path, d.Path) {
+	if m.destKeys == nil {
+		for _, d := range m.Destinations {
+			m.destKeys = append(m.destKeys, config.PathKey(d.Path))
+		}
+	}
+	key := config.PathKey(path)
+	for i, d := range m.Destinations {
+		if config.KeysOverlap(key, m.destKeys[i]) {
 			return fmt.Errorf("%s is also written by %s (%s)", m.Paths.Pretty(path), d.What, d.Dst)
 		}
 	}
