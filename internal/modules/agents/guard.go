@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -147,7 +148,7 @@ var agentPermissionsCall = regexp.MustCompile("agentPermissions\\s+[\"`]opencode
 // agentPermissions function, and zakwas can't tell otherwise. It also names
 // what each profile asks of a provider that can't express it.
 func (m *Module) Warnings(context.Context) []string {
-	out := m.profileWarnings()
+	out := append(m.profileWarnings(), m.opencodePromptWarnings()...)
 	if !m.Guard {
 		return out
 	}
@@ -165,6 +166,34 @@ func (m *Module) Warnings(context.Context) []string {
 func (m *Module) rendersOpencodePermissions() bool {
 	for _, src := range m.TemplateSources {
 		if data, err := os.ReadFile(src); err == nil && agentPermissionsCall.Match(data) {
+			return true
+		}
+	}
+	return false
+}
+
+var opencodeToolChars = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+
+// opencodePromptWarnings names the tools opencode must be told by hand to
+// ask about: its permission object is part of an opencode.json that zakwas
+// only renders pieces of, so it can't add a key there.
+func (m *Module) opencodePromptWarnings() []string {
+	var out []string
+	for _, s := range m.Agents.MCPFor(config.ProviderOpencode) {
+		for _, tool := range s.PromptTools() {
+			key := opencodeToolChars.ReplaceAllString(s.Name, "_") + "_" + opencodeToolChars.ReplaceAllString(tool, "_")
+			if !m.templatesAsk(key) {
+				out = append(out, fmt.Sprintf("opencode won't ask before %s of MCP server %s: add %q: \"ask\" to the permission object of its opencode.json template", tool, s.Name, key))
+			}
+		}
+	}
+	return out
+}
+
+func (m *Module) templatesAsk(key string) bool {
+	ask := regexp.MustCompile(`"` + regexp.QuoteMeta(key) + `"\s*:\s*"ask"`)
+	for _, src := range m.TemplateSources {
+		if data, err := os.ReadFile(src); err == nil && ask.Match(data) {
 			return true
 		}
 	}

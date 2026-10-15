@@ -42,6 +42,7 @@ var commandList = []struct{ name, args, help string }{
 	{"propose", "OPERATION [ARGS]...", "save a config change as a proposal, without editing anything"},
 	{"proposals", "", "list pending proposals"},
 	{"approve", "ID", "show a proposal's diff and plan, confirm, apply it and commit it"},
+	{"mcp", "[--enable-apply]", "serve config reads and proposals to coding agents over MCP"},
 	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
 	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
 	{"completion", "zsh|bash|fish", "print a shell completion script"},
@@ -137,6 +138,8 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return runProposals(env, env.Args[1:], out, errOut)
 		case "approve":
 			return runApprove(ctx, env, env.Args[1:], out, errOut)
+		case "mcp":
+			return runMCP(ctx, env, env.Args[1:], out, errOut)
 		}
 	}
 	fs, o := newFlags(errOut)
@@ -312,9 +315,22 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 // and check take no lock; state files are replaced atomically, so they never
 // read a half-written one.
 func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, int, bool) {
+	held, ok := takeLock(ctx, env, cmd, noWait, errOut)
+	if !ok {
+		return nil, ExitErr, false
+	}
+	if ex, ok := env.Runner.(*runner.Exec); ok {
+		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
+	}
+	return held, ExitOK, true
+}
+
+// takeLock takes the run lock without marking the runner's commands as
+// running under it, for a long-lived process that sets that once.
+func takeLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, bool) {
 	if env.LockHeldBy != "" {
 		errOut.printf("zakwas: can't run %s inside a zakwas run (pid %s holds the lock and would wait for itself forever)\n", cmd, env.LockHeldBy)
-		return nil, ExitErr, false
+		return nil, false
 	}
 	held, err := lock.Acquire(ctx, env.Home, "zakwas "+cmd, lock.Options{
 		NoWait: noWait,
@@ -326,12 +342,9 @@ func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *
 		if ctx.Err() == nil {
 			errOut.fail(err)
 		}
-		return nil, ExitErr, false
+		return nil, false
 	}
-	if ex, ok := env.Runner.(*runner.Exec); ok {
-		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
-	}
-	return held, ExitOK, true
+	return held, true
 }
 
 // refresh fetches new package and plugin versions for `zakwas upgrade`:
