@@ -1,0 +1,25 @@
+name: Question
+description: How do I do something with zakwas
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [docs/troubleshooting.md](https://github.com/Automaat/zakwas/blob/main/docs/troubleshooting.md) and the [docs](https://github.com/Automaat/zakwas#documentation) first.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you want to do
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried
+      description: "Relevant part of zakwas.yaml and the output of `zakwas plan`. Remove anything private."
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: "`zakwas version` and macOS version"
