@@ -62,7 +62,12 @@ zakwas apply           # show plan, confirm, apply (-y skips the prompt)
 zakwas upgrade         # brew update + refresh agent marketplaces, then apply
 zakwas check           # exit 2 when the machine drifted (cron/launchd friendly)
 zakwas plan --only brew,defaults
+zakwas propose add-plugin foo@market   # save a config edit without applying it
+zakwas proposals                       # pending proposals
+zakwas approve ID                      # diff + plan, confirm, apply, commit (terminal only)
 ```
+
+`propose` takes a typed operation (add a plugin, add or remove a permission, add a brew package, pin a mise tool, add an MCP server), splices it into the original file bytes, and saves it with its plan and risk tier. `approve` applies only the affected modules and commits to the current branch without pushing. See [docs/commands.md](docs/commands.md#propose-proposals-approve).
 
 ```
 $ zakwas plan
@@ -231,7 +236,7 @@ See [docs/config.md](docs/config.md#profiles).
 
 ### Agents can't apply the config
 
-With an `agents` section, zakwas denies the managed agents `zakwas apply`, `upgrade` and `self-update` (Claude Code's `permissions.deny`, a Codex `forbidden` rule, opencode `deny` patterns), denies Claude Code edits to the config repo's main checkout and zakwas state, and refuses `apply` and `upgrade` started from an agent session. Otherwise one prompt injection could make an agent widen its own permissions through `apply`. `plan` and `check` stay allowed, and the plan names a managed provider the guard can't cover. Set `agents.guard: false` to turn it off; zakwas then removes only the rules it added. See [docs/config.md](docs/config.md#guard).
+With an `agents` section, zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update` and `approve` (Claude Code's `permissions.deny`, a Codex `forbidden` rule, opencode `deny` patterns), denies Claude Code edits to the config repo's main checkout and zakwas state, and refuses `apply`, `upgrade` and `approve` started from an agent session. Otherwise one prompt injection could make an agent widen its own permissions through `apply`. `plan` and `check` stay allowed, and the plan names a managed provider the guard can't cover. Set `agents.guard: false` to turn it off; zakwas then removes only the rules it added. See [docs/config.md](docs/config.md#guard).
 
 ## Protected dotfiles
 

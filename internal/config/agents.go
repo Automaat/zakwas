@@ -315,7 +315,7 @@ func (a *Agents) targets(own []string) []string {
 
 // GuardedCommands are the zakwas commands that change the system or zakwas
 // itself, which the guard keeps agents from running.
-var GuardedCommands = []string{"apply", "upgrade", "self-update"}
+var GuardedCommands = []string{"apply", "upgrade", "self-update", "approve"}
 
 // GuardEnabled reports whether the guard is on: it is, for any agents
 // section, unless it sets guard to false.

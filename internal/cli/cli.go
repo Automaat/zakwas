@@ -39,6 +39,9 @@ var commandList = []struct{ name, args, help string }{
 	{"apply", "", "show pending changes, confirm, apply them"},
 	{"upgrade", "", "refresh Homebrew and agent marketplaces, then apply (picks up new versions)"},
 	{"check", "", "exit 2 when anything drifted (for CI/cron)"},
+	{"propose", "OPERATION [ARGS]...", "save a config change as a proposal, without editing anything"},
+	{"proposals", "", "list pending proposals"},
+	{"approve", "ID", "show a proposal's diff and plan, confirm, apply it and commit it"},
 	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
 	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
 	{"completion", "zsh|bash|fish", "print a shell completion script"},
@@ -128,6 +131,12 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return runSelfUpdate(ctx, env, env.Args[1:], out, errOut)
 		case "completion":
 			return runCompletion(env.Args[1:], out, errOut)
+		case "propose":
+			return runPropose(ctx, env, env.Args[1:], out, errOut)
+		case "proposals":
+			return runProposals(env, env.Args[1:], out, errOut)
+		case "approve":
+			return runApprove(ctx, env, env.Args[1:], out, errOut)
 		}
 	}
 	fs, o := newFlags(errOut)

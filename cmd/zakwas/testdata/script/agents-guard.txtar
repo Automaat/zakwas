@@ -2,8 +2,8 @@ env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex
 
 zakwas plan --only agents
-stdout 'permissions \+25 deny'
-stdout 'permissions \+3 forbidden'
+stdout 'permissions \+33 deny'
+stdout 'permissions \+4 forbidden'
 stdout '⚠ claude is only partly protected: the config repo holds your home directory'
 stdout '⚠ opencode can''t be protected'
 
@@ -17,7 +17,7 @@ stderr 'refusing to upgrade from a Claude Code session'
 ! exists codex/rules/zakwas.rules
 zakwas plan --only agents
 ! zakwas check --only agents
-stdout 'permissions \+25 deny'
+stdout 'permissions \+33 deny'
 
 env CLAUDECODE=
 zakwas apply -y --only agents
@@ -41,7 +41,7 @@ grep '"zakwas \* apply": "deny"' home/.config/opencode/opencode.json
 
 cp zakwas-off.yaml zakwas.yaml
 zakwas plan --only agents
-stdout 'permissions -25 deny'
+stdout 'permissions -33 deny'
 stdout '- .*/codex/rules/zakwas.rules'
 zakwas apply -y --only agents
 ! exists codex/rules/zakwas.rules

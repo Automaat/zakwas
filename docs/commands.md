@@ -12,6 +12,9 @@ Flags go before or after the command: `zakwas -y apply` and `zakwas apply -y` ar
 | [`apply`](#apply) | show pending changes, confirm, apply them |
 | [`upgrade`](#upgrade) | `brew update` and refresh agent marketplaces, then apply |
 | [`check`](#check) | exit 2 when anything drifted |
+| [`propose`](#propose) | save a config change as a proposal, without editing anything |
+| [`proposals`](#proposals) | list pending proposals |
+| [`approve`](#approve) | show a proposal's diff and plan, confirm, apply it and commit it |
 | [`init`](#init) | create a starter config repo from this Mac |
 | [`self-update`](#self-update) | replace the zakwas binary with a release |
 | [`completion`](#completion) | print a shell completion script |
@@ -70,6 +73,60 @@ Like `plan`, but exits 2 when anything would change. For CI, cron or launchd.
 zakwas check || notify "machine drifted"
 zakwas check --json
 ```
+
+## propose, proposals, approve
+
+Changing the setup without finding the right YAML section by hand, and without letting an agent edit `zakwas.yaml` freely: `propose` takes a typed operation and saves the edit, `approve` applies it from a terminal.
+
+```
+zakwas propose OPERATION [flags]
+zakwas proposals [-c PATH] [-json]
+zakwas approve ID [-c PATH]
+```
+
+### propose
+
+Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/proposals/`, and prints them. It changes neither the config repo nor the system; the plan only reads, like `zakwas plan`.
+
+| Operation | Edits | Flags |
+|---|---|---|
+| `add-plugin NAME@MARKETPLACE` | `agents.plugins` | `--providers LIST` |
+| `add-permission allow\|review\|deny COMMAND...` | `agents.permissions.<decision>` | `--providers LIST`, `--justification TEXT` |
+| `remove-permission allow\|review\|deny COMMAND...` | `agents.permissions.<decision>` | |
+| `add-brew NAME` | the Brewfile (`brew.file`) | `--cask` |
+| `pin-mise TOOL VERSION` | the `[tools]` table of the mise config (`mise.config`) | |
+| `add-mcp NAME` | `agents.mcp` | `--command CMD` with `--arg A` and `--env-var NAME`, or `--url URL` with `--bearer-token-env NAME`; `--providers LIST` |
+
+`--providers`, `--arg` and `--env-var` take a comma list or repeat. A command that starts with a dash goes after `--`: `zakwas propose add-permission allow -- ls -la`. Also `-c PATH` and `-json`, which prints the proposal as JSON.
+
+Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared, a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
+
+**Risk tier.** `low` or `high`, from the operations and the plan of the modules they affect (a permission or MCP edit also plans `templates`, a mise pin `files`):
+
+| Tier | Operations |
+|---|---|
+| low | add a plugin from a declared marketplace; add a `deny` or `review` rule; remove an `allow` rule; add a core Homebrew formula (not a cask, not from a tap); pin a mise tool (without a backend prefix such as `npm:` or `github:`) |
+| high | everything else: an `allow` rule, removing a `deny` or `review` rule, a cask or tap formula, a tool from a mise backend, an MCP server |
+
+Whatever the operations, a proposal is high when the plan it will run touches agent config (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`), shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, …), `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The plan is the whole plan of those modules, including drift that was already there, since that is what `approve` runs.
+
+### proposals
+
+Lists the pending proposals of this config: id, tier, time left and what they do. A proposal expires after 7 days.
+
+### approve
+
+Loads the proposal, computes the diff, plan and tier again from its operations against the current files, shows them and asks. On `y` it writes the files, applies only the affected modules (same lock, history and progress as `apply`), deletes the proposal and commits the edited files, and only those, to the current branch of the config repo. It never pushes. Needs a terminal on stdin and has no `-y`.
+
+It refuses, changing nothing, when:
+
+- the config file, Brewfile or mise config the proposal was made against has changed (propose again); a file saved while the prompt waits is detected before anything is written, and never overwritten;
+- the proposal is older than 7 days, or was made for another config;
+- an edited file has uncommitted changes, the config repo isn't a git repository, or `HEAD` is detached;
+- a module can't be planned;
+- it runs from an agent session while [`agents.guard`](config.md#guard) is on. The guard also denies the managed agents `zakwas approve`.
+
+If the apply fails, the files are written back as they were and the proposal stays pending; the steps that ran stay done. If only the commit fails, the change stays applied and uncommitted, and the message says so.
 
 ## init
 

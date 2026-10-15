@@ -44,6 +44,8 @@ func (f complFlag) spellings() []string {
 	return []string{"-" + f.name, "--" + f.name}
 }
 
+var freeFlags = []string{"version", "providers", "justification", "command", "url", "arg", "env-var", "bearer-token-env"}
+
 func flagsOf(fs *flag.FlagSet) []complFlag {
 	var out []complFlag
 	fs.VisitAll(func(f *flag.Flag) {
@@ -53,7 +55,7 @@ func flagsOf(fs *flag.FlagSet) []complFlag {
 			cf.kind = noValue
 		case f.Name == "only":
 			cf.kind = moduleValue
-		case f.Name == "version":
+		case slices.Contains(freeFlags, f.Name):
 			cf.kind = freeValue
 		}
 		out = append(out, cf)
@@ -67,7 +69,7 @@ func isBoolFlag(f *flag.Flag) bool {
 }
 
 type completionModel struct {
-	global, init, selfUpdate []complFlag
+	global, init, selfUpdate, propose, proposals, approve []complFlag
 }
 
 func newCompletionModel() completionModel {
@@ -75,7 +77,13 @@ func newCompletionModel() completionModel {
 	global, _ := newFlags(discard)
 	initFS, _ := newInitFlags(discard)
 	selfUpdateFS, _ := newSelfUpdateFlags(discard)
-	return completionModel{global: flagsOf(global), init: flagsOf(initFS), selfUpdate: flagsOf(selfUpdateFS)}
+	proposeFS, _ := newProposeFlags(discard)
+	proposalsFS, _ := newConfigFlags("proposals", "", true, discard)
+	approveFS, _ := newConfigFlags("approve", "", false, discard)
+	return completionModel{
+		global: flagsOf(global), init: flagsOf(initFS), selfUpdate: flagsOf(selfUpdateFS),
+		propose: flagsOf(proposeFS), proposals: flagsOf(proposalsFS), approve: flagsOf(approveFS),
+	}
 }
 
 const completionUsage = "Usage: zakwas completion zsh|bash|fish\n"
@@ -113,7 +121,7 @@ func commandNames() []string {
 }
 
 func (m completionModel) all() []complFlag {
-	return append(append(append([]complFlag{}, m.global...), m.init...), m.selfUpdate...)
+	return slices.Concat(m.global, m.init, m.selfUpdate, m.propose, m.proposals, m.approve)
 }
 
 func (m completionModel) bash() string {
@@ -145,6 +153,9 @@ func (m completionModel) bash() string {
 	fmt.Fprintf(&b, "        %s) words='%s' ;;\n", strings.Join(planCommands, "|"), strings.Join(spelled, " "))
 	fmt.Fprintf(&b, "        init) [[ $cur == -* ]] || return; words='%s' ;;\n", spellingsOf(m.init))
 	fmt.Fprintf(&b, "        self-update) words='%s' ;;\n", spellingsOf(m.selfUpdate))
+	fmt.Fprintf(&b, "        propose) words='%s' ;;\n", spellingsOf(m.propose))
+	fmt.Fprintf(&b, "        proposals) words='%s' ;;\n", spellingsOf(m.proposals))
+	fmt.Fprintf(&b, "        approve) words='%s' ;;\n", spellingsOf(m.approve))
 	fmt.Fprintf(&b, "        completion) words='%s' ;;\n", strings.Join(shells, " "))
 	b.WriteString("        *) return ;;\n    esac\n")
 	b.WriteString("    COMPREPLY=($(compgen -W \"$words\" -- \"$cur\"))\n}\n")
@@ -186,6 +197,16 @@ func (m completionModel) zsh() string {
 		b.WriteString(" " + zshSpec(f, ""))
 	}
 	b.WriteString(" ;;\n")
+	for _, sub := range []struct {
+		name  string
+		flags []complFlag
+	}{{"propose", m.propose}, {"proposals", m.proposals}, {"approve", m.approve}} {
+		fmt.Fprintf(&b, "        %s) _arguments", sub.name)
+		for _, f := range sub.flags {
+			b.WriteString(" " + zshSpec(f, ""))
+		}
+		b.WriteString(" ;;\n")
+	}
 	fmt.Fprintf(&b, "        completion) _arguments '1:shell:(%s)' ;;\n", strings.Join(shells, " "))
 	b.WriteString("      esac ;;\n  esac\n}\n\n")
 	b.WriteString("if [[ $funcstack[1] == _zakwas ]]; then\n  _zakwas \"$@\"\nelse\n  compdef _zakwas zakwas\nfi\n")
@@ -228,6 +249,14 @@ func (m completionModel) fish() string {
 	b.WriteString("complete -c zakwas -n '__fish_seen_subcommand_from init' -a '(__fish_complete_directories)'\n")
 	for _, f := range m.selfUpdate {
 		b.WriteString(fishFlag(fishQuote("__fish_seen_subcommand_from self-update"), f))
+	}
+	for _, sub := range []struct {
+		name  string
+		flags []complFlag
+	}{{"propose", m.propose}, {"proposals", m.proposals}, {"approve", m.approve}} {
+		for _, f := range sub.flags {
+			b.WriteString(fishFlag(fishQuote("__fish_seen_subcommand_from "+sub.name), f))
+		}
 	}
 	fmt.Fprintf(&b, "complete -c zakwas -n '__fish_seen_subcommand_from completion' -a %s\n", fishQuote(strings.Join(shells, " ")))
 	return b.String()

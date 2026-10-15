@@ -121,6 +121,12 @@ func Load(path, home string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Parse(data, path, home)
+}
+
+// Parse validates config bytes as if they were the file at path, so an edit
+// can be checked before it is written.
+func Parse(data []byte, path, home string) (*Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var c Config
