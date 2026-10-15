@@ -445,6 +445,25 @@ func TestInstructionsImportErrors(t *testing.T) {
 	}
 }
 
+func TestInstructionsNestedFencesHideImports(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	for name, body := range map[string]string{
+		"longer outer fence":   "````md\n```\n@missing/example.md\n```\n````\nafter\n",
+		"tilde with backticks": "~~~md\n```\n@missing/example.md\n```\n~~~\nafter\n",
+		"unclosed fence":       "```\n@missing/example.md\n",
+		"info string":          "```md\n@missing/example.md\n```\n",
+	} {
+		writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), body)
+		if _, err := m.Plan(context.Background()); err != nil {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "```\ncode\n```md\n@missing/example.md\n```\n@missing/after.md\n")
+	if _, err := m.Plan(context.Background()); err == nil || !strings.Contains(err.Error(), "@missing/after.md") || strings.Contains(err.Error(), "example.md") {
+		t.Errorf("a fence closes only on its own marker: err = %v", err)
+	}
+}
+
 func TestInstructionsProseMentionsAreNotImports(t *testing.T) {
 	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
 	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "types from @types/node and @scope/pkg, not @docs/x.md\n")

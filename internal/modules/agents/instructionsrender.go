@@ -120,15 +120,9 @@ type importer struct {
 func (im importer) expand(text, dir string, stack []string) (string, error) {
 	var out strings.Builder
 	var errs []error
-	fenced := false
+	var fence fence
 	for line := range strings.SplitAfterSeq(text, "\n") {
-		trimmed := strings.TrimLeft(line, " \t")
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			fenced = !fenced
-			out.WriteString(line)
-			continue
-		}
-		if fenced {
+		if fence.update(line) || fence.open() {
 			out.WriteString(line)
 			continue
 		}
@@ -158,6 +152,42 @@ func (im importer) expand(text, dir string, stack []string) (string, error) {
 		return "", err
 	}
 	return out.String(), nil
+}
+
+// fence tracks fenced code blocks: one opens with a run of at least three
+// backticks or tildes and closes with a run of the same character, at least
+// as long, with nothing after it.
+type fence struct {
+	char byte
+	size int
+}
+
+func (f fence) open() bool { return f.size > 0 }
+
+// update reads a line and reports whether it opens or closes a fence.
+func (f *fence) update(line string) bool {
+	trimmed := strings.TrimLeft(line, " \t")
+	if trimmed == "" || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return false
+	}
+	char := trimmed[0]
+	size := len(trimmed) - len(strings.TrimLeft(trimmed, string(char)))
+	if size < 3 {
+		return false
+	}
+	rest := trimmed[size:]
+	switch {
+	case !f.open():
+		if char == '`' && strings.Contains(rest, "`") {
+			return false
+		}
+		*f = fence{char: char, size: size}
+		return true
+	case char == f.char && size >= f.size && strings.TrimSpace(rest) == "":
+		*f = fence{}
+		return true
+	}
+	return false
 }
 
 // resolve returns what an import of path becomes: the imported text when
