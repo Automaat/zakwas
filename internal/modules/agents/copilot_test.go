@@ -197,6 +197,8 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 		{name: "entry without a ref, declared ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`, conflict: true},
 		{name: "entry without a ref, no declared ref", declared: "o/sai", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai"}}}}`},
 		{name: "another ref", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true},
+		{name: "null entry for the marketplace", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"sai":null}}`},
+		{name: "malformed sibling entry", declared: "o/sai#v2", settings: `{"extraKnownMarketplaces":{"x":{"source":"str"},"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`, conflict: true},
 		{name: "same ref", declared: "o/sai#v1", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
 		{name: "no declared ref, entry with one", declared: "o/sai", settings: `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`},
 	}
@@ -222,6 +224,47 @@ func TestCopilotMarketplaceRefAgainstSettings(t *testing.T) {
 			}
 			assertCopilotReadOnly(t, fake)
 		})
+	}
+}
+
+func TestCopilotURLMarketplaceRefAgainstSettings(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings string
+		conflict bool
+	}{
+		{"entry without a ref", `{"extraKnownMarketplaces":{"sai":{"source":{"source":"git","url":"https://example.com/sai.git"}}}}`, true},
+		{"same ref", `{"extraKnownMarketplaces":{"sai":{"source":{"source":"git","url":"https://example.com/sai.git","ref":"v2"}}}}`, false},
+		{"another ref", `{"extraKnownMarketplaces":{"sai":{"source":{"source":"git","url":"https://example.com/sai.git","ref":"v1"}}}}`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, fake := newCopilotModule(t, config.Agents{
+				Marketplaces: map[string]config.Marketplace{"sai": {Source: "https://example.com/sai.git#v2"}},
+			})
+			writeFile(t, filepath.Join(m.CopilotHome, "settings.json"), tt.settings)
+			fake.OnOK(copilotMarketList, `[{"name":"sai","source":"URL: https://example.com/sai.git","isDefault":false}]`)
+			fake.OnOK(copilotPluginList, `[]`)
+			changes, err := m.Plan(t.Context())
+			if tt.conflict != (err != nil) || len(changes) != 0 {
+				t.Fatalf("plan = %v, %v; conflict want %v", targets(changes), err, tt.conflict)
+			}
+		})
+	}
+}
+
+func TestCopilotRefreshJudgesAMarketplaceWithoutAnEntryBySource(t *testing.T) {
+	m, fake := newCopilotModule(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai#v2"}},
+	})
+	fake.OnOK(copilotMarketList, `[{"name":"sai","source":"GitHub: o/sai","isDefault":false}]`)
+	fake.OnOK(copilotPluginList, `[]`)
+	fake.OnOK("copilot plugin marketplace update sai", "updated")
+	if err := m.Refresh(t.Context()); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !slices.Contains(fake.Lines(), "copilot plugin marketplace update sai") {
+		t.Errorf("lines = %q, want a marketplace update", fake.Lines())
 	}
 }
 
@@ -513,8 +556,11 @@ func TestCopilotMCPToleratesNullEntries(t *testing.T) {
 			if !strings.Contains(got, `"command": "docs-mcp"`) || !strings.Contains(got, `"y"`) {
 				t.Errorf("mcp-config.json lost a server:\n%s", got)
 			}
-			if strings.Contains(tt.file, `"x":null`) && !strings.Contains(got, `"x": null`) {
-				t.Errorf("mcp-config.json dropped the null entry:\n%s", got)
+			if keeps := strings.Contains(tt.file, `"x":null`); keeps != strings.Contains(got, `"x": null`) {
+				t.Errorf("null entry kept = %v, want %v:\n%s", !keeps, keeps, got)
+			}
+			if strings.Contains(got, `"docs": null`) {
+				t.Errorf("declared server left null:\n%s", got)
 			}
 			assertConverged(t, m)
 		})

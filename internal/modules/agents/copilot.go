@@ -116,18 +116,21 @@ func (c *copilot) refs() map[string]string {
 		return nil
 	}
 	var settings struct {
-		Marketplaces map[string]struct {
-			Source struct {
-				Ref string `json:"ref"`
-			} `json:"source"`
-		} `json:"extraKnownMarketplaces"`
+		Marketplaces map[string]json.RawMessage `json:"extraKnownMarketplaces"`
 	}
 	if json.Unmarshal(data, &settings) != nil {
 		return nil
 	}
 	refs := map[string]string{}
-	for name, m := range settings.Marketplaces {
-		refs[name] = m.Source.Ref
+	for name, raw := range settings.Marketplaces {
+		var m struct {
+			Source struct {
+				Ref string `json:"ref"`
+			} `json:"source"`
+		}
+		if json.Unmarshal(raw, &m) == nil && string(raw) != "null" {
+			refs[name] = m.Source.Ref
+		}
 	}
 	return refs
 }
@@ -183,7 +186,7 @@ func (c *copilot) plan(ctx context.Context, d desired) ([]engine.Change, error) 
 			continue
 		}
 		if cur.differs(refs, src) {
-			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; remove it with `copilot plugin marketplace remove %s` and apply again", name, cur.source(), src, name))
+			errs = append(errs, fmt.Errorf("copilot: marketplace %q comes from %s, but zakwas.yaml declares %s; remove it with `copilot plugin marketplace remove %s` (add --force when its plugins are installed) and apply again", name, cur.source(), src, name))
 		}
 	}
 
