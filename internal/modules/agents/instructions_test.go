@@ -445,6 +445,53 @@ func TestInstructionsImportErrors(t *testing.T) {
 	}
 }
 
+func TestInstructionsProseMentionsAreNotImports(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "types from @types/node and @scope/pkg, not @docs/x.md\n")
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "import @docs/x.md") {
+		t.Fatalf("a .md path that is missing must fail: err = %v", err)
+	}
+	if len(changes) != 0 {
+		t.Errorf("plan = %v", targets(changes))
+	}
+
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "types from @types/node and @scope/pkg.\n")
+	apply(t, plan(t, m))
+	assertCopy(t, filepath.Join(m.Paths.Home, ".claude", "CLAUDE.md"), "types from @types/node and @scope/pkg.\n")
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), "types from @types/node and @scope/pkg.\n")
+	assertConverged(t, m)
+
+	writeFile(t, filepath.Join(m.Paths.Root, "types", "node"), "node types\n")
+	apply(t, plan(t, m))
+	assertCopy(t, filepath.Join(m.Paths.Home, ".codex", "AGENTS.md"), "types from node types and @scope/pkg.\n")
+}
+
+func TestInstructionsImportPathWithSpaceFailsForClaude(t *testing.T) {
+	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
+	m.Paths.Root = filepath.Join(t.TempDir(), "my repo")
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "@docs/git.md\n")
+	writeFile(t, filepath.Join(m.Paths.Root, "docs", "git.md"), "git rules\n")
+	changes, err := m.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "claude: instructions:") || !strings.Contains(err.Error(), "whitespace") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"codex: + ~/.codex/AGENTS.md"}) {
+		t.Errorf("plan = %v", got)
+	}
+}
+
+func TestInstructionsBestEffortProviderRenderErrorSkipped(t *testing.T) {
+	m, fake, _ := newInstructions(t)
+	m.Agents.Providers = nil
+	fake.OnOK(marketList, "[]").OnOK(pluginList, `{"installed":[],"available":[]}`)
+	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), "{{ if eq .Provider \"opencode\" }}{{ .Nope }}{{ end }}hi\n")
+	changes := plan(t, m)
+	if got := groups(changes); !reflect.DeepEqual(got, []string{"claude: + ~/.claude/CLAUDE.md"}) {
+		t.Fatalf("plan = %v", got)
+	}
+}
+
 func TestInstructionsSizeLimit(t *testing.T) {
 	m, _, _ := newInstructions(t, config.ProviderClaude, config.ProviderCodex)
 	writeFile(t, filepath.Join(m.Paths.Root, "AGENTS.md"), strings.Repeat("x", 32768))

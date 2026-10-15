@@ -204,7 +204,9 @@ func (m *Module) planInstructions() (map[string][]engine.Change, map[string]erro
 			}
 			want, err := m.renderInstructions(p)
 			if err != nil {
-				failed[p] = fmt.Errorf("%s: instructions: %w", p, err)
+				if strict {
+					failed[p] = fmt.Errorf("%s: instructions: %w", p, err)
+				}
 				continue
 			}
 			changes, err := m.planInstruction(in, st, dst, want)

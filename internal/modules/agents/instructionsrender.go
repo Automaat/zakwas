@@ -88,8 +88,21 @@ func pathErr(err error) error {
 // whitespace, like Claude Code reads them.
 var importRef = regexp.MustCompile(`(^|\s)@(\S+)`)
 
+// errNotAnImport marks an @path that names no file and doesn't look like an
+// import for sure, such as @types/node in prose.
+var errNotAnImport = errors.New("not an import")
+
+// certainImport reports whether a path can only be meant as an import: it
+// ends in ".md" or starts like a file path. Others, such as @types/node,
+// are imports only when the file exists.
+func certainImport(path string) bool {
+	return strings.HasSuffix(path, ".md") || strings.HasPrefix(path, "./") ||
+		strings.HasPrefix(path, "../") || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "/")
+}
+
 // importer handles the @path imports of instructions text. Only a path with
-// a "/" or ending in ".md" counts, so mentions like @claude are left alone.
+// a "/" or ending in ".md" counts, so mentions like @claude are left alone;
+// one that names no file counts only when it is certainly a path.
 // Imports in code blocks and code spans are not imports, as in Claude Code.
 // With inline set, an import is replaced by the imported file as is, not
 // rendered as a template; otherwise it stays, a relative one of the
@@ -129,6 +142,9 @@ func (im importer) expand(text, dir string, stack []string) (string, error) {
 					return match
 				}
 				replaced, err := im.resolve(path, dir, stack)
+				if errors.Is(err, errNotAnImport) {
+					return match
+				}
 				if err != nil {
 					errs = append(errs, fmt.Errorf("import @%s: %w", path, err))
 					return match
@@ -160,8 +176,14 @@ func (im importer) resolve(path, dir string, stack []string) (string, error) {
 		return "", fmt.Errorf("%s imports itself through %s", im.paths.Pretty(target), im.paths.Pretty(stack[len(stack)-1]))
 	}
 	raw, err := os.ReadFile(target)
+	if errors.Is(err, fs.ErrNotExist) && !certainImport(path) {
+		return "", errNotAnImport
+	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", im.paths.Pretty(target), pathErr(err))
+	}
+	if !im.inline && relative && len(stack) == 1 && strings.ContainsAny(target, " \t") {
+		return "", fmt.Errorf("%s: path has whitespace, which an import can't hold; move it or import it with ~/", im.paths.Pretty(target))
 	}
 	nested, err := im.expand(string(raw), filepath.Dir(target), append(slices.Clone(stack), target))
 	if err != nil {
