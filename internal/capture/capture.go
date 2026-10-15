@@ -35,6 +35,7 @@ func Plan(cands []agents.Candidate, cfg *config.Config, home string) Result {
 	var res Result
 	var entries []*entry
 	index := map[string]*entry{}
+	cands, res.Skipped = strictest(cands)
 	for _, c := range cands {
 		if c.Skip != "" {
 			res.Skipped = append(res.Skipped, c)
@@ -82,6 +83,33 @@ func Plan(cands []agents.Candidate, cfg *config.Config, home string) Result {
 		}
 	}
 	return res
+}
+
+var strictness = []string{config.PermissionDeny, config.PermissionReview, config.PermissionAllow}
+
+// strictest keeps, for each command of a provider, only the strictest of the
+// decisions found for it, since the agent applies that one. The others are
+// returned as skipped.
+func strictest(cands []agents.Candidate) (kept, dropped []agents.Candidate) {
+	best := map[string]int{}
+	rank := func(c agents.Candidate) int { return slices.Index(strictness, c.Decision) }
+	key := func(c agents.Candidate) string { return c.Provider + "\x00" + c.Name }
+	for _, c := range cands {
+		if c.Kind == agents.KindPermission && c.Skip == "" {
+			if r, seen := best[key(c)]; !seen || rank(c) < r {
+				best[key(c)] = rank(c)
+			}
+		}
+	}
+	for _, c := range cands {
+		if c.Kind == agents.KindPermission && c.Skip == "" && rank(c) > best[key(c)] {
+			c.Skip = "the same command is also saved with a stricter decision, which is the one that applies"
+			dropped = append(dropped, c)
+			continue
+		}
+		kept = append(kept, c)
+	}
+	return kept, dropped
 }
 
 var opOrder = []string{proposal.AddMarketplace, proposal.AddPlugin, proposal.AddMCP, proposal.AddPermission}

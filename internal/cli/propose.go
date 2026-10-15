@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	udiff "github.com/aymanbagabas/go-udiff"
 
@@ -465,7 +464,7 @@ func configWithEdits(res *proposal.Result, dir, home string) (*config.Config, er
 // file, which anything that can write the state directory could have forged.
 func printable(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if proposal.Hidden(r) {
 			return -1
 		}
 		return r

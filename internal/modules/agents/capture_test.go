@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -371,5 +372,92 @@ func TestSameSource(t *testing.T) {
 		if got := SameSource(tt.a, tt.b); got != tt.same {
 			t.Errorf("SameSource(%q, %q) = %v", tt.a, tt.b, got)
 		}
+	}
+}
+
+func TestCaptureKeepsCredentialsOutOfTheFindings(t *testing.T) {
+	m, fake := newModule(t, config.Agents{})
+	writeFile(t, m.claude().settingsPath(), `{"extraKnownMarketplaces": {"priv": {}, "web": {}, "ssh": {}, "plain": {}}}`)
+	writeFile(t, m.claudeJSONPath(), `{"mcpServers": {
+  "flag": {"type": "stdio", "command": "gh", "args": ["-y", "gh-mcp", "--token=ghp_ARGSECRET"]},
+  "split": {"type": "stdio", "command": "gh", "args": ["--api-key", "abc"]},
+  "prefix": {"type": "stdio", "command": "gh", "args": ["ghp_ABCDEFGH"]},
+  "fine": {"type": "stdio", "command": "gh", "args": ["--tokens-per-minute-limit-disabled"]}
+}}`)
+	fake.OnOK(marketList, `[
+		{"name":"priv","source":"git","url":"https://x-access-token:ghp_SECRET123@github.com/o/priv.git"},
+		{"name":"web","source":"git","url":"https://example.com/m.json?token=ABC"},
+		{"name":"ssh","source":"git","url":"ssh://git@github.com/o/ssh.git"},
+		{"name":"plain","source":"github","repo":"o/plain","ref":"v1"}]`)
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	got := capture(t, m)
+	for _, name := range []string{"priv", "web"} {
+		if why := find(t, got, KindMarketplace, name).Skip; !strings.Contains(why, "credentials or a query") {
+			t.Errorf("%s: %q", name, why)
+		}
+	}
+	for _, name := range []string{"ssh", "plain"} {
+		if c := find(t, got, KindMarketplace, name); c.Skip != "" {
+			t.Errorf("%s skipped: %q", name, c.Skip)
+		}
+	}
+	for _, name := range []string{"flag", "split", "prefix"} {
+		c := find(t, got, KindMCP, name)
+		if !strings.Contains(c.Skip, "credential") || c.Server != nil {
+			t.Errorf("%s: %+v", name, c)
+		}
+	}
+	if c := find(t, got, KindMCP, "fine"); c.Server == nil {
+		t.Errorf("an ordinary argument was refused: %q", c.Skip)
+	}
+	for _, c := range got {
+		if strings.Contains(c.Source, "SECRET") && c.Skip == "" {
+			t.Errorf("a secret reached a finding: %+v", c)
+		}
+	}
+}
+
+func TestCaptureReadsCodexRulesOnlyWhenTheyAreWholeAndKeepsTheRestOnASymlink(t *testing.T) {
+	m, fake := newCodexModule(t, config.Agents{})
+	real := filepath.Join(t.TempDir(), "dotfiles", "default.rules")
+	writeFile(t, real, "prefix_rule(pattern=[\"dd\"],\n  decision=\"forbidden\")\n"+
+		"prefix_rule(pattern=[\"rm\", \"-rf\"], decision='forbidden')\n"+
+		"prefix_rule(pattern=[\"ls\"], decision=\"allow\")\n")
+	link := filepath.Join(m.CodexHome, "rules", "default.rules")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(m.CodexHome, "config.toml"), "[marketplaces.cx]\nsource_type = \"git\"\nsource = \"o/cx\"\n")
+	fake.OnOK(codexMarketList, `{"marketplaces":[{"name":"cx","root":"/y"}]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	got := capture(t, m)
+	want := []string{
+		"codex marketplace cx",
+		`codex permission ls`,
+		`codex permission prefix_rule(pattern=["dd"], !`,
+		`codex permission prefix_rule(pattern=["rm", "-rf"], decision='forbidden') !`,
+	}
+	if l := listed(got); !slices.Equal(l, want) {
+		t.Errorf("candidates\n got %q\nwant %q", l, want)
+	}
+}
+
+func TestCaptureServerDeclaredForOtherProvidersIsReported(t *testing.T) {
+	m, fake := newModule(t, config.Agents{
+		Providers: []string{config.ProviderClaude, config.ProviderCodex},
+		MCP:       map[string]config.MCPServer{"docs": {Command: "npx", Providers: []string{config.ProviderCodex}}},
+	})
+	writeFile(t, m.claudeJSONPath(), `{"mcpServers": {"docs": {"type": "stdio", "command": "other"}}}`)
+	fake.OnOK(marketList, "[]")
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	fake.OnOK(codexMarketList, `{"marketplaces":[]}`)
+	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
+	writeFile(t, filepath.Join(m.codexBackend().home, "config.toml"), "[mcp_servers.docs]\ncommand = \"npx\"\n")
+	got := capture(t, m)
+	if l := listed(got); !slices.Equal(l, []string{"claude mcp docs !"}) || !strings.Contains(got[0].Skip, "other providers only") {
+		t.Errorf("candidates = %q", l)
 	}
 }

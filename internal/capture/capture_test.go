@@ -124,7 +124,7 @@ func TestPlanDropsOperationsTheConfigRejects(t *testing.T) {
 		rule("claude", "deny", "ls"),
 		rule("claude", "allow", "git status"),
 	}, cfg, home)
-	if got := summary(res); !slices.Equal(got, []string{"add plugin a@market claude", `allow "ls" claude`, `allow "git status" claude`}) {
+	if got := summary(res); !slices.Equal(got, []string{"add plugin a@market claude", `deny "ls" claude`, `allow "git status" claude`}) {
 		t.Errorf("ops = %q", got)
 	}
 	got := skips(res)
@@ -132,7 +132,6 @@ func TestPlanDropsOperationsTheConfigRejects(t *testing.T) {
 		"claude marketplace market":  "already declared",
 		"claude plugin b@nowhere":    `marketplace "nowhere" is not declared`,
 		"claude permission rm -rf *": "contains '*'",
-		"claude permission ls":       "one decision per provider",
 	} {
 		if !strings.Contains(got[key], want) || !strings.HasPrefix(got[key], "can't be declared: ") {
 			t.Errorf("%s: %q, want %q", key, got[key], want)
@@ -148,5 +147,21 @@ func TestPlanWithNothingToDeclare(t *testing.T) {
 	res := Plan(nil, cfg, home)
 	if len(res.Ops) != 0 || len(res.Findings) != 0 || len(res.Skipped) != 0 {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestPlanKeepsTheStrictestDecisionOfACommand(t *testing.T) {
+	cfg, home := repo(t)
+	res := Plan([]agents.Candidate{
+		rule("codex", "allow", "git push"),
+		rule("codex", "review", "git push"),
+		rule("codex", "deny", "git push"),
+		rule("claude", "allow", "git push"),
+	}, cfg, home)
+	if got := summary(res); !slices.Equal(got, []string{`deny "git push" codex`, `allow "git push" claude`}) {
+		t.Errorf("ops = %q", got)
+	}
+	if len(res.Skipped) != 2 || !strings.Contains(res.Skipped[0].Skip, "stricter decision") {
+		t.Errorf("skipped = %v", skips(res))
 	}
 }

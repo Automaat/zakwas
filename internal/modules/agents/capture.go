@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -145,12 +147,39 @@ func (m *Module) pluginCandidate(provider, id string, enabled bool, d declared, 
 func (m *Module) marketplaceCandidate(provider, name, source string) Candidate {
 	c := Candidate{Provider: provider, Kind: KindMarketplace, Name: name, Source: source}
 	switch _, named := m.Agents.Marketplaces[name]; {
+	case secretSource(source) != "":
+		c.Skip = secretSource(source)
 	case named:
 		c.Skip = "declared in zakwas.yaml for other providers only; add this provider to its providers by hand"
 	case source == "":
 		c.Skip = "no source to declare"
 	}
 	return c
+}
+
+var tokenPrefix = regexp.MustCompile(`(?i)(ghp_|gho_|ghs_|github_pat_|glpat-|xox[abprs]-|sk-[a-z0-9]|AKIA[0-9A-Z]{8})`)
+
+// secretSource says why a marketplace source may carry a credential, or "".
+// A user name alone is what ssh://git@host uses, so only a password, a user
+// name on an http URL, or a query counts.
+func secretSource(source string) string {
+	const why = "its source has credentials or a query, which could hold a key; add it to zakwas.yaml by hand"
+	base, _, _ := strings.Cut(source, "#")
+	if tokenPrefix.MatchString(base) {
+		return why
+	}
+	if !strings.Contains(base, "://") {
+		return ""
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return why
+	}
+	_, hasPassword := u.User.Password()
+	if hasPassword || u.RawQuery != "" || u.User != nil && (u.Scheme == "http" || u.Scheme == "https") {
+		return why
+	}
+	return ""
 }
 
 func (m *Module) captureClaude(ctx context.Context) ([]Candidate, error) {
@@ -253,6 +282,13 @@ func (m *Module) captureMCP(provider string, store mcpStore) ([]Candidate, error
 	var out []Candidate
 	for _, name := range sortedKeys(have) {
 		if _, declared := m.Agents.MCP[name]; declared {
+			if slices.ContainsFunc(m.Agents.MCPFor(provider), func(s config.NamedMCPServer) bool { return s.Name == name }) {
+				continue
+			}
+			out = append(out, Candidate{
+				Provider: provider, Kind: KindMCP, Name: name, Found: m.Paths.Pretty(store.path()),
+				Skip: "declared in zakwas.yaml for other providers only; add this provider to its providers by hand",
+			})
 			continue
 		}
 		if _, added := owned[name]; added {
@@ -315,6 +351,9 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 	}
 	s.Command, _ = v["command"].(string)
 	s.Args = mcpStrings(v["args"])
+	if secretArgs(s.Args) {
+		return s, "an argument looks like a credential, which would reach the config repo; add it to zakwas.yaml by hand"
+	}
 	if provider == config.ProviderCodex {
 		s.EnvVars = mcpStrings(v["env_vars"])
 		return s, ""
@@ -326,6 +365,22 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 		}
 	}
 	return s, ""
+}
+
+var credentialFlag = regexp.MustCompile(`(?i)^-{0,2}[a-z0-9_-]*(token|secret|passw(or)?d|api-?key|apikey|credential)[a-z0-9_-]*(=.+)?$`)
+
+// secretArgs reports an argument that names a credential with its value, or
+// holds one by its look.
+func secretArgs(args []string) bool {
+	for i, a := range args {
+		switch {
+		case tokenPrefix.MatchString(a):
+			return true
+		case credentialFlag.MatchString(a) && (strings.Contains(a, "=") || i+1 < len(args)):
+			return true
+		}
+	}
+	return false
 }
 
 func mcpStrings(v any) []string {
@@ -443,8 +498,8 @@ var codexRuleDecisions = map[string]string{
 // The rules file zakwas writes is another file.
 func (m *Module) captureCodexRules() ([]Candidate, error) {
 	path := filepath.Join(m.codexBackend().home, "rules", "default.rules")
-	data, err := readRegular(path)
-	if err != nil {
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("codex: %s: %w", m.Paths.Pretty(path), err)
 	}
 	known := m.declaredCommands(config.ProviderCodex)
@@ -486,6 +541,9 @@ var (
 // pattern has alternatives, or whose decision zakwas doesn't know, comes
 // back with the reason it can't be declared.
 func parsePrefixRule(line string) (words []string, decision, justification, reason string) {
+	if !strings.HasSuffix(line, ")") {
+		return nil, "", "", "the rule spans lines, which capture can't read"
+	}
 	m := rulePattern.FindStringSubmatch(line)
 	if m == nil {
 		return nil, "", "", "its pattern has alternatives or spans lines, which capture can't declare"
@@ -497,6 +555,9 @@ func parsePrefixRule(line string) (words []string, decision, justification, reas
 		return nil, "", "", "its pattern is empty"
 	}
 	d := ruleDecision.FindStringSubmatch(line)
+	if d == nil && strings.Contains(line, "decision") {
+		return words, "", "", "its decision isn't written as decision=\"...\", which capture can't read"
+	}
 	if d == nil {
 		decision = config.PermissionAllow
 	} else if decision = codexRuleDecisions[d[1]]; decision == "" {
