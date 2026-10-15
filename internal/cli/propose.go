@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	udiff "github.com/aymanbagabas/go-udiff"
 
@@ -300,7 +301,7 @@ func runProposals(env Env, args []string, out, errOut *console) int {
 	}
 	now := env.now()
 	for _, p := range mine {
-		out.printf("%s  %-4s  %-8s  %s\n", p.ID, p.Tier, expiry(p, now), p.Summary)
+		out.printf("%s  %-4s  %-8s  %s\n", p.ID, printable(p.Tier), expiry(p, now), printable(p.Summary))
 	}
 	return ExitOK
 }
@@ -437,4 +438,15 @@ func configWithEdits(res *proposal.Result, dir, home string) (*config.Config, er
 		c.Mise = &m
 	}
 	return &c, nil
+}
+
+// printable drops control characters from text read back from a proposal
+// file, which anything that can write the state directory could have forged.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }

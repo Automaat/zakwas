@@ -175,3 +175,14 @@ func TestScalar(t *testing.T) {
 		}
 	}
 }
+
+func TestParseYAMLRejectsMoreThanOneDocument(t *testing.T) {
+	for _, in := range []string{"a: 1\n---\nb: 2\n", "a: 1\n...\n---\nb: 2\n"} {
+		if _, err := parseYAML([]byte(in)); err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
+			t.Errorf("%q: err = %v", in, err)
+		}
+	}
+	if _, err := parseYAML([]byte("a: 1\n---\n")); err == nil {
+		t.Log("a trailing empty document is accepted or rejected, either keeps the file safe")
+	}
+}

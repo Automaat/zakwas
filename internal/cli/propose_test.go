@@ -359,3 +359,63 @@ func TestApproveLeavesOtherChangesUncommitted(t *testing.T) {
 		t.Errorf("status = %q, the user's staged file should stay staged", status)
 	}
 }
+
+type editWhileAsking struct {
+	path string
+	done bool
+}
+
+func (r *editWhileAsking) Read(p []byte) (int, error) {
+	if !r.done {
+		r.done = true
+		data, err := os.ReadFile(r.path)
+		if err != nil {
+			return 0, err
+		}
+		if err := os.WriteFile(r.path, append(data, "# saved while the prompt waited\n"...), 0o644); err != nil {
+			return 0, err
+		}
+	}
+	return copy(p, "y\n"), nil
+}
+
+func TestApproveKeepsAnEditSavedWhileItAsks(t *testing.T) {
+	env, _ := proposeSetup(t)
+	p := propose(t, env, "add-permission", "review", "git", "push")
+	env.StdinTTY = true
+	path := filepath.Join(env.Cwd, "zakwas.yaml")
+	var stdout, stderr strings.Builder
+	env.Args = []string{"approve", p.ID}
+	env.Stdin, env.Stdout, env.Stderr = &editWhileAsking{path: path}, &stdout, &stderr
+	if code := Main(context.Background(), env); code != ExitErr || !strings.Contains(stderr.String(), "uncommitted changes") {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+	if got := readFile(t, path); !strings.Contains(got, "saved while the prompt waited") || strings.Contains(got, "git push") {
+		t.Errorf("approve overwrote the user's edit:\n%s", got)
+	}
+}
+
+func TestForgedProposalTextIsNotTrusted(t *testing.T) {
+	env, home := proposeSetup(t)
+	p := propose(t, env, "add-permission", "review", "git", "push")
+	file := filepath.Join(proposal.Dir(home), p.ID+".json")
+	forged := strings.Replace(readFile(t, file), `"summary": "review \"git push\""`, `"summary": "tidy up\u001b[8m"`, 1)
+	forged = strings.Replace(forged, `"tier": "high"`, `"tier": "low"`, 1)
+	if err := os.WriteFile(file, []byte(forged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := invoke(env, "", "proposals"); strings.Contains(r.stdout, "\x1b") {
+		t.Errorf("proposals prints control characters: %q", r.stdout)
+	}
+	env.StdinTTY = true
+	r := invoke(env, "y\n", "approve", p.ID)
+	if r.code != ExitOK || strings.Contains(r.stdout, "\x1b") || !strings.Contains(r.stdout, `review "git push" (high risk)`) {
+		t.Fatalf("exit %d\nstdout: %q\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+	if subject := gitIn(t, env.Cwd, "log", "-1", "--format=%s"); subject != `zakwas: review "git push"` {
+		t.Errorf("commit subject = %q", subject)
+	}
+	if body := gitIn(t, env.Cwd, "log", "-1", "--format=%b"); !strings.Contains(body, "(high risk)") {
+		t.Errorf("commit body = %q", body)
+	}
+}

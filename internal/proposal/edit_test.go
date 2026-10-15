@@ -218,6 +218,7 @@ func TestClassify(t *testing.T) {
 		{"cask", Op{Kind: AddBrew, Name: "iterm2", Cask: true}, TierHigh},
 		{"tap formula", Op{Kind: AddBrew, Name: "owner/tap/tool"}, TierHigh},
 		{"mise pin", Op{Kind: PinMise, Name: "node", Version: "22"}, TierLow},
+		{"mise backend tool", Op{Kind: PinMise, Name: "npm:left-pad", Version: "1.0.0"}, TierHigh},
 		{"mcp", Op{Kind: AddMCP, Name: "docs"}, TierHigh},
 	}
 	for _, tt := range tests {
@@ -257,5 +258,21 @@ func TestSensitiveTouches(t *testing.T) {
 		if _, got := s.Touches(tt.text); got != tt.want {
 			t.Errorf("Touches(%q) = %v, want %v", tt.text, got, tt.want)
 		}
+	}
+}
+
+func TestAddBrewRefusesFilesAnInsertCouldLandInside(t *testing.T) {
+	for _, in := range []string{
+		"brew \"foo\", args: [\n  \"HEAD\",\n  \"verbose\"\n]\ncask \"x\"\n",
+		"if OS.mac?\n  brew \"a\"\nend\n",
+		"brew \"a\"\ncask \"b\" do\nend\n",
+	} {
+		if _, err := addBrew([]byte(in), "jq", false); err == nil {
+			t.Errorf("%q: accepted", in)
+		}
+	}
+	got, err := addBrew([]byte("tap \"x/y\" # [odd] comment\nbrew \"a\", args: [\"HEAD\"] if OS.mac?\n"), "jq", false)
+	if err != nil || !strings.HasSuffix(string(got), "brew \"jq\"\n") {
+		t.Errorf("one-line entries: %q, %v", got, err)
 	}
 }

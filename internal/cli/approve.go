@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -78,6 +79,8 @@ type approval struct {
 	p      *proposal.Proposal
 	out    *console
 	errOut *console
+
+	summary, tier string
 }
 
 func (a *approval) fail(err error) int {
@@ -122,7 +125,8 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 	}
 
 	style := engine.Style{Color: a.env.Color, ShowDiffs: true}
-	a.out.printf("Proposal %s: %s (%s risk)\n", a.p.ID, a.p.Summary, ev.tier)
+	a.summary, a.tier = proposal.Summaries(ev.ops), ev.tier
+	a.out.printf("Proposal %s: %s (%s risk)\n", a.p.ID, a.summary, a.tier)
 	for _, r := range ev.reasons {
 		a.out.print("  " + r + "\n")
 	}
@@ -137,13 +141,19 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		return ExitErr
 	}
 
+	if _, err := a.checkGit(ctx, rels); err != nil {
+		return a.fail(fmt.Errorf("while waiting for the answer: %w", err))
+	}
 	restore, err := writeEdits(ev.edits)
 	if err != nil {
 		return a.fail(err)
 	}
 	if code := a.apply(ctx, ev, style); code != ExitOK {
-		restore()
-		a.errOut.print("zakwas: restored the config files; the proposal is still pending\n")
+		if err := restore(); err != nil {
+			a.errOut.fail(fmt.Errorf("couldn't restore every config file; check them with git status: %w", err))
+		} else {
+			a.errOut.print("zakwas: restored the config files; the proposal is still pending\n")
+		}
 		return code
 	}
 	if err := store.Delete(a.p.ID); err != nil {
@@ -221,11 +231,11 @@ func (a *approval) apply(ctx context.Context, ev *evaluation, style engine.Style
 
 func (a *approval) commit(ctx context.Context, rels []string) error {
 	root := a.cfg.Root
-	subject := "zakwas: " + a.p.Summary
+	subject := "zakwas: " + a.summary
 	if r := []rune(subject); len(r) > 72 {
 		subject = string(r[:71]) + "…"
 	}
-	body := fmt.Sprintf("Proposal %s (%s risk), approved in a terminal.", a.p.ID, a.p.Tier)
+	body := fmt.Sprintf("Proposal %s (%s risk), approved in a terminal.", a.p.ID, a.tier)
 	run := func(args ...string) error {
 		return runner.Check(ctx, a.env.Runner, runner.Cmd{Name: "git", Args: append([]string{"-C", root}, args...)})
 	}
@@ -236,18 +246,21 @@ func (a *approval) commit(ctx context.Context, rels []string) error {
 }
 
 // writeEdits replaces the files with their new contents and returns a func
-// that puts the old contents back.
-func writeEdits(edits []proposal.Edit) (restore func(), err error) {
+// that puts the old contents back. Each write first checks the file still
+// holds what the edit was made from, so a change saved since the prompt
+// isn't overwritten; the restore does the same against the new contents.
+func writeEdits(edits []proposal.Edit) (restore func() error, err error) {
 	var done []proposal.Edit
-	restore = func() {
+	restore = func() error {
+		var errs []error
 		for _, e := range slices.Backward(done) {
-			_ = replaceFile(e.Path, e.Old)
+			errs = append(errs, replaceFile(e.Path, e.New, e.Old))
 		}
+		return errors.Join(errs...)
 	}
 	for _, e := range edits {
-		if err := replaceFile(e.Path, e.New); err != nil {
-			restore()
-			return func() {}, err
+		if err := replaceFile(e.Path, e.Old, e.New); err != nil {
+			return func() error { return nil }, errors.Join(err, restore())
 		}
 		done = append(done, e)
 	}
@@ -255,8 +268,15 @@ func writeEdits(edits []proposal.Edit) (restore func(), err error) {
 }
 
 // replaceFile writes data through a temporary file and a rename, keeping the
-// file's mode.
-func replaceFile(path string, data []byte) error {
+// file's mode, but only while the file still holds want.
+func replaceFile(path string, want, data []byte) error {
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, want) {
+		return fmt.Errorf("%s changed while zakwas was working on it; nothing was overwritten", path)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return err

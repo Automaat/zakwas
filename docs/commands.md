@@ -99,14 +99,14 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 
 `--providers`, `--arg` and `--env-var` take a comma list or repeat. A command that starts with a dash goes after `--`: `zakwas propose add-permission allow -- ls -la`. Also `-c PATH` and `-json`, which prints the proposal as JSON.
 
-Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared, and a brew or mise edit when the config file is a symlink or outside the config repo.
+Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared, a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
 
 **Risk tier.** `low` or `high`, from the operations and the plan of the modules they affect (a permission or MCP edit also plans `templates`, a mise pin `files`):
 
 | Tier | Operations |
 |---|---|
-| low | add a plugin from a declared marketplace; add a `deny` or `review` rule; remove an `allow` rule; add a core Homebrew formula (not a cask, not from a tap); pin a mise tool |
-| high | everything else: an `allow` rule, removing a `deny` or `review` rule, a cask or tap formula, an MCP server |
+| low | add a plugin from a declared marketplace; add a `deny` or `review` rule; remove an `allow` rule; add a core Homebrew formula (not a cask, not from a tap); pin a mise tool (without a backend prefix such as `npm:` or `github:`) |
+| high | everything else: an `allow` rule, removing a `deny` or `review` rule, a cask or tap formula, a tool from a mise backend, an MCP server |
 
 Whatever the operations, a proposal is high when the plan it will run touches agent config (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`), shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, …), `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The plan is the whole plan of those modules, including drift that was already there, since that is what `approve` runs.
 
@@ -120,7 +120,7 @@ Loads the proposal, computes the diff, plan and tier again from its operations a
 
 It refuses, changing nothing, when:
 
-- the config file, Brewfile or mise config the proposal was made against has changed (propose again);
+- the config file, Brewfile or mise config the proposal was made against has changed (propose again); a file saved while the prompt waits is detected before anything is written, and never overwritten;
 - the proposal is older than 7 days, or was made for another config;
 - an edited file has uncommitted changes, the config repo isn't a git repository, or `HEAD` is detached;
 - a module can't be planned;

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -267,6 +268,9 @@ func addBrew(data []byte, name string, cask bool) ([]byte, error) {
 			return nil, fmt.Errorf("%s %q is already in the Brewfile", kind, name)
 		}
 	}
+	if err := plainBrewfile(data); err != nil {
+		return nil, err
+	}
 	lines := strings.SplitAfter(string(data), "\n")
 	if lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
@@ -294,6 +298,32 @@ func addBrew(data []byte, name string, cask bool) ([]byte, error) {
 		out = strings.TrimSuffix(out, eol)
 	}
 	return []byte(out), nil
+}
+
+var (
+	rubyBlock    = regexp.MustCompile(`^\s*(if|unless|else|elsif|end|case|when|begin|while|until|for)\b|\bdo(\s*\|[^|]*\|)?\s*$`)
+	quotedString = regexp.MustCompile(`"[^"]*"|'[^']*'`)
+)
+
+// plainBrewfile refuses a Brewfile an inserted line could land inside: one
+// with Ruby blocks or an entry that spans lines through an open bracket.
+func plainBrewfile(data []byte) error {
+	depth := 0
+	for line := range strings.Lines(string(data)) {
+		code := strings.TrimSpace(quotedString.ReplaceAllString(line, `""`))
+		if i := strings.Index(code, "#"); i >= 0 {
+			code = strings.TrimSpace(code[:i])
+		}
+		if rubyBlock.MatchString(code) {
+			return errors.New("the Brewfile has Ruby blocks; add the package by hand")
+		}
+		depth += strings.Count(code, "[") + strings.Count(code, "(") + strings.Count(code, "{")
+		depth -= strings.Count(code, "]") + strings.Count(code, ")") + strings.Count(code, "}")
+		if depth != 0 {
+			return errors.New("the Brewfile has an entry that spans lines; add the package by hand")
+		}
+	}
+	return nil
 }
 
 // continued reports whether a Brewfile line continues on the next one.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
@@ -31,9 +32,14 @@ func parseYAML(data []byte) (*yamlFile, error) {
 	if f.lines[len(f.lines)-1] == "" {
 		f.lines = f.lines[:len(f.lines)-1]
 	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
+	}
+	var next yaml.Node
+	if err := dec.Decode(&next); !errors.Is(err, io.EOF) {
+		return nil, errors.New("the file has more than one YAML document, which edits don't support")
 	}
 	if len(doc.Content) > 0 {
 		root := doc.Content[0]

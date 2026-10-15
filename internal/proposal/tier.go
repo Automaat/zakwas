@@ -34,7 +34,12 @@ func Classify(ops []Op) (tier string, reasons []string) {
 // so every plugin is from a declared marketplace.
 func (o Op) highBecause() string {
 	switch o.Kind {
-	case AddPlugin, PinMise:
+	case AddPlugin:
+		return ""
+	case PinMise:
+		if strings.Contains(o.Name, ":") {
+			return "a tool from a mise backend (npm:, github:, cargo:, ...) runs code from outside the registry"
+		}
 		return ""
 	case AddPermission:
 		if o.Decision == config.PermissionAllow {
