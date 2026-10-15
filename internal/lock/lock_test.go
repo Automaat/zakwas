@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
-	"sync/atomic"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,7 +25,8 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		fmt.Println("locked")
-		select {}
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -69,12 +73,12 @@ func TestNoWaitNamesTheHolder(t *testing.T) {
 func TestWaitsUntilReleased(t *testing.T) {
 	home := t.TempDir()
 	held := acquire(t, home, Options{})
-	var waitedFor atomic.Value
-	done := make(chan *Lock)
+	waiting := make(chan Holder, 1)
+	done := make(chan *Lock, 1)
 	go func() {
 		l, err := Acquire(context.Background(), home, "zakwas upgrade", Options{
 			Poll:   10 * time.Millisecond,
-			OnWait: func(h Holder) { waitedFor.Store(h) },
+			OnWait: func(h Holder) { waiting <- h },
 		})
 		if err != nil {
 			t.Error(err)
@@ -82,10 +86,16 @@ func TestWaitsUntilReleased(t *testing.T) {
 		done <- l
 	}()
 
+	var h Holder
+	select {
+	case h = <-waiting:
+	case <-done:
+		t.Fatal("acquired without waiting while the lock was held")
+	}
 	select {
 	case <-done:
 		t.Fatal("acquired while the lock was held")
-	case <-time.After(300 * time.Millisecond):
+	default:
 	}
 	if err := held.Release(); err != nil {
 		t.Fatal(err)
@@ -96,7 +106,6 @@ func TestWaitsUntilReleased(t *testing.T) {
 	}
 	defer func() { _ = second.Release() }()
 
-	h, _ := waitedFor.Load().(Holder)
 	if h.PID != os.Getpid() || h.Command != "zakwas apply" {
 		t.Errorf("OnWait got %+v", h)
 	}
@@ -123,13 +132,19 @@ func TestKilledHolderReleasesTheLock(t *testing.T) {
 	home := t.TempDir()
 	cmd := exec.Command(os.Args[0])
 	cmd.Env = append(os.Environ(), holdEnv+"="+home)
+	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = stdin.Close() })
 	if line, _ := bufio.NewReader(stdout).ReadString('\n'); line != "locked\n" {
 		t.Fatalf("holder said %q", line)
 	}
@@ -189,5 +204,179 @@ func TestReadOnlyLockFileStillLocks(t *testing.T) {
 	var busy *BusyError
 	if !errors.As(err, &busy) {
 		t.Errorf("a second run got %v, want *BusyError", err)
+	}
+}
+
+func skipIfRoot(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file modes")
+	}
+}
+
+func TestBlockedRunDoesNotNameAHolderItCannotTrust(t *testing.T) {
+	skipIfRoot(t)
+	home := t.TempDir()
+	if err := acquire(t, home, Options{}).Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(home), []byte("4242\nzakwas apply\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(Path(home), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	held := acquire(t, home, Options{})
+	defer func() { _ = held.Release() }()
+
+	_, err := Acquire(context.Background(), home, "zakwas apply", Options{NoWait: true})
+
+	var busy *BusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("got %v, want *BusyError", err)
+	}
+	if busy.Holder != (Holder{}) {
+		t.Errorf("holder %+v, want none: the file names an earlier run", busy.Holder)
+	}
+	if want := "another run is in progress: another zakwas run; not waiting (--no-wait)"; err.Error() != want {
+		t.Errorf("error %q, want %q", err, want)
+	}
+}
+
+func TestUnavailable(t *testing.T) {
+	skipIfRoot(t)
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, home string)
+	}{
+		{"state dir is read-only", func(t *testing.T, home string) {
+			mkdir(t, filepath.Dir(Path(home)), 0o555)
+		}},
+		{"state dir can't be created", func(t *testing.T, home string) {
+			mkdir(t, home, 0o555)
+		}},
+		{"state dir is read-only and holds an unopenable lock file", func(t *testing.T, home string) {
+			mkdir(t, filepath.Dir(Path(home)), 0o755)
+			if err := os.WriteFile(Path(home), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(Path(home), 0); err != nil {
+				t.Fatal(err)
+			}
+			mkdir(t, filepath.Dir(Path(home)), 0o555)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := filepath.Join(t.TempDir(), "home")
+			if err := os.Mkdir(home, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			tt.setup(t, home)
+
+			l, err := Acquire(context.Background(), home, "zakwas apply", Options{})
+
+			if l != nil {
+				t.Fatal("got a lock, want none")
+			}
+			var unavailable *UnavailableError
+			if !errors.As(err, &unavailable) {
+				t.Fatalf("got %v, want *UnavailableError", err)
+			}
+			if !errors.Is(err, fs.ErrPermission) {
+				t.Errorf("%v does not wrap the permission error", err)
+			}
+			if unavailable.Path != Path(home) || !strings.Contains(err.Error(), Path(home)) {
+				t.Errorf("error %q does not name %s", err, Path(home))
+			}
+			if strings.Contains(err.Error(), "no such file") {
+				t.Errorf("error %q hides the permission error", err)
+			}
+		})
+	}
+}
+
+func mkdir(t *testing.T, dir string, mode os.FileMode) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, mode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+func TestReleaseNilLock(t *testing.T) {
+	var l *Lock
+	if err := l.Release(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBlockedRunIgnoresAHolderThatIsGone(t *testing.T) {
+	skipIfRoot(t)
+	home := t.TempDir()
+	gone := exec.Command(os.Args[0], "-test.run=^$")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := acquire(t, home, Options{}).Release(); err != nil {
+		t.Fatal(err)
+	}
+	stale := fmt.Sprintf("%d\nzakwas apply\n", gone.Process.Pid)
+	if err := os.WriteFile(Path(home), []byte(stale), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(Path(home), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	readOnly := acquire(t, home, Options{})
+	defer func() { _ = readOnly.Release() }()
+	if err := os.Chmod(Path(home), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Acquire(context.Background(), home, "zakwas apply", Options{NoWait: true})
+
+	var busy *BusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("got %v, want *BusyError", err)
+	}
+	if busy.Holder != (Holder{}) {
+		t.Errorf("holder %+v, want none: its pid %d is gone", busy.Holder, gone.Process.Pid)
+	}
+}
+
+func TestUnopenableLockFileFailsInAWritableDir(t *testing.T) {
+	skipIfRoot(t)
+	home := t.TempDir()
+	if err := acquire(t, home, Options{}).Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(Path(home), 0); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := Acquire(context.Background(), home, "zakwas apply", Options{})
+
+	if l != nil {
+		t.Fatal("got a lock, want none")
+	}
+	var fileErr *FileError
+	if !errors.As(err, &fileErr) {
+		t.Fatalf("got %v, want *FileError", err)
+	}
+	var unavailable *UnavailableError
+	if errors.As(err, &unavailable) {
+		t.Errorf("%v must not be the warn-and-continue error", err)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("%v does not wrap the permission error", err)
+	}
+	for _, want := range []string{Path(home), "permission denied", "another user", "remove it or chmod it"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
 	}
 }

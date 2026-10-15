@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -489,6 +491,45 @@ func TestConcurrentAppliesEndLikeSequentialOnes(t *testing.T) {
 	}
 	if string(log) != "ran\n" {
 		t.Errorf("command ran %d times, want once: the second apply planned before the first finished", strings.Count(string(log), "ran"))
+	}
+}
+
+func TestRunsAreMarkedAsHoldingTheLockEvenWithoutOne(t *testing.T) {
+	tests := []struct {
+		name string
+		mode os.FileMode
+	}{
+		{"state dir can be written", 0o755},
+		{"state dir is read-only", 0o555},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if os.Geteuid() == 0 && tt.mode != 0o755 {
+				t.Skip("root ignores file modes")
+			}
+			home := t.TempDir()
+			stateDir := filepath.Dir(lock.Path(home))
+			if err := os.MkdirAll(stateDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(stateDir, tt.mode); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(stateDir, 0o755) })
+			ex := &runner.Exec{}
+			env := Env{Home: home, Runner: ex}
+			var errBuf bytes.Buffer
+
+			held, code, ok := acquireLock(context.Background(), env, "apply", true, &console{w: &errBuf})
+
+			if !ok || code != ExitOK {
+				t.Fatalf("code %d, ok %v, stderr: %s", code, ok, errBuf.String())
+			}
+			defer func() { _ = held.Release() }()
+			if want := LockHeldEnv + "=" + strconv.Itoa(os.Getpid()); !slices.Contains(ex.Env, want) {
+				t.Errorf("commands run with %v, want %s", ex.Env, want)
+			}
+		})
 	}
 }
 

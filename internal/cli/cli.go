@@ -332,7 +332,9 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 // acquireLock serializes the commands that change the system: a second one
 // waits for the first, so it plans against what the first left behind. plan
 // and check take no lock; state files are replaced atomically, so they never
-// read a half-written one.
+// read a half-written one. The commands the run starts are marked as running
+// under it whether or not the lock could be taken, so a nested zakwas apply is
+// refused even in a state dir the lock can't live in.
 func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, int, bool) {
 	held, ok := takeLock(ctx, env, cmd, noWait, errOut)
 	if !ok {
@@ -345,7 +347,10 @@ func acquireLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *
 }
 
 // takeLock takes the run lock without marking the runner's commands as
-// running under it, for a long-lived process that sets that once.
+// running under it, for a long-lived process that sets that once. A lock the
+// state dir or file won't allow is a warning, not a failure, so a read-only
+// state dir keeps working as it did before the lock; the returned lock is
+// then nil.
 func takeLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *console) (*lock.Lock, bool) {
 	if env.LockHeldBy != "" {
 		errOut.printf("zakwas: can't run %s inside a zakwas run (pid %s holds the lock and would wait for itself forever)\n", cmd, env.LockHeldBy)
@@ -357,6 +362,11 @@ func takeLock(ctx context.Context, env Env, cmd string, noWait bool, errOut *con
 			errOut.print("zakwas: waiting for " + h.String() + " to finish\n")
 		},
 	})
+	var unavailable *lock.UnavailableError
+	if errors.As(err, &unavailable) {
+		errOut.print("zakwas: warning: " + unavailable.Error() + "; running without it, so another run is not kept out\n")
+		return nil, true
+	}
 	if err != nil {
 		if ctx.Err() == nil {
 			errOut.fail(err)
