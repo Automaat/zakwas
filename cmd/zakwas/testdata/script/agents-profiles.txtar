@@ -1,0 +1,149 @@
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+
+zakwas plan --only agents
+stdout 'claude profile build can''t express: sandbox; shell: allow'
+stdout 'codex profile review can''t express: tools'
+stdout 'opencode profile review can''t express: reviewer: auto'
+! exists claude/agents/zakwas
+! exists codex
+
+zakwas apply -y --only templates,agents
+stdout 'Applied \d+ of \d+ steps'
+cmp claude/agents/zakwas/review.md claude-review.golden
+cmp codex/review.config.toml codex-review.golden
+grep -count=1 '^  docs_\*: allow$' home/.config/opencode/agents/review.md
+grep -count=1 'Review as opencode' home/.config/opencode/agents/review.md
+exists claude/agents/zakwas/build.md
+exists codex/build.config.toml
+exists home/.config/opencode/agents/build.md
+exists home/.local/state/zakwas/agent-profiles.json
+
+zakwas check --only templates,agents
+stdout 'No changes'
+
+cp zakwas-conflict.yaml zakwas.yaml
+! zakwas plan --only templates,agents
+stdout 'opencode: profiles: profile "review" is also defined by the opencode template'
+
+cp zakwas-undeclared.yaml zakwas.yaml
+! zakwas plan --only agents
+stderr 'agents.profiles.review: mcp.docs: server is not declared in agents.mcp'
+
+cp zakwas-one.yaml zakwas.yaml
+zakwas plan --only templates,agents
+stdout 'build.md'
+zakwas apply -y --only templates,agents
+! exists claude/agents/zakwas/build.md
+! exists codex/build.config.toml
+! exists home/.config/opencode/agents/build.md
+exists claude/agents/zakwas/review.md
+exists claude/agents/mine.md
+zakwas check --only templates,agents
+
+cp zakwas-none.yaml zakwas.yaml
+zakwas apply -y --only templates,agents
+! exists claude/agents/zakwas/review.md
+! exists home/.local/state/zakwas/agent-profiles.json
+exists claude/agents/mine.md
+zakwas check --only agents
+
+-- zakwas.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+  mcp:
+    docs: {command: npx, args: [-y, docs-mcp]}
+  profiles:
+    review:
+      description: Read-only review
+      prompt: review.md
+      tools: [read, search, shell]
+      edit: deny
+      shell: ask
+      reviewer: auto
+      mcp: {docs: allow}
+      claude: {model: sonnet}
+    build:
+      description: Build
+      edit: allow
+      shell: allow
+      sandbox: workspace-write
+-- zakwas-conflict.yaml --
+templates:
+  files:
+    - {src: opencode-agents.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, opencode]
+  profiles:
+    review: {description: Read-only review}
+-- zakwas-undeclared.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  profiles:
+    review: {description: d, mcp: {docs: allow}}
+-- zakwas-one.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+  mcp:
+    docs: {command: npx, args: [-y, docs-mcp]}
+  profiles:
+    review:
+      description: Read-only review
+      prompt: review.md
+      tools: [read, search, shell]
+      edit: deny
+      shell: ask
+      reviewer: auto
+      mcp: {docs: allow}
+      claude: {model: sonnet}
+-- zakwas-none.yaml --
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+-- review.md --
+Review as {{ .Provider }}.
+-- opencode.json.tmpl --
+{
+  "mcp": {{ agentMCP "opencode" }}
+}
+-- opencode-agents.json.tmpl --
+{
+  "agent": {"review": {"description": "mine"}}
+}
+-- claude/agents/mine.md --
+mine
+-- claude-review.golden --
+---
+name: review
+description: Read-only review
+model: sonnet
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+  - mcp__docs
+permissionMode: auto
+---
+
+Review as claude.
+-- codex-review.golden --
+approval_policy = 'on-request'
+approvals_reviewer = 'auto_review'
+developer_instructions = "Review as codex.\n"
+sandbox_mode = 'read-only'
+
+[mcp_servers]
+[mcp_servers.docs]
+default_tools_approval_mode = 'approve'
+enabled = true

@@ -540,11 +540,14 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if _, err := os.Lstat(agents.MCPStatePath(env.Home)); agentsCfg == nil && err == nil {
 		agentsCfg = &config.Agents{}
 	}
+	if _, err := os.Lstat(agents.ProfilesStatePath(env.Home)); agentsCfg == nil && err == nil {
+		agentsCfg = &config.Agents{}
+	}
 	if agentsCfg != nil {
 		mods = append(mods, &agents.Module{
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
 			Guard: cfg.Agents.GuardEnabled(), TemplateSources: templateSrcs(cfg, paths),
-			Vars: cfg.Templates.Vars, Immutable: cfg.Protect.Immutable,
+			Vars: cfg.Templates.Vars, Immutable: cfg.Protect.Immutable, TemplateFiles: cfg.Templates.Files,
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
 		})
 	}

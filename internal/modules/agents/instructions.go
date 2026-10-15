@@ -227,7 +227,7 @@ func (m *Module) planInstructions() (map[string][]engine.Change, map[string]erro
 		if keep[samePath(dst)] {
 			continue
 		}
-		c, err := m.planInstructionCopyRemove(in, dst)
+		c, err := m.planCopyRemove(in, m.instructionFilesStatePath(), dst, "instructions no longer managed")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -285,10 +285,11 @@ func (m *Module) symlinkedParent(dst string) bool {
 	return install.CheckParents(m.Paths, dst) != nil
 }
 
-// planInstructionCopyRemove removes a copy zakwas wrote that no provider
-// wants anymore. One edited since is backed up first; one that is no longer
-// a regular file, or sits under a symlinked parent now, is only forgotten.
-func (m *Module) planInstructionCopyRemove(in *install.Installer, dst string) (engine.Change, error) {
+// planCopyRemove removes a copy zakwas wrote, tracked in the state file of
+// in, that nothing wants anymore. One edited since is backed up first; one
+// that is no longer a regular file, or sits under a symlinked parent now, is
+// only forgotten. The state file goes with its last copy.
+func (m *Module) planCopyRemove(in *install.Installer, stateFile, dst, detail string) (engine.Change, error) {
 	target := m.Paths.Pretty(dst)
 	forget := func() error {
 		if err := in.State.Forget(dst); err != nil {
@@ -297,7 +298,7 @@ func (m *Module) planInstructionCopyRemove(in *install.Installer, dst string) (e
 		if len(in.State.Files) > 0 {
 			return nil
 		}
-		if err := os.Remove(m.instructionFilesStatePath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := os.Remove(stateFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		return nil
@@ -332,7 +333,7 @@ func (m *Module) planInstructionCopyRemove(in *install.Installer, dst string) (e
 		}, nil
 	}
 	return engine.Change{
-		Action: engine.Remove, Target: target, Detail: "instructions no longer managed", Destructive: true,
+		Action: engine.Remove, Target: target, Detail: detail, Destructive: true,
 		Apply: func(context.Context) error {
 			if err := install.Unlock(dst); err != nil {
 				return err
