@@ -655,6 +655,61 @@ func TestGeminiMovedHomeLeavesAnExtensionZakwasDidNotLink(t *testing.T) {
 	assertConverged(t, m)
 }
 
+func TestGeminiMovedHomeSkipsAnOldExtensionItCannotUninstall(t *testing.T) {
+	for name, damage := range map[string]func(t *testing.T, old string){
+		"manifest gone": func(t *testing.T, old string) {
+			if err := os.Remove(filepath.Join(old, ".gemini", geminiExtension, "gemini-extension.json")); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"record unreadable": func(t *testing.T, old string) { writeFile(t, geminiInstallPathAt(old), "{not json") },
+		"record missing": func(t *testing.T, old string) {
+			if err := os.RemoveAll(filepath.Dir(geminiInstallPathAt(old))); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, r := newGemini(t, geminiConfig(t))
+			prepareGemini(t, m)
+			m.GeminiHome = filepath.Join(t.TempDir(), "a")
+			oldBase := m.GeminiHome
+			apply(t, plan(t, m))
+			damage(t, oldBase)
+
+			m.GeminiHome = filepath.Join(t.TempDir(), "b")
+			r.Calls = nil
+			apply(t, plan(t, m))
+			for _, c := range r.Calls {
+				if len(c.Args) > 1 && c.Args[1] == "uninstall" {
+					t.Errorf("ran an uninstall for a home it cannot uninstall from: %v", r.Lines())
+				}
+			}
+			if _, err := os.Stat(m.geminiInstallPath()); err != nil {
+				t.Errorf("the extension is not linked in the new home: %v", err)
+			}
+			assertConverged(t, m)
+		})
+	}
+}
+
+func TestGeminiMovedHomeWithGeminiDroppedUninstallsTheOldExtension(t *testing.T) {
+	m, r := newGemini(t, geminiConfig(t))
+	prepareGemini(t, m)
+	m.GeminiHome = filepath.Join(t.TempDir(), "a")
+	oldBase := m.GeminiHome
+	apply(t, plan(t, m))
+
+	m.GeminiHome = filepath.Join(t.TempDir(), "b")
+	m.Agents.Providers = []string{config.ProviderClaude}
+	r.Calls = nil
+	apply(t, plan(t, m))
+	if _, err := os.Lstat(filepath.Dir(geminiInstallPathAt(oldBase))); !os.IsNotExist(err) {
+		t.Errorf("old extension record left behind: %v", err)
+	}
+	assertConverged(t, m)
+}
+
 func TestGeminiSharesTheAgentsSkillsLinkWithCodex(t *testing.T) {
 	m, _ := newGemini(t, config.Agents{Providers: []string{config.ProviderCodex, config.ProviderGemini}, Skills: []config.Skill{{Path: "skills/mine"}}})
 	prepareGemini(t, m)

@@ -397,16 +397,18 @@ func (m *Module) geminiStaleBases(tracked []string) []string {
 // GEMINI_CLI_HOME it no longer uses, with that home in the environment, since
 // gemini keeps its record per home and would warn about the missing manifest
 // on every start. The old manifest's removal comes after, as gemini needs
-// it. keep holds the manifests that must stay until gemini is installed.
-func (m *Module) planGeminiStaleUnlinks(tracked []string) (changes []engine.Change, keep map[string]bool, err error) {
+// it. A record that can't be read, isn't a link zakwas made or has lost its
+// manifest is left alone. keep holds the manifests that must stay until gemini
+// is installed.
+func (m *Module) planGeminiStaleUnlinks(tracked []string) (changes []engine.Change, keep map[string]bool) {
 	keep = map[string]bool{}
 	for _, base := range m.geminiStaleBases(tracked) {
 		have, err := m.geminiLinkedAt(base)
-		if err != nil {
-			return nil, nil, err
-		}
 		dir := filepath.Join(base, ".gemini", geminiExtension)
-		if have == nil || have.Type != "link" || sameFile(have.Source) != sameFile(dir) {
+		if err != nil || have == nil || have.Type != "link" || sameFile(have.Source) != sameFile(dir) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "gemini-extension.json")); errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if !m.Runner.Installed("gemini") {
@@ -422,7 +424,7 @@ func (m *Module) planGeminiStaleUnlinks(tracked []string) (changes []engine.Chan
 			},
 		})
 	}
-	return changes, keep, nil
+	return changes, keep
 }
 
 // planGeminiLink links the extension, or unlinks one zakwas linked when it
@@ -489,10 +491,7 @@ func (m *Module) planGemini() ([]engine.Change, error) {
 	if !wanted && len(tracked) == 0 && link == nil {
 		return nil, nil
 	}
-	stale, staleKept, err := m.planGeminiStaleUnlinks(tracked)
-	if err != nil {
-		return nil, fmt.Errorf("gemini: %w", err)
-	}
+	stale, staleKept := m.planGeminiStaleUnlinks(tracked)
 	changes := stale
 	keep := map[string]bool{}
 	if unlink {
