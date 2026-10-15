@@ -82,10 +82,6 @@ func (o *opencode) update(edit func(*opencodeState)) error {
 	return saveState(o.statePath, st)
 }
 
-func (o *opencode) git(args ...string) runner.Cmd {
-	return runner.Cmd{Name: "git", Args: args, Dir: "/", Env: []string{"GIT_TERMINAL_PROMPT=0"}}
-}
-
 // gitSource splits a git marketplace source into a clone URL and ref.
 func gitSource(src string) (url, ref string) {
 	url, ref, _ = strings.Cut(src, "#")
@@ -543,36 +539,9 @@ func (o *opencode) converge(ctx context.Context, d desired, shown, waiting map[s
 	return nil
 }
 
-// fetch clones a marketplace next to its cache dir, then swaps it in, so a
-// failed clone leaves the previous copy alone.
+// fetch clones a marketplace into the cache.
 func (o *opencode) fetch(ctx context.Context, name, src string) error {
-	if err := os.MkdirAll(o.cacheDir, 0o755); err != nil {
-		return err
-	}
-	stale, _ := filepath.Glob(filepath.Join(o.cacheDir, "."+name+".zakwas-*"))
-	for _, dir := range stale {
-		if err := os.RemoveAll(dir); err != nil {
-			return err
-		}
-	}
-	tmp, err := os.MkdirTemp(o.cacheDir, "."+name+".zakwas-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.RemoveAll(tmp) }()
-	url, ref := gitSource(src)
-	args := []string{"clone", "--quiet", "--depth", "1"}
-	if ref != "" {
-		args = append(args, "--branch", ref)
-	}
-	if err := runner.Check(ctx, o.runner, o.git(append(args, "--", url, tmp)...)); err != nil {
-		return err
-	}
-	dir := filepath.Join(o.cacheDir, name)
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, dir); err != nil {
+	if err := gitClone(ctx, o.runner, o.cacheDir, name, src); err != nil {
 		return err
 	}
 	return o.update(func(st *opencodeState) {
@@ -609,15 +578,7 @@ func (o *opencode) refresh(ctx context.Context, d desired) error {
 			continue
 		}
 		dir := filepath.Join(o.cacheDir, name)
-		_, ref := gitSource(src)
-		if ref == "" {
-			ref = "HEAD"
-		}
-		repo := []string{"--git-dir=" + filepath.Join(dir, ".git"), "--work-tree=" + dir}
-		err := runner.Check(ctx, o.runner, o.git(append(repo, "fetch", "--quiet", "--depth", "1", "origin", ref)...))
-		if err == nil {
-			err = runner.Check(ctx, o.runner, o.git(append(repo, "reset", "--quiet", "--hard", "FETCH_HEAD")...))
-		}
+		err := gitPull(ctx, o.runner, dir, src)
 		if err != nil && (explicitIn(d, name) || ctx.Err() != nil) {
 			errs = append(errs, fmt.Errorf("%w; to fetch it fresh, remove %s and apply again", err, o.paths.Pretty(dir)))
 		}

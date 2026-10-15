@@ -206,6 +206,20 @@ defaults:
 		{"profile override of a managed key", "agents: {profiles: {r: {description: d, claude: {overrides: {tools: x}}}}}", []string{"agents.profiles.r: claude.overrides.tools: zakwas sets it from the profile's own fields"}},
 		{"profile codex block while codex is opt-in", "agents: {profiles: {r: {description: d, codex: {model: m}}}}", []string{"agents.profiles.r: codex: the profile is not rendered for codex; Codex is opt-in"}},
 		{"empty profile provider block", "agents: {profiles: {r: {description: d, opencode: {}}}}", []string{"agents.profiles.r: opencode: set a model or overrides, or remove it"}},
+		{"skill without path", "agents: {skills: [{git: o/r}]}", []string{"agents.skills[0]: path is required"}},
+		{"skill path is the repo root", "agents: {skills: [.]}", []string{`agents.skills[0]: path "." must point at a skill directory`}},
+		{"skill path outside the repo", "agents: {skills: [{git: o/r, path: ../x}]}", []string{`agents.skills[0]: path "../x" must be relative to the root of the git repository`}},
+		{"skill absolute git path", "agents: {skills: [{git: o/r, path: /x}]}", []string{"must be relative to the root of the git repository"}},
+		{"skill path in .git", "agents: {skills: [{git: o/r, path: .git/x}]}", []string{`path ".git/x" goes into .git`}},
+		{"skill ref without git", "agents: {skills: [{path: s/a, ref: v1}]}", []string{"agents.skills[0]: ref only applies to a skill with git"}},
+		{"skill git with ref", "agents: {skills: [{git: 'o/r#v1', path: s/a}]}", []string{"set ref instead"}},
+		{"skill git option", "agents: {skills: [{git: --upload-pack=x, path: s/a}]}", []string{"without a leading '-'"}},
+		{"skill ref option", "agents: {skills: [{git: o/r, path: s/a, ref: -x}]}", []string{`ref "-x" must not start with '-'`}},
+		{"skill git with a space", "agents: {skills: [{git: 'o/r x', path: s/a}]}", []string{"git \"o/r x\" must not contain spaces"}},
+		{"skill name", "agents: {skills: [s/.hidden]}", []string{`name ".hidden" (the last element of path)`}},
+		{"duplicate skill name", "agents: {skills: [a/foo, {git: o/r, path: b/Foo}]}", []string{`agents.skills[1]: skill "Foo" is already declared by agents.skills[0]`}},
+		{"skill provider not managed", "agents: {providers: [claude], skills: [{path: s/a, providers: [codex]}]}", []string{`agents.skills[0].providers: provider "codex" is not in agents.providers`}},
+		{"skill unknown field", "agents: {skills: [{path: s/a, name: b}]}", []string{"field name not found"}},
 		{"mcp oauth and bearer token", "agents: {mcp: {a: {url: 'https://e.com', oauth: true, bearerTokenEnv: T}}}", []string{"agents.mcp.a: oauth can't be combined with an Authorization header (bearerTokenEnv)"}},
 		{"mcp control character", "agents: {mcp: {a: {command: x, args: [\"a\\nb\"]}}}", []string{"agents.mcp.a: values may not hold control characters"}},
 		{"mcp provider not managed", "agents: {providers: [claude], mcp: {a: {command: x, providers: [codex]}}}", []string{`agents.mcp.a.providers: provider "codex" is not in agents.providers`}},
@@ -294,6 +308,15 @@ agents:
     web: {url: 'https://e.com/mcp', bearerTokenEnv: WEB_TOKEN, headers: {X-Org: acme}, headerEnv: {X-Key: KEY}, providers: [claude, codex]}
     linear: {url: 'https://mcp.linear.app/mcp', oauth: true}`},
 		{"empty mcp", "agents: {mcp: {}}"},
+		{"skills", `
+agents:
+  providers: [claude, codex]
+  skills:
+    - skills/mine
+    - ~/work/skills/other
+    - {git: o/skills, path: skills/pdf, ref: v1}
+    - {path: skills/c, providers: [codex]}`},
+		{"empty skills", "agents: {skills: []}"},
 		{"empty permissions", "agents: {permissions: {}}"},
 		{"codex decision differs while codex is not named", "agents: {permissions: {allow: [git push], deny: [{command: git push, providers: [codex]}]}}"},
 		{"example config", mustRead(t, "../../examples/zakwas.yaml")},
@@ -480,6 +503,43 @@ agents:
 	}
 	if got := (*Agents)(nil).MCPFor(ProviderClaude); got != nil {
 		t.Errorf("nil agents servers = %v", got)
+	}
+}
+
+func TestAgentsSkillsFor(t *testing.T) {
+	c, err := Load(writeConfig(t, `
+agents:
+  skills:
+    - skills/b
+    - {path: skills/a, providers: [codex, opencode]}
+    - {git: o/r, path: x/c, providers: [claude]}
+`), "/h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := func(provider string) []string {
+		var out []string
+		for _, s := range c.Agents.SkillsFor(provider) {
+			out = append(out, s.Name)
+		}
+		return out
+	}
+	for provider, want := range map[string][]string{
+		ProviderClaude:   {"b", "c"},
+		ProviderCodex:    {"a"},
+		ProviderOpencode: {"a", "b"},
+	} {
+		if got := names(provider); !slices.Equal(got, want) {
+			t.Errorf("%s skills = %v, want %v", provider, got, want)
+		}
+	}
+	for provider, want := range map[string]bool{ProviderClaude: true, ProviderCodex: true, ProviderOpencode: true} {
+		if got := c.Agents.NamesInSkill(provider); got != want {
+			t.Errorf("NamesInSkill(%s) = %v, want %v", provider, got, want)
+		}
+	}
+	if got := (*Agents)(nil).SkillsFor(ProviderClaude); got != nil {
+		t.Errorf("nil agents skills = %v", got)
 	}
 }
 

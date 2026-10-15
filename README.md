@@ -234,6 +234,24 @@ agents:
 
 See [docs/config.md](docs/config.md#profiles).
 
+### Agent skills
+
+`agents.skills` links skills that don't come from a plugin marketplace into every managed agent: Claude Code reads only `~/.claude/skills`, while Codex and opencode read `~/.agents/skills`.
+
+```yaml
+agents:
+  skills:
+    - dotfiles/skills/review
+    - {git: owner/skills, path: skills/pdf, ref: v1}
+```
+
+- A skill is a directory in the config repo or elsewhere on disk, or a path inside a git repository; its directory name must equal the `name` in its `SKILL.md`.
+- A skill directory or link zakwas did not make fails the plan instead of being replaced; `npx skills` installs are never touched.
+- `plan` never fetches, `apply` clones missing git sources and `zakwas upgrade` pulls them.
+- Removing a skill removes only the links zakwas made.
+
+See [docs/config.md](docs/config.md#skills).
+
 ### Agents can't apply the config
 
 With an `agents` section, zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update` and `approve` (Claude Code's `permissions.deny`, a Codex `forbidden` rule, opencode `deny` patterns), denies Claude Code edits to the config repo's main checkout and zakwas state, and refuses `apply`, `upgrade` and `approve` started from an agent session. Otherwise one prompt injection could make an agent widen its own permissions through `apply`. `plan` and `check` stay allowed, and the plan names a managed provider the guard can't cover. Set `agents.guard: false` to turn it off; zakwas then removes only the rules it added. See [docs/config.md](docs/config.md#guard).

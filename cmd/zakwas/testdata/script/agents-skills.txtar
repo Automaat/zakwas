@@ -1,0 +1,134 @@
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+exec sh -c 'git config --global url."file://$WORK/repo".insteadOf https://github.com/owner/skills.git'
+exec git config --global user.name test
+exec git config --global user.email test@example.com
+exec git config --global commit.gpgsign false
+exec git -C repo init -q
+exec git -C repo add -A
+exec git -C repo commit -qm init
+exec git -C repo tag v1
+
+zakwas plan --only agents
+cmpenv stdout plan.golden
+! exists claude
+! exists home/.agents
+! exists home/.local/share/zakwas
+
+zakwas apply -y --only agents
+stdout 'Applied 4 of 4 steps'
+linkto claude/skills/mine skills/mine
+linkto home/.agents/skills/mine skills/mine
+linkto claude/skills/pdf home/.local/share/zakwas/skills/github-com-owner-skills-v1-a92e86fb/skills/pdf
+exists home/.local/state/zakwas/skills.json
+
+zakwas check --only agents
+stdout 'up to date: agents'
+
+mkdir repo/skills/fresh
+cp repo/skills/pdf/SKILL.md repo/skills/fresh/SKILL.md
+exec git -C repo add -A
+exec git -C repo commit -qm fresh
+exec git -C repo tag -f v1
+zakwas check --only agents
+stdout 'up to date: agents'
+zakwas upgrade -y --only agents
+exists home/.local/share/zakwas/skills/github-com-owner-skills-v1-a92e86fb/skills/fresh/SKILL.md
+
+mkdir claude/skills/theirs
+cp skills/mine/SKILL.md claude/skills/theirs/SKILL.md
+cp zakwas-conflict.yaml zakwas.yaml
+! zakwas plan --only agents
+stdout 'claude: skills: .*theirs already exists and zakwas did not link it'
+exists claude/skills/theirs/SKILL.md
+
+cp zakwas-mismatch.yaml zakwas.yaml
+! zakwas plan --only agents
+stdout 'skill "wrong": SKILL.md of .* names it "mine"'
+
+cp zakwas-one.yaml zakwas.yaml
+zakwas plan --only agents
+cmpenv stdout drop.golden
+zakwas apply -y --only agents
+! exists claude/skills/pdf
+! exists home/.agents/skills/pdf
+! exists home/.agents/skills/mine
+exists claude/skills/theirs/SKILL.md
+linkto claude/skills/mine skills/mine
+zakwas check --only agents
+
+cp zakwas-none.yaml zakwas.yaml
+zakwas apply -y --only agents
+! exists claude/skills/mine
+exists claude/skills/theirs/SKILL.md
+! exists home/.local/state/zakwas/skills.json
+! exists home/.local/share/zakwas/skills/github-com-owner-skills-v1-a92e86fb
+
+-- zakwas.yaml --
+agents:
+  guard: false
+  providers: [claude, codex]
+  skills:
+    - skills/mine
+    - {git: owner/skills, ref: v1, path: skills/pdf}
+-- zakwas-conflict.yaml --
+agents:
+  guard: false
+  providers: [claude, codex]
+  skills:
+    - skills/mine
+    - skills/theirs
+-- zakwas-mismatch.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  skills:
+    - skills/wrong
+-- zakwas-one.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  skills:
+    - skills/mine
+-- zakwas-none.yaml --
+agents:
+  guard: false
+  providers: [claude]
+-- skills/mine/SKILL.md --
+---
+name: mine
+description: test
+---
+-- skills/theirs/SKILL.md --
+---
+name: theirs
+description: test
+---
+-- skills/wrong/SKILL.md --
+---
+name: mine
+description: test
+---
+-- repo/skills/pdf/SKILL.md --
+---
+name: pdf
+description: test
+---
+-- plan.golden --
+agents
+  + $WORK/claude/skills/mine  → $WORK/skills/mine
+  + claude skills                             clone owner/skills#v1, link pdf
+  + ~/.agents/skills/mine                     → $WORK/skills/mine
+  + codex skills                              clone owner/skills#v1, link pdf
+
+Plan: 4 to add, 0 to change, 0 to remove, 0 to run.
+-- drop.golden --
+agents
+  - $WORK/claude/skills/pdf  skill pdf no longer declared
+  - ~/.agents/skills/mine                     skill mine no longer declared
+  - ~/.agents/skills/pdf                      skill pdf no longer declared
+  - skills source owner/skills#v1             ~/.local/share/zakwas/skills/github-com-owner-skills-v1-a92e86fb
+
+⚠ destructive: $WORK/claude/skills/pdf, ~/.agents/skills/mine, ~/.agents/skills/pdf, skills source owner/skills#v1
+
+Plan: 0 to add, 0 to change, 4 to remove, 0 to run.
