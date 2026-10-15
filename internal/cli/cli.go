@@ -240,7 +240,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 	doc := newPlanDoc(env, cfg.Path, commit, onlyList, plan, o.diff)
 	if o.offline {
-		doc.Offline, doc.Skipped = true, offlineSkipped
+		doc.Offline, doc.Skipped = true, offlineNotChecked(mods)
 	}
 	switch {
 	case o.asJSON && cmd == "plan", o.asJSON && cmd == "check":
@@ -252,7 +252,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return ExitErr
 		}
 		if o.offline {
-			out.print(offlineNote(style))
+			out.print(offlineNote(style, offlineNotChecked(mods)))
 		}
 	}
 

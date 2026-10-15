@@ -47,8 +47,20 @@ func offlineModules(mods []engine.Module, explicit bool) ([]engine.Module, error
 	return out, nil
 }
 
+// offlineNotChecked lists what an offline check left out: the modules that
+// need commands, then the offline ones --only did not select.
+func offlineNotChecked(ran []engine.Module) []string {
+	out := slices.Clone(offlineSkipped)
+	for _, name := range offlineChecked {
+		if !slices.ContainsFunc(ran, func(m engine.Module) bool { return m.Name() == name }) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // offlineNote tells the reader what an offline check did not look at, so a
 // clean result isn't taken for a full check.
-func offlineNote(style engine.Style) string {
-	return style.Dim("offline: not checked: "+strings.Join(offlineSkipped, ", ")+"; run `zakwas check` for those") + "\n"
+func offlineNote(style engine.Style, notChecked []string) string {
+	return style.Dim("offline: not checked: "+strings.Join(notChecked, ", ")+"; run `zakwas check` for those") + "\n"
 }

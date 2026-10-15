@@ -147,10 +147,28 @@ func TestOfflineFlagConflicts(t *testing.T) {
 	}
 }
 
-func TestOfflineCheckWithOnlyOfflineModules(t *testing.T) {
+func TestOfflineCheckWithOnlyNamesTheUnselectedModules(t *testing.T) {
 	env, _ := setupOffline(t)
 	r := invoke(env, "", "check", "--offline", "--only", "links")
 	if r.code != ExitDrift || strings.Contains(r.stdout, ".greeting") {
-		t.Errorf("%+v", r)
+		t.Fatalf("%+v", r)
+	}
+	want := "offline: not checked: system, brew, mise, agents, commands, defaults, files, templates;"
+	if !strings.Contains(r.stdout, want) {
+		t.Errorf("note does not name files and templates as unchecked:\n%s", r.stdout)
+	}
+
+	r = invoke(env, "", "check", "--offline", "--only", "links", "--json")
+	var doc planDoc
+	if err := json.Unmarshal([]byte(r.stdout), &doc); err != nil {
+		t.Fatalf("%v\n%s", err, r.stdout)
+	}
+	if got := strings.Join(doc.Skipped, ","); got != "system,brew,mise,agents,commands,defaults,files,templates" {
+		t.Errorf("skipped = %s", got)
+	}
+
+	r = invoke(env, "", "check", "--offline")
+	if strings.Contains(r.stdout, "defaults, files") {
+		t.Errorf("a full offline check names files as unchecked:\n%s", r.stdout)
 	}
 }

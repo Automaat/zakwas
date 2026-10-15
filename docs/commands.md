@@ -76,7 +76,9 @@ zakwas check || notify "machine drifted"
 zakwas check --json
 ```
 
-`--offline` is a fast variant that starts no command: it runs only the `files`, `links` and `templates` modules, which compare the files zakwas owns with the content, links and hashes it recorded in `~/.local/state/zakwas/files.json`. It takes about 30 ms on a config with 55 managed files, so it fits in an agent's session start. The exit codes are those of `check` (0 clean, 2 drift, 1 error) and the output ends with the modules it did not check: `system`, `brew`, `mise`, `agents`, `commands` and `defaults`. Drift in those, such as a missing brew package or an agent plugin, shows only in a full `check`. With `--json` the plan document carries `"offline": true` and the skipped modules in `skipped`, and has no `commit`. `--only` accepts only `files`, `links` and `templates` with `--offline`.
+`--offline` is a fast variant that starts no command: it runs only the `files`, `links` and `templates` modules, which compare the files zakwas owns with the content, links and hashes it recorded in `~/.local/state/zakwas/files.json`. It takes about 30 ms on a config with 55 managed files, so it fits in an agent's session start. The exit codes are those of `check` (0 clean, 2 drift, 1 error) and the output ends with the modules it did not check: `system`, `brew`, `mise`, `agents`, `commands` and `defaults`. Drift in those, such as a missing brew package or an agent plugin, shows only in a full `check`. With `--json` the plan document carries `"offline": true` and the skipped modules in `skipped`, and has no `commit`. With `--only`, the offline modules left out are named too, and `--only` accepts only `files`, `links` and `templates` with `--offline`.
+
+The `agents` module is not part of it, so files it owns (instruction links, profile files, skills, hook registrations, permission and MCP entries in agent settings) are checked only by a full `check`.
 
 #### Report drift when an agent session starts
 
@@ -84,10 +86,12 @@ A `sessionStart` hook can tell the agent that its setup is stale before the firs
 
 ```sh
 #!/bin/sh
-out=$(zakwas check --offline 2>/dev/null)
-if [ $? -eq 2 ]; then
-  printf 'zakwas: this Mac drifted from its config. Pending changes:\n%s\n' "$out"
-fi
+out=$(zakwas check --offline -c "$HOME/dotfiles/zakwas.yaml" 2>&1)
+case $? in
+  0|127) ;;
+  2) printf 'zakwas: this Mac drifted from its config. Pending changes:\n%s\n' "$out" ;;
+  *) printf 'zakwas: could not check drift: %s\n' "$out" ;;
+esac
 exit 0
 ```
 
@@ -102,7 +106,7 @@ agents:
       - {event: sessionStart, command: $HOME/.local/bin/zakwas-drift, providers: [claude, codex]}
 ```
 
-Nothing is printed when the machine matches the config, when zakwas isn't on `PATH` or when the check fails, so a healthy session starts with no extra context. The hook runs `check`, never `apply`: [`agents.guard`](config.md#guard) keeps agents from applying the config. Install `zakwas` where the agent's shell finds it (`~/.local/bin` by default).
+The script names the config with `-c` (change the path to where your config repo lives) because an agent starts in the project directory, where zakwas can't find `zakwas.yaml` by searching upward, and `$ZAKWAS_CONFIG` is only a fallback when that search fails. Nothing is printed when the machine matches the config or when zakwas isn't on `PATH` (exit 127), so a healthy session starts with no extra context. Any other failure, such as an unreadable config, prints `zakwas: could not check drift:` and zakwas's error, so a broken hook doesn't look like a clean machine. The hook runs `check`, never `apply`: [`agents.guard`](config.md#guard) keeps agents from applying the config. Install `zakwas` where the agent's shell finds it (`~/.local/bin` by default).
 
 ## propose, proposals, approve
 
