@@ -1,0 +1,59 @@
+chmod 755 bin/claude
+env CLAUDE_CONFIG_DIR=$WORK/claude
+
+zakwas capture
+stdout '^claude$'
+stdout '^  marketplace  sai  o/sai$'
+stdout '^  plugin       humanize@sai$'
+stdout '^  mcp server   docs  stdio npx -y docs-mcp$'
+stdout '^  allow rule   git status$'
+stdout 'claude plugin off@sai: installed but disabled'
+stdout 'claude allow rule WebFetch\(\.\.\.\): not a Bash command rule'
+stdout 'zakwas capture --write'
+! stdout 'team@sai|cloud@synced|core@builtin'
+! stderr .
+cmp zakwas.yaml zakwas.orig
+cmp claude/settings.json settings.orig
+! exists home/.local/state/zakwas
+
+zakwas capture -json
+stdout '"kind": "add-marketplace"'
+stdout '"providers": \['
+stdout '"skipped": \['
+! stdout '"proposal"'
+
+zakwas capture --write
+stdout 'Proposal [0-9a-f]{8}: add marketplace sai; add plugin humanize@sai; add MCP server docs; allow "git status" \(high risk\)'
+stdout '\+    sai:'
+stdout 'Nothing was changed'
+cmp zakwas.yaml zakwas.orig
+zakwas proposals
+stdout -count=1 '^[0-9a-f]{8}  high  in 7d     add marketplace sai'
+
+! zakwas capture extra
+stderr 'Usage: zakwas capture'
+
+-- zakwas.yaml --
+agents:
+  guard: false
+  providers: [claude]
+-- zakwas.orig --
+agents:
+  guard: false
+  providers: [claude]
+-- claude/settings.json --
+{"extraKnownMarketplaces": {"sai": {"autoUpdate": true}}, "permissions": {"allow": ["Bash(git status:*)", "WebFetch(domain:example.com)"]}}
+-- settings.orig --
+{"extraKnownMarketplaces": {"sai": {"autoUpdate": true}}, "permissions": {"allow": ["Bash(git status:*)", "WebFetch(domain:example.com)"]}}
+-- claude/.claude.json --
+{"mcpServers": {"docs": {"type": "stdio", "command": "npx", "args": ["-y", "docs-mcp"]}}}
+-- bin/claude --
+#!/bin/sh
+[ "$(pwd)" = / ] || { echo "claude must run from /, not $(pwd)" >&2; exit 97; }
+case "$*" in
+  "plugin marketplace list --json")
+    echo '[{"name":"sai","source":"github","repo":"o/sai"}]' ;;
+  "plugin list --json --available")
+    echo '{"installed":[{"id":"humanize@sai","version":"1","scope":"user","enabled":true},{"id":"off@sai","version":"1","scope":"user","enabled":false},{"id":"team@sai","version":"1","scope":"project","enabled":true},{"id":"cloud@synced","version":"1","scope":"user","enabled":true},{"id":"core@builtin","version":"1","scope":"user","enabled":true}],"available":[]}' ;;
+  *) echo "unexpected claude $*" >&2; exit 99 ;;
+esac

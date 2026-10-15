@@ -64,15 +64,18 @@ zakwas upgrade         # brew update + refresh agent marketplaces, then apply
 zakwas check           # exit 2 when the machine drifted (cron/launchd friendly)
 zakwas check --offline # same for the files zakwas owns only, in ~30 ms, no commands (agent session start)
 zakwas plan --only brew,defaults
+zakwas capture                         # list what agents have that zakwas.yaml doesn't declare (--write saves it as a proposal)
 zakwas propose add-plugin foo@market   # save a config edit without applying it
 zakwas proposals                       # pending proposals
 zakwas approve ID                      # diff + plan, confirm, apply, commit (terminal only)
 zakwas mcp --enable-apply              # serve plan/propose (and confirmed low-risk apply) to agents over MCP
 ```
 
-`propose` takes a typed operation (add a plugin, add or remove a permission, add a brew package, pin a mise tool, add an MCP server), splices it into the original file bytes, and saves it with its plan and risk tier. `approve` applies only the affected modules and commits to the current branch without pushing. See [docs/commands.md](docs/commands.md#propose-proposals-approve).
+`propose` takes a typed operation (add a marketplace or plugin, add or remove a permission, add a brew package, pin a mise tool, add an MCP server), splices it into the original file bytes, and saves it with its plan and risk tier. `approve` applies only the affected modules and commits to the current branch without pushing. See [docs/commands.md](docs/commands.md#propose-proposals-approve).
 
-`zakwas mcp` serves the same to coding agents over MCP: read-only config, plan and check tools, plus propose and discard. With `--enable-apply` it also applies a low-risk proposal after you confirm a diff and plan zakwas renders in the agent; high-risk proposals and clients that can't show the confirmation get the `zakwas approve ID` command. Register it with `agents.mcp: {zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, ~/dotfiles/zakwas.yaml]}}`. See [docs/commands.md](docs/commands.md#mcp).
+`capture` lists the plugins, marketplaces, MCP servers, Claude allow rules and Codex approvals that agents got outside zakwas, and with `--write` saves them as one proposal. See [docs/commands.md](docs/commands.md#capture).
+
+`zakwas mcp` serves the same to coding agents over MCP: read-only config, plan, check and capture tools, plus propose and discard. With `--enable-apply` it also applies a low-risk proposal after you confirm a diff and plan zakwas renders in the agent; high-risk proposals and clients that can't show the confirmation get the `zakwas approve ID` command. Register it with `agents.mcp: {zakwas: {command: zakwas, args: [mcp, --enable-apply, -c, ~/dotfiles/zakwas.yaml]}}`. See [docs/commands.md](docs/commands.md#mcp).
 
 The repo is also an agent plugin marketplace. Its `zakwas` plugin ships a skill that tells agents to propose changes instead of editing agent config or `zakwas.yaml`, and to hand high-risk proposals to you as `zakwas approve ID`. Install it with zakwas itself: `agents.marketplaces: {zakwas: Automaat/zakwas}` and `agents.plugins: [zakwas@zakwas]` (Claude Code, Codex and opencode). See [docs/commands.md](docs/commands.md#teach-agents-the-flow).
 

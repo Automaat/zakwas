@@ -306,3 +306,7 @@ func canonical(src string) string {
 	}
 	return strings.TrimSuffix(strings.TrimSuffix(src, "/"), ".git")
 }
+
+// SameSource reports whether two marketplace sources are the same one,
+// however each is spelled.
+func SameSource(a, b string) bool { return canonical(a) == canonical(b) }

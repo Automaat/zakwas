@@ -38,6 +38,9 @@ type editor struct {
 	home  string
 	files map[string]*Edit
 	order []string
+	// markets are the marketplaces earlier operations declared, which later
+	// plugins may come from.
+	markets map[string]bool
 }
 
 // Apply runs the operations against the config repo's files in memory. The
@@ -46,7 +49,7 @@ func Apply(ops []Op, cfg *config.Config, home string) (*Result, error) {
 	if len(ops) == 0 {
 		return nil, errors.New("no operations")
 	}
-	e := &editor{cfg: cfg, home: home, files: map[string]*Edit{}}
+	e := &editor{cfg: cfg, home: home, files: map[string]*Edit{}, markets: map[string]bool{}}
 	for i, op := range ops {
 		if err := op.Validate(); err != nil {
 			return nil, fmt.Errorf("%s: %w", op.Summary(), err)
@@ -138,9 +141,22 @@ func (e *editor) apply(op Op) error {
 
 func (e *editor) editYAML(y *yamlFile, op Op) error {
 	switch op.Kind {
+	case AddMarketplace:
+		if e.cfg.Agents != nil && hasKey(e.cfg.Agents.Marketplaces, op.Name) || e.markets[op.Name] {
+			return fmt.Errorf("marketplace %s is already declared", op.Name)
+		}
+		e.markets[op.Name] = true
+		return y.add([]string{"agents", "marketplaces"}, yaml.MappingNode, func(indent string) []string {
+			lines := []string{indent + keyText(op.Name) + ":", indent + "  source: " + scalar(op.Source, false)}
+			if len(op.Providers) > 0 {
+				lines = append(lines, indent+"  providers: "+flowList(op.Providers))
+			}
+			return lines
+		})
 	case AddPlugin:
 		_, mkt, _ := strings.Cut(op.Name, "@")
-		if e.cfg.Agents == nil || !hasKey(e.cfg.Agents.Marketplaces, mkt) {
+		declared := e.cfg.Agents != nil && hasKey(e.cfg.Agents.Marketplaces, mkt)
+		if !declared && !e.markets[mkt] {
 			return fmt.Errorf("marketplace %q is not declared under agents.marketplaces", mkt)
 		}
 		path := []string{"agents", "plugins"}

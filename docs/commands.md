@@ -12,6 +12,7 @@ Flags go before or after the command: `zakwas -y apply` and `zakwas apply -y` ar
 | [`apply`](#apply) | show pending changes, confirm, apply them |
 | [`upgrade`](#upgrade) | `brew update` and refresh agent marketplaces, then apply |
 | [`check`](#check) | exit 2 when anything drifted |
+| [`capture`](#capture) | list what agents have that `zakwas.yaml` doesn't declare; `--write` saves it as a proposal |
 | [`propose`](#propose) | save a config change as a proposal, without editing anything |
 | [`proposals`](#proposals) | list pending proposals |
 | [`approve`](#approve) | show a proposal's diff and plan, confirm, apply it and commit it |
@@ -124,6 +125,7 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 
 | Operation | Edits | Flags |
 |---|---|---|
+| `add-marketplace NAME SOURCE` | `agents.marketplaces` | `--providers LIST` |
 | `add-plugin NAME@MARKETPLACE` | `agents.plugins` | `--providers LIST` |
 | `add-permission allow\|review\|deny COMMAND...` | `agents.permissions.<decision>` | `--providers LIST`, `--justification TEXT` |
 | `remove-permission allow\|review\|deny COMMAND...` | `agents.permissions.<decision>` | |
@@ -133,14 +135,14 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 
 `--providers`, `--arg` and `--env-var` take a comma list or repeat. Also `-c PATH` and `-json`, which prints the proposal as JSON. Flags go before `--`; any command word that starts with a dash goes after it: `zakwas propose -json add-permission allow -- ls -la`.
 
-Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared, a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
+Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared (one declared by an earlier operation of the same proposal counts), a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
 
 **Risk tier.** `low` or `high`, from the operations and the plan of the modules they affect (a permission or MCP edit also plans `templates`, a mise pin `files`):
 
 | Tier | Operations |
 |---|---|
 | low | add a plugin from a declared marketplace; add a `deny` or `review` rule; remove an `allow` rule; add a core Homebrew formula (not a cask, not from a tap); pin a mise tool (without a backend prefix such as `npm:` or `github:`) |
-| high | everything else: an `allow` rule, removing a `deny` or `review` rule, a cask or tap formula, a tool from a mise backend, an MCP server |
+| high | everything else: an `allow` rule, removing a `deny` or `review` rule, a cask or tap formula, a tool from a mise backend, an MCP server, a marketplace |
 
 Whatever the operations, a proposal is high when the plan it will run touches agent config (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.config/opencode`, `~/.agents`, `~/.gemini`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$GEMINI_CLI_HOME`), shell rc files (`~/.zshrc`, `~/.zprofile`, `~/.bashrc`, …), `~/.ssh` or `/etc`, or when a module of that plan fails to plan. The plan is the whole plan of those modules, including drift that was already there, since that is what `approve` runs.
 
@@ -160,7 +162,51 @@ It refuses, changing nothing, when:
 - a module can't be planned;
 - it runs from an agent session while [`agents.guard`](config.md#guard) is on. The guard also denies the managed agents `zakwas approve`.
 
-If the apply fails, the files are written back as they were and the proposal stays pending; the steps that ran stay done. If only the commit fails, the change stays applied and uncommitted, and the message says so.
+If the apply fails, the files are written back as they were and the proposal stays pending; the steps that ran stay done. The records of the MCP servers and Claude rules zakwas owns (`agent-mcp.json`, `agent-permissions.json`) go back with them, so a server an earlier step adopted isn't owned, or planned for removal, once the config no longer declares it. If only the commit fails, the change stays applied and uncommitted, and the message says so.
+
+## capture
+
+```
+zakwas capture [-c PATH] [-json] [--write]
+```
+
+Users and agents install plugins, add MCP servers and approve commands directly in each agent. `capture` finds what those changes left behind, so they reach the config repo instead of missing on the next Mac or being pruned. It lists, per provider, what the managed agents have that `zakwas.yaml` doesn't declare:
+
+| Provider | Listed |
+|---|---|
+| Claude Code | user-scope plugins; marketplaces declared in the user settings; MCP servers in `~/.claude.json`; `allow` rules of the user `settings.json` written as `Bash(command:*)` or `Bash(command *)` |
+| Codex (only when `zakwas.yaml` names `codex`) | plugins and marketplaces of `config.toml`; `[mcp_servers.*]` tables; the prefix rules of `rules/default.rules`, where approving a command in Codex saves it |
+
+opencode has no plugin commands, and gets servers and rules through its templates, so it isn't read.
+
+Never listed: plugins that come from no marketplace (built-in, synced from claude.ai, `--plugin-dir` and `.claude/skills` ones), project and local installs, servers and rules zakwas added itself, and the rules file zakwas writes. A server, plugin or rule that `zakwas.yaml` already declares for the provider isn't listed either.
+
+Nothing is changed; like `plan` it takes no lock and runs no command but the providers' list commands. Without `--write` it prints the findings and what can't be declared:
+
+```
+claude
+  marketplace  sai  o/sai
+  plugin       humanize@sai
+  mcp server   docs  stdio npx -y docs-mcp
+  allow rule   git status
+codex
+  approval     allow cargo build
+
+Not captured
+  claude plugin off@sai: installed but disabled, and declaring it would enable it
+```
+
+**Not captured.** A finding is only declared when the declaration reproduces what is there, so an apply right after adopts it without changing it. These are listed with the reason and left out:
+
+- anything that may hold a credential, by what it is passed with or how it looks: a flag or name such as `--token`, `--password`, `-p`, `-k`, `-t`, `--pin`, `--session-id`, `-u USER:VALUE`, `--header "Authorization: ..."`, `NAME_KEY=VALUE` or `export NAME VALUE` (a name containing PASS, PWD, PAT, KEY, TOKEN, SECRET, CRED or AUTH), `login VALUE`, `/password:VALUE`; a DSN or URL with user info, a password, a query or a fragment; a JSON value with a credential key; a JWT, base64, long hex or long mixed-case token, a known token prefix (`ghp_`, `sk-`, `sk_live_`, `AKIA`, ...); a URL path segment that isn't a plain lower-case word, version or short ID; a marketplace source or ref that does; a name or environment variable name that does, or that isn't upper case. This covers marketplace sources, MCP commands, arguments and URLs, Claude allow rules and Codex approvals. The value is never printed or echoed in a reason: a skipped rule is shown as `Bash(...)` or `prefix_rule on line N`, a skipped name as `(name withheld)`. A Codex rule's `justification` is free text and never read or declared;
+- a disabled plugin (declaring it would enable it) and a plugin whose marketplace `zakwas.yaml` doesn't declare for that provider and capture can't either (a plugin installed in two providers whose marketplaces of one name differ is declared for the provider whose marketplace is);
+- an MCP server with settings `agents.mcp` can't express here (literal `env` values or headers, which may be secrets; a URL with a query, a fragment or credentials; options such as timeouts), one whose name another provider uses for a different server, and one `zakwas.yaml` declares for other providers only;
+- a Claude rule that isn't a command prefix (`Read(...)`, `WebFetch(...)`, an exact `Bash(cmd)` rule, `Bash(*)`), and a Codex rule whose pattern has alternatives, that spans lines or whose decision isn't `allow`, `prompt` or `forbidden`; when one command is saved with several decisions, only the strictest is declared;
+- an operation that wouldn't apply to `zakwas.yaml` (a marketplace declared for other providers only, a flow-style list, an invalid rule), with the error.
+
+The screening errs on the side of skipping, so some ordinary commands (`mkdir -p DIR`, `ls -t DIR`) are listed under "Not captured" too. A lower-case word-shaped key given without a name that gives it away (`srv kjhgfdsapoiuytrewq`) can't be told from an ordinary argument. What passes is copied as it is: read the proposal's diff before approving, since a secret would reach the config repo.
+
+With `--write` the findings become **one proposal** that follows the normal [approval rules](#propose-proposals-approve): it is saved with its diff, plan and tier (high, since it adds marketplaces or servers), nothing is edited, and a person applies it with `zakwas approve ID` in a terminal. Marketplaces are added as `add-marketplace`, plugins as `add-plugin`, servers as `add-mcp`, rules as `add-permission`, each with `providers` set to where it was found, so nothing reaches a provider that didn't have it. After the proposal is approved, a second `capture` lists nothing; what it can't declare stays under "Not captured". Without anything to declare, `--write` saves no proposal. `-json` prints `findings`, `skipped`, `ops` (each a valid [`zakwas_propose`](#mcp) argument) and, with `--write`, the `proposal`. Exit 1 when a provider can't be read, for example its CLI is missing; the others' findings are still printed.
 
 ## mcp
 
@@ -183,6 +229,7 @@ Pass `-c` (or set `ZAKWAS_CONFIG` in the agent's environment): an agent starts t
 | `zakwas_config` | the config path, repo root, modules, agent providers, MCP servers, whether the [guard](config.md#guard) is on, and the text of `zakwas.yaml` |
 | `zakwas_plan` | the plan as JSON, like `zakwas plan --json`; arguments `only` (modules) and `diff` |
 | `zakwas_check` | the same, with `drift: true` when anything would change |
+| `zakwas_capture` | what the agents have that `zakwas.yaml` doesn't declare, like [`capture`](#capture): `findings`, `skipped` with the reason, and in `ops` the operations that declare the rest, each valid for `zakwas_propose`. Changes nothing |
 | `zakwas_propose` | saves a proposal like [`propose`](#propose); arguments are the operation's fields (`kind`, `name`, `decision`, `command`, `version`, `cask`, `providers`, `justification`, `server`). Returns the proposal and what to do next |
 | `zakwas_proposals` | pending proposals of this config |
 | `zakwas_discard` | deletes a pending proposal of this config |

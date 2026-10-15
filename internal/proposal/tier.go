@@ -31,11 +31,14 @@ func Classify(ops []Op) (tier string, reasons []string) {
 
 // highBecause explains why an operation is not low risk, or returns "". A
 // plugin's marketplace must be declared for the config to validate at all,
-// so every plugin is from a declared marketplace.
+// so every plugin is from a declared marketplace, unless the same proposal
+// adds it, which is rated on its own.
 func (o Op) highBecause() string {
 	switch o.Kind {
 	case AddPlugin:
 		return ""
+	case AddMarketplace:
+		return "a marketplace is a source of plugins that run code in every agent that installs one"
 	case PinMise:
 		if strings.Contains(o.Name, ":") {
 			return "a tool from a mise backend (npm:, github:, cargo:, ...) runs code from outside the registry"
