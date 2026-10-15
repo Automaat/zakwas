@@ -311,10 +311,13 @@ func TestGeminiNamedByAnEntryAlone(t *testing.T) {
 func TestGeminiLeavesServersItCannotCarry(t *testing.T) {
 	m, _ := newGemini(t, config.Agents{MCP: map[string]config.MCPServer{
 		"ok":         {Command: "ok", EnvVars: []string{"REGION"}},
-		"under_line": {Command: "x"},
-		"secret":     {Command: "x", EnvVars: []string{"GITHUB_TOKEN"}},
+		"secret":     {Command: "ok", EnvVars: []string{"GITHUB_TOKEN"}},
 		"bearer":     {URL: "https://example.com/mcp", BearerTokenEnv: "API_KEY"},
+		"under_line": {Command: "x"},
 		"dollar":     {Command: "x", Env: map[string]string{"A": "$HOME/x"}},
+		"args":       {Command: "x", Args: []string{"--root", "${HOME}/data"}},
+		"cmd":        {Command: "$BIN/x"},
+		"url":        {URL: "https://example.com/$X"},
 		"oauth":      {URL: "https://example.com/oauth", OAuth: true},
 	}})
 	apply(t, plan(t, m))
@@ -327,34 +330,27 @@ func TestGeminiLeavesServersItCannotCarry(t *testing.T) {
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	if !slices.Equal(names, []string{"oauth", "ok"}) {
-		t.Errorf("registered %v, want oauth and ok", names)
+	if !slices.Equal(names, []string{"bearer", "oauth", "ok", "secret"}) {
+		t.Errorf("registered %v, want bearer, oauth, ok and secret: Gemini expands secret-named variables for extensions", names)
+	}
+	if got := manifest.MCPServers["bearer"].Headers["Authorization"]; got != "Bearer $API_KEY" {
+		t.Errorf("bearer header = %q", got)
 	}
 	warnings := strings.Join(m.Warnings(context.Background()), "\n")
 	for _, want := range []string{
-		"gemini leaves out mcp server bearer: Gemini redacts $API_KEY",
+		"gemini leaves out mcp server args: Gemini would expand the $",
+		"gemini leaves out mcp server cmd: Gemini would expand the $",
 		"gemini leaves out mcp server dollar: Gemini would expand the $",
-		"gemini leaves out mcp server secret: Gemini redacts $GITHUB_TOKEN",
 		"gemini leaves out mcp server under_line: its name has an underscore",
+		"gemini leaves out mcp server url: Gemini would expand the $",
 		"gemini mcp server oauth signs in with OAuth: run /mcp auth oauth in Gemini CLI",
 	} {
 		if !strings.Contains(warnings, want) {
 			t.Errorf("warnings lack %q:\n%s", want, warnings)
 		}
 	}
-	if strings.Contains(warnings, "mcp server ok") {
-		t.Errorf("warned about the server it carries:\n%s", warnings)
-	}
-}
-
-func TestGeminiRedactedNames(t *testing.T) {
-	for name, want := range map[string]bool{
-		"GITHUB_TOKEN": true, "api_key": true, "MY_SECRET": true, "DB_PASSWORD": true, "AUTH_HEADER": true,
-		"DATABASE_URL": true, "CLIENT_ID": true, "REGION": false, "DOCS_HOST": false, "PATH": false,
-	} {
-		if got := geminiRedacts(name); got != want {
-			t.Errorf("geminiRedacts(%q) = %v, want %v", name, got, want)
-		}
+	if strings.Contains(warnings, "mcp server ok") || strings.Contains(warnings, "mcp server secret") {
+		t.Errorf("warned about a server it carries:\n%s", warnings)
 	}
 }
 
@@ -652,6 +648,36 @@ func TestGeminiUnlinksWhenTheExtensionEmpties(t *testing.T) {
 	}
 	if _, err := os.Stat(m.geminiPolicyPath()); err != nil {
 		t.Errorf("the policy file went with the extension: %v", err)
+	}
+	assertConverged(t, m)
+}
+
+func TestGeminiKeepsTheManifestUntilItCanUnlink(t *testing.T) {
+	m, r := newGemini(t, config.Agents{Hooks: &config.AgentHooks{Commands: []config.AgentCommandHook{{Event: "stop", Command: "/bin/stop"}}}})
+	apply(t, plan(t, m))
+	manifest := filepath.Join(m.geminiExtDir(), "gemini-extension.json")
+
+	m.Agents = config.Agents{Providers: []string{config.ProviderClaude}}
+	r.Missing("gemini")
+	apply(t, plan(t, m))
+	if _, err := os.Stat(manifest); err != nil {
+		t.Fatalf("the manifest went before the link could: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(m.geminiExtDir(), "hooks", "hooks.json")); !os.IsNotExist(err) {
+		t.Errorf("hooks.json is still there: %v", err)
+	}
+
+	r.Install("gemini")
+	changes := plan(t, m)
+	if len(changes) == 0 || changes[0].Target != "gemini extension zakwas" {
+		t.Fatalf("changes = %v, want the uninstall first", targets(changes))
+	}
+	apply(t, changes)
+	if _, err := os.Stat(manifest); !os.IsNotExist(err) {
+		t.Errorf("the manifest is still there: %v", err)
+	}
+	if _, err := os.Stat(m.geminiInstallPath()); !os.IsNotExist(err) {
+		t.Errorf("the link is still there: %v", err)
 	}
 	assertConverged(t, m)
 }

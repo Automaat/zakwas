@@ -14,7 +14,7 @@ stdout '\+ ~/\.gemini/zakwas/hooks/hooks\.json'
 stdout '\+ ~/\.gemini/policies/zakwas\.toml'
 stdout '\+ ~/\.agents/skills/mine'
 stdout '\+ gemini extension zakwas  +link ~/\.gemini/zakwas'
-stdout 'gemini leaves out mcp server wiki: Gemini redacts \$WIKI_TOKEN'
+stdout 'gemini leaves out mcp server wiki_two: its name has an underscore'
 stdout 'gemini profile review can''t express: reviewer: auto'
 ! exists home/.gemini
 ! exists calls
@@ -70,6 +70,7 @@ agents:
   mcp:
     docs: {command: npx, args: [-y, docs-mcp], envVars: [DOCS_REGION]}
     wiki: {url: 'https://example.com/mcp', bearerTokenEnv: WIKI_TOKEN}
+    wiki_two: {command: wiki}
   skills: [skills/mine]
   hooks:
     commands:
@@ -114,6 +115,12 @@ Body
       ],
       "env": {
         "DOCS_REGION": "$DOCS_REGION"
+      }
+    },
+    "wiki": {
+      "httpUrl": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer $WIKI_TOKEN"
       }
     }
   }

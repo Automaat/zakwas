@@ -106,45 +106,19 @@ type geminiManifest struct {
 	MCPServers      map[string]geminiServer `json:"mcpServers,omitempty"`
 }
 
-// Gemini expands $NAME and ${NAME} in the env and headers of an MCP server,
-// but from an environment it first strips of every variable whose name looks
-// like a secret, and of any whose value looks like a credential. Naming such
-// a variable therefore yields an empty string, and the allowed list that
-// could exempt it ignores those names too.
-var geminiSecretName = regexp.MustCompile(`(?i)TOKEN|SECRET|PASSWORD|PASSWD|KEY|AUTH|CREDENTIAL|CREDS|PRIVATE|CERT`)
-
-var geminiNeverEnv = map[string]bool{
-	"CLIENT_ID": true, "DB_URI": true, "CONNECTION_STRING": true, "AWS_DEFAULT_REGION": true,
-	"AZURE_CLIENT_ID": true, "AZURE_TENANT_ID": true, "SLACK_WEBHOOK_URL": true, "TWILIO_ACCOUNT_SID": true,
-	"DATABASE_URL": true, "GOOGLE_CLOUD_PROJECT": true, "GOOGLE_CLOUD_ACCOUNT": true, "FIREBASE_PROJECT_ID": true,
-}
-
-func geminiRedacts(name string) bool {
-	upper := strings.ToUpper(name)
-	return geminiNeverEnv[upper] || geminiSecretName.MatchString(upper)
-}
-
-// geminiServerGaps names what keeps a server out of Gemini CLI.
+// geminiServerGaps names what keeps a server out of Gemini CLI. Gemini
+// expands $NAME and ${NAME} anywhere in gemini-extension.json when it loads
+// the extension, so a literal dollar sign in a server's command, args, url,
+// env or headers would be silently replaced; the variables zakwas writes
+// itself are what that expansion is for.
 func geminiServerGaps(name string, s config.MCPServer) []string {
 	var gaps []string
 	if strings.Contains(name, "_") {
 		gaps = append(gaps, "its name has an underscore, which Gemini's policy rules misread")
 	}
-	var vars []string
-	vars = append(vars, s.EnvVars...)
-	vars = append(vars, slices.Collect(maps.Values(s.HeaderEnv))...)
-	if s.BearerTokenEnv != "" {
-		vars = append(vars, s.BearerTokenEnv)
-	}
-	slices.Sort(vars)
-	for _, v := range slices.Compact(vars) {
-		if geminiRedacts(v) {
-			gaps = append(gaps, "Gemini redacts $"+v+" from its servers")
-		}
-	}
-	literal := slices.Concat(slices.Collect(maps.Values(s.Env)), slices.Collect(maps.Values(s.Headers)))
+	literal := slices.Concat([]string{s.Command, s.URL}, s.Args, slices.Collect(maps.Values(s.Env)), slices.Collect(maps.Values(s.Headers)))
 	if slices.ContainsFunc(literal, func(v string) bool { return strings.Contains(v, "$") }) {
-		gaps = append(gaps, "Gemini would expand the $ in its env or headers")
+		gaps = append(gaps, "Gemini would expand the $ in its command, args, url, env or headers")
 	}
 	return gaps
 }
@@ -392,10 +366,13 @@ func (m *Module) geminiLinked() (*geminiInstall, error) {
 // planGeminiLink links the extension, or unlinks one zakwas linked when it
 // is no longer wanted. Unlinking comes first, since gemini needs the manifest
 // to uninstall.
-func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink bool, err error) {
+//
+// kept reports a link zakwas made that can't be removed yet because gemini
+// is not installed: its manifest stays until the uninstall has run.
+func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink, kept bool, err error) {
 	have, err := m.geminiLinked()
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	dir := m.geminiExtDir()
 	ours := have != nil && have.Type == "link" && sameFile(have.Source) == sameFile(dir)
@@ -408,19 +385,21 @@ func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink bool, err
 				_, err := runner.Output(ctx, m.Runner, m.geminiCmd("extensions", "link", dir, "--consent"))
 				return err
 			},
-		}, false, nil
+		}, false, false, nil
 	case wanted && !ours:
-		return nil, false, fmt.Errorf("the gemini extension %q is installed from %s, not linked to %s; remove it with `gemini extensions uninstall %s` or rename it", geminiExtension, m.Paths.Pretty(have.Source), m.Paths.Pretty(dir), geminiExtension)
-	case !wanted && ours && m.Runner.Installed("gemini"):
+		return nil, false, false, fmt.Errorf("the gemini extension %q is installed from %s, not linked to %s; remove it with `gemini extensions uninstall %s` or rename it", geminiExtension, m.Paths.Pretty(have.Source), m.Paths.Pretty(dir), geminiExtension)
+	case !wanted && ours && !m.Runner.Installed("gemini"):
+		return nil, false, true, nil
+	case !wanted && ours:
 		return &engine.Change{
 			Action: engine.Remove, Target: "gemini extension " + geminiExtension, Detail: "nothing left to put in it", Destructive: true,
 			Apply: func(ctx context.Context) error {
 				_, err := runner.Output(ctx, m.Runner, m.geminiCmd("extensions", "uninstall", geminiExtension))
 				return err
 			},
-		}, true, nil
+		}, true, false, nil
 	}
-	return nil, false, nil
+	return nil, false, false, nil
 }
 
 // planGemini converges the extension and the policy file. The context file,
@@ -441,7 +420,7 @@ func (m *Module) planGemini() ([]engine.Change, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
-	link, unlink, err := m.planGeminiLink(wanted && m.geminiNeedsExtension())
+	link, unlink, kept, err := m.planGeminiLink(wanted && m.geminiNeedsExtension())
 	if err != nil {
 		return nil, fmt.Errorf("gemini: %w", err)
 	}
@@ -479,7 +458,7 @@ func (m *Module) planGemini() ([]engine.Change, error) {
 		}
 	}
 	for _, dst := range tracked {
-		if keep[samePath(dst)] {
+		if keep[samePath(dst)] || kept && samePath(dst) == samePath(filepath.Join(m.geminiExtDir(), "gemini-extension.json")) {
 			continue
 		}
 		c, err := m.planCopyRemove(in, statePath, dst, "gemini no longer declares it")

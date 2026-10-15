@@ -112,7 +112,7 @@ type MCPServer struct {
 	Command        string            `yaml:"command" jsonschema:"minLength=1" jsonschema_description:"Command that starts a stdio server. Set either 'command' or 'url'."`
 	Args           []string          `yaml:"args" jsonschema_description:"Arguments of the command. Written to the agents' config as is, so keep secrets out of them."`
 	Env            map[string]string `yaml:"env" jsonschema_description:"Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead."`
-	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI redacts variables whose name looks like a secret (TOKEN, KEY, SECRET, PASSWORD, AUTH, CREDENTIAL, ...); a server that needs one is left out of Gemini CLI and the plan says so."`
+	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env or headers hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so."`
 	URL            string            `yaml:"url" jsonschema:"minLength=1" jsonschema_description:"URL of an HTTP (streamable) server, http:// or https://, without a user name or password. Written as is, so keep keys out of the query. Set either 'command' or 'url'."`
 	Headers        map[string]string `yaml:"headers" jsonschema_description:"HTTP headers with their values. Written to the agents' config as is, so use 'headerEnv' or 'bearerTokenEnv' for secrets."`
 	HeaderEnv      map[string]string `yaml:"headerEnv" jsonschema_description:"HTTP headers whose value is read from an environment variable: header name to variable name."`
@@ -624,6 +624,9 @@ func (a *Agents) validate() []error {
 		}
 	}
 	checkProviders("agents.providers", a.Providers, Providers, "the default (all)")
+	if (len(a.Marketplaces) > 0 || len(a.Plugins) > 0) && len(pluginProviders(a.DefaultProviders())) == 0 {
+		errs = append(errs, errors.New("agents.marketplaces and agents.plugins: no provider in agents.providers has plugins (gemini has none); add claude, codex or opencode"))
+	}
 	folded := map[string]string{}
 	for _, name := range a.MarketplaceNames() {
 		m := a.Marketplaces[name]

@@ -153,6 +153,7 @@ defaults:
 		{"marketplace without source", "agents: {marketplaces: {sai: {providers: [claude]}}}", []string{"agents.marketplaces.sai: source is required"}},
 		{"null marketplace", "agents: {marketplaces: {sai: }}", []string{"agents.marketplaces.sai: source is required"}},
 		{"bad marketplace name", "agents: {marketplaces: {'my market': o/m}}", []string{"agents.marketplaces.my market: name may only contain"}},
+		{"plugins with only gemini", "agents: {providers: [gemini], marketplaces: {sai: o/sai}, plugins: [a@sai]}", []string{"agents.marketplaces and agents.plugins: no provider in agents.providers has plugins"}},
 		{"marketplace for gemini", "agents: {providers: [claude, gemini], marketplaces: {sai: {source: o/sai, providers: [gemini]}}}", []string{"agents.marketplaces.sai.providers: gemini has no plugin marketplaces"}},
 		{"plugin for gemini", "agents: {providers: [claude, gemini], marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: [gemini]}]}", []string{"agents.plugins[0].providers: gemini has no plugins"}},
 		{"gemini hook while gemini is not managed", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check, providers: [gemini]}]}}", []string{`agents.hooks.commands[0].providers: provider "gemini" is not in agents.providers`}},

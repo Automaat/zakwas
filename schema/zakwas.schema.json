@@ -779,7 +779,7 @@
                   "type": "string"
                 },
                 "uniqueItems": true,
-                "description": "Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI redacts variables whose name looks like a secret (TOKEN, KEY, SECRET, PASSWORD, AUTH, CREDENTIAL, ...); a server that needs one is left out of Gemini CLI and the plan says so.",
+                "description": "Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env or headers hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so.",
                 "type": [
                   "array",
                   "null"
