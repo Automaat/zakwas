@@ -147,9 +147,15 @@ var permissions = &config.Agents{
 }
 
 func TestAgentPermissions(t *testing.T) {
-	guardEntries := `"zakwas apply": "deny", "zakwas apply *": "deny", "zakwas * apply": "deny", "zakwas * apply *": "deny", ` +
-		`"zakwas upgrade": "deny", "zakwas upgrade *": "deny", "zakwas * upgrade": "deny", "zakwas * upgrade *": "deny", ` +
-		`"zakwas self-update": "deny", "zakwas self-update *": "deny", "zakwas * self-update": "deny", "zakwas * self-update *": "deny"`
+	var guard []string
+	for _, c := range []string{"apply", "upgrade", "self-update"} {
+		for _, name := range []string{"zakwas", "*/zakwas"} {
+			for _, p := range []string{name + " " + c, name + " " + c + " *", name + " * " + c, name + " * " + c + " *"} {
+				guard = append(guard, `"`+p+`": "deny"`)
+			}
+		}
+	}
+	guardEntries := strings.Join(guard, ", ")
 	entries := `"git status": "allow", "git status *": "allow", "peekaboo see": "allow", "peekaboo see *": "allow", ` +
 		`"git push": "ask", "git push *": "ask", "git push --force": "deny", "git push --force *": "deny"`
 	tests := []struct {

@@ -50,6 +50,7 @@ func TestGuardDeniesApplyAndEditsInClaude(t *testing.T) {
 		"Bash(zakwas apply)", "Bash(zakwas apply *)", "Bash(zakwas * apply)", "Bash(zakwas * apply *)",
 		"Bash(zakwas upgrade *)", "Bash(zakwas * upgrade *)",
 		"Bash(zakwas self-update)", "Bash(zakwas * self-update *)",
+		"Bash(*/zakwas apply *)", "Bash(*/zakwas * upgrade)", "Bash(*/zakwas * self-update *)",
 		"Edit(~/dotfiles/**)", "Edit(~/.local/state/zakwas/**)",
 	} {
 		if !slices.Contains(deny, want) {
@@ -65,7 +66,7 @@ func TestGuardDeniesApplyAndEditsInClaude(t *testing.T) {
 
 	m.Guard = false
 	changes := plan(t, m)
-	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-14 deny") {
+	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-26 deny") {
 		t.Fatalf("plan = %q", targets(changes))
 	}
 	apply(t, changes)
@@ -214,5 +215,43 @@ func TestGuardWarnsAboutOpencodeWithoutAnAgentPermissionsTemplate(t *testing.T) 
 				t.Errorf("warning = %q", got[0])
 			}
 		})
+	}
+}
+
+func TestGuardCantDenyAConfigAtHomeWithoutARepo(t *testing.T) {
+	m := guardedModule(t, config.ProviderClaude)
+	m.Paths.Root = m.Paths.Home
+	if err := os.RemoveAll(filepath.Join(m.Paths.Home, "dotfiles")); err != nil {
+		t.Fatal(err)
+	}
+	apply(t, plan(t, m))
+	deny := settingsDeny(t, filepath.Join(m.Paths.Home, ".claude", "settings.json"))
+	for _, rule := range deny {
+		if strings.HasPrefix(rule, "Edit(") && rule != "Edit(~/.local/state/zakwas/**)" {
+			t.Errorf("deny holds %q, which covers the home directory", rule)
+		}
+	}
+	if warnings := m.Warnings(context.Background()); len(warnings) != 1 || !strings.Contains(warnings[0], "home directory") {
+		t.Errorf("warnings = %q", warnings)
+	}
+}
+
+func TestGuardWarnsWhenTheMainCheckoutHoldsHome(t *testing.T) {
+	m := guardedModule(t, config.ProviderClaude)
+	home := m.Paths.Home
+	if err := os.Mkdir(filepath.Join(home, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(home, "dotfiles")); err != nil {
+		t.Fatal(err)
+	}
+	gitdir := filepath.Join(home, ".git", "worktrees", "wt")
+	worktree := filepath.Join(t.TempDir(), "wt")
+	writeFile(t, filepath.Join(gitdir, "commondir"), "../..\n")
+	writeFile(t, filepath.Join(worktree, ".git"), "gitdir: "+gitdir+"\n")
+	m.Paths.Root = worktree
+	dirs, warning := m.guardedDirs()
+	if len(dirs) != 1 || dirs[0] != realPath(worktree) || !strings.Contains(warning, "home directory") {
+		t.Errorf("dirs = %q, warning = %q", dirs, warning)
 	}
 }

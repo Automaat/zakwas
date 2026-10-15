@@ -12,7 +12,8 @@ import (
 
 // claudeGuardRules are the Claude Code deny rules of the guard: no zakwas
 // apply, upgrade or self-update, also with a flag before the command as in
-// `zakwas -c zakwas.yaml apply`, and no edits to the config repo or to
+// `zakwas -c zakwas.yaml apply` and run by path as in
+// `~/.local/bin/zakwas apply`, and no edits to the config repo or to
 // zakwas state. Claude Code applies deny rules in every permission mode.
 // Edit rules reach Claude's own file tools, not what a shell command does,
 // so the command rules are the ones that stop an apply.
@@ -22,8 +23,10 @@ func (m *Module) claudeGuardRules() []string {
 	}
 	var rules []string
 	for _, c := range config.GuardedCommands {
-		for _, form := range []string{"", " *"} {
-			rules = append(rules, "Bash(zakwas "+c+form+")", "Bash(zakwas * "+c+form+")")
+		for _, name := range []string{"zakwas", "*/zakwas"} {
+			for _, form := range []string{"", " *"} {
+				rules = append(rules, "Bash("+name+" "+c+form+")", "Bash("+name+" * "+c+form+")")
+			}
 		}
 	}
 	dirs, _ := m.guardedDirs()
@@ -49,24 +52,23 @@ func (m *Module) claudePath(dir string) string {
 func (m *Module) guardedDirs() (dirs []string, warning string) {
 	root := realPath(m.Paths.Root)
 	top, main := repoCheckouts(root)
-	for _, d := range []string{top, main} {
-		if d == "" {
-			continue
-		}
+	candidates := []string{top, main}
+	if top == "" {
+		candidates = []string{root}
+	}
+	for _, d := range candidates {
 		if contains(d, m.Paths.Home) {
+			warning = "the config repo holds your home directory, so Claude's edits to it can't be denied"
 			d = root
 		}
 		if contains(d, m.Paths.Home) {
-			return dirs, "the config repo holds your home directory, so Claude's edits to it can't be denied"
+			continue
 		}
 		if !hasDir(dirs, d) {
 			dirs = append(dirs, d)
 		}
 	}
-	if len(dirs) == 0 {
-		dirs = append(dirs, root)
-	}
-	return dirs, ""
+	return dirs, warning
 }
 
 func hasDir(dirs []string, d string) bool {

@@ -324,3 +324,16 @@ func TestWarningsDontMakeAPlanDrift(t *testing.T) {
 		t.Errorf("modules = %+v", mods)
 	}
 }
+
+func TestRenderKeepsWarningsOfAModuleThatFailedToPlan(t *testing.T) {
+	plan := Build(context.Background(), []Module{
+		warningModule{stubModule{name: "agents", err: errors.New("boom")}, []string{"opencode can't be protected"}},
+	})
+	var out bytes.Buffer
+	if err := Render(&out, plan, Style{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "plan failed: boom") || !strings.Contains(out.String(), "⚠ opencode can't be protected") {
+		t.Errorf("render =\n%s", out.String())
+	}
+}

@@ -98,7 +98,7 @@ var opencodeActions = map[string]string{
 // object. opencode applies the last matching pattern, so the catch-all
 // comes first and deny entries last; each prefix gets a bare pattern and
 // one with " *" for its arguments. With the guard on, the commands that
-// apply the config are denied last, also after a flag: zakwas * apply.
+// apply the config are denied last, also after a flag (zakwas * apply) and run by path (*/zakwas apply).
 func agentPermissions(agents *config.Agents, provider string, catchAll ...string) (string, error) {
 	if provider != config.ProviderOpencode {
 		return "", fmt.Errorf("agentPermissions: provider %q is not supported, only %s", provider, config.ProviderOpencode)
@@ -124,10 +124,11 @@ func agentPermissions(agents *config.Agents, provider string, catchAll ...string
 		add(p.Command()+" *", action)
 	}
 	for _, p := range agents.GuardPermissions(provider) {
-		command := p.Command()
 		first, rest := p.Words[0], strings.Join(p.Words[1:], " ")
-		for _, pattern := range []string{command, command + " *", first + " * " + rest, first + " * " + rest + " *"} {
-			add(pattern, opencodeActions[p.Decision])
+		for _, name := range []string{first, "*/" + first} {
+			for _, pattern := range []string{name + " " + rest, name + " " + rest + " *", name + " * " + rest, name + " * " + rest + " *"} {
+				add(pattern, opencodeActions[p.Decision])
+			}
 		}
 	}
 	var b strings.Builder
