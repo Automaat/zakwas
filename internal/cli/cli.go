@@ -610,6 +610,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
 			Guard: cfg.Agents.GuardEnabled(), TemplateSources: templateSrcs(cfg, paths),
 			Vars: cfg.Templates.Vars, Immutable: cfg.Protect.Immutable, TemplateFiles: cfg.Templates.Files,
+			Destinations:    cfg.Destinations(paths),
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
 			GeminiHome: absFromCwd(env, env.GeminiHome), CopilotHome: absFromCwd(env, env.CopilotHome),
 		})

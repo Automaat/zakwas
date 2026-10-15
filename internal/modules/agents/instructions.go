@@ -203,6 +203,10 @@ func (m *Module) planInstructions() (map[string][]engine.Change, map[string]erro
 			if !strict && !m.Runner.Installed(p) {
 				continue
 			}
+			if err := m.sharedDestination(dst); err != nil {
+				failed[p] = fmt.Errorf("%s: instructions: %w", p, err)
+				continue
+			}
 			if known, ok := recorded[samePath(dst)]; ok {
 				dst = known
 			}

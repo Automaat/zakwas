@@ -134,6 +134,9 @@ func Parse(data []byte, path, home string) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := rejectNullProfileNames(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	root, err := resolveRoot(path)
 	if err != nil {
 		return nil, err
@@ -184,7 +187,7 @@ func (c *Config) Validate(home string) error {
 			errs = append(errs, fmt.Errorf("%s: %w", what, err))
 			return
 		}
-		cl := claim{what: what, dst: dst, key: strings.ToLower(filepath.Clean(paths.Dst(dst)))}
+		cl := claim{what: what, dst: dst, key: foldPath(paths.Dst(dst))}
 		for _, other := range claimed {
 			if overlaps(cl.key, other.key) {
 				errs = append(errs, fmt.Errorf("%s: destination %q overlaps %s %q", what, dst, other.what, other.dst))
@@ -286,6 +289,37 @@ func yamlDate(t time.Time) string {
 }
 
 type claim struct{ what, dst, key string }
+
+// Destination is a path a files, links or templates entry writes: What names
+// the entry, Dst is as written and Path is absolute.
+type Destination struct{ What, Dst, Path string }
+
+// Destinations lists where the files, links and templates entries write,
+// for the modules that write files of their own and must not share them.
+func (c *Config) Destinations(paths Paths) []Destination {
+	var out []Destination
+	add := func(what, dst string) {
+		if dst != "" {
+			out = append(out, Destination{What: what, Dst: dst, Path: paths.Dst(dst)})
+		}
+	}
+	for i, f := range c.Files {
+		add(fmt.Sprintf("files[%d]", i), f.Dst)
+	}
+	for i, l := range c.Links {
+		add(fmt.Sprintf("links[%d]", i), l.Dst)
+	}
+	for i, t := range c.Templates.Files {
+		add(fmt.Sprintf("templates.files[%d]", i), t.Dst)
+	}
+	return out
+}
+
+// PathsOverlap reports whether two absolute paths are the same file, or one
+// is inside the other, ignoring case.
+func PathsOverlap(a, b string) bool { return overlaps(foldPath(a), foldPath(b)) }
+
+func foldPath(path string) string { return strings.ToLower(filepath.Clean(path)) }
 
 // overlaps compares case-folded paths, since APFS is case-insensitive by
 // default: two entries on one path, or one inside a directory the other
