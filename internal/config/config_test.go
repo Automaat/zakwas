@@ -142,7 +142,7 @@ defaults:
 		{"unquoted date default", "defaults: [{domain: d, key: k, value: 2024-01-01}]", []string{"defaults[0] d k: YAML reads 2024-01-01 as a date; quote it"}},
 		{"unquoted timestamp default", "defaults: [{domain: d, key: k, value: 2024-01-01T10:00:00Z}]", []string{"YAML reads 2024-01-01T10:00:00Z as a date"}},
 		{"template mode 0o unreadable by owner", "templates: {files: [{src: a, dst: ~/a, mode: 0o044}]}", []string{"e.g. 0o644"}},
-		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode)`}},
+		{"unknown agent provider", "agents: {providers: [claude, cursor]}", []string{`agents.providers: unknown provider "cursor" (want claude, codex, opencode, gemini)`}},
 		{"duplicate agent provider", "agents: {providers: [claude, claude]}", []string{`agents.providers: provider "claude" is listed twice`}},
 		{"duplicate plugin provider", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: [codex, codex]}]}", []string{`agents.plugins[0].providers: provider "codex" is listed twice`}},
 		{"empty agent providers", "agents: {providers: []}", []string{"agents.providers: list at least one provider"}},
@@ -153,6 +153,12 @@ defaults:
 		{"marketplace without source", "agents: {marketplaces: {sai: {providers: [claude]}}}", []string{"agents.marketplaces.sai: source is required"}},
 		{"null marketplace", "agents: {marketplaces: {sai: }}", []string{"agents.marketplaces.sai: source is required"}},
 		{"bad marketplace name", "agents: {marketplaces: {'my market': o/m}}", []string{"agents.marketplaces.my market: name may only contain"}},
+		{"plugins with only gemini", "agents: {providers: [gemini], marketplaces: {sai: o/sai}, plugins: [a@sai]}", []string{"agents.marketplaces and agents.plugins: no provider in agents.providers has plugins"}},
+		{"marketplace for gemini", "agents: {providers: [claude, gemini], marketplaces: {sai: {source: o/sai, providers: [gemini]}}}", []string{"agents.marketplaces.sai.providers: gemini has no plugin marketplaces"}},
+		{"plugin for gemini", "agents: {providers: [claude, gemini], marketplaces: {sai: o/sai}, plugins: [{id: a@sai, providers: [gemini]}]}", []string{"agents.plugins[0].providers: gemini has no plugins"}},
+		{"gemini hook while gemini is not managed", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check, providers: [gemini]}]}}", []string{`agents.hooks.commands[0].providers: provider "gemini" is not in agents.providers`}},
+		{"profile gemini block while gemini is opt-in", "agents: {profiles: {r: {description: d, gemini: {model: m}}}}", []string{"agents.profiles.r: gemini: the profile is not rendered for gemini; Gemini is opt-in"}},
+		{"profile gemini override zakwas sets", "agents: {providers: [gemini], profiles: {r: {description: d, gemini: {overrides: {tools: [x]}}}}}", []string{"agents.profiles.r: gemini.overrides.tools: zakwas sets it from the profile's own fields"}},
 		{"marketplace provider not managed", "agents: {providers: [claude], marketplaces: {sai: {source: o/sai, providers: [codex]}}}", []string{`agents.marketplaces.sai.providers: provider "codex" is not in agents.providers`}},
 		{"plugin provider not in marketplace", "agents: {marketplaces: {sai: {source: o/sai, providers: [claude]}}, plugins: [{id: a@sai, providers: [opencode]}]}", []string{`agents.plugins[0].providers: provider "opencode" is not in the providers of marketplace sai`}},
 		{"unknown marketplace field", "agents: {marketplaces: {sai: {source: o/sai, auto: true}}}", []string{"field auto not found"}},
@@ -364,7 +370,7 @@ agents:
 		plugin int
 		want   []string
 	}{
-		{0, Providers},
+		{0, []string{ProviderClaude, ProviderCodex, ProviderOpencode}},
 		{1, []string{ProviderClaude}},
 		{2, []string{ProviderOpencode}},
 	} {
@@ -471,6 +477,55 @@ agents:
 	var none *Agents
 	if got := none.PermissionsFor(ProviderClaude); got != nil {
 		t.Errorf("nil agents = %v", got)
+	}
+}
+
+func TestGeminiIsOptIn(t *testing.T) {
+	load := func(yaml string) *Agents {
+		t.Helper()
+		c, err := Load(writeConfig(t, yaml), "/h")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.Agents
+	}
+	targets := func(a *Agents) map[string][]string {
+		out := map[string][]string{}
+		for _, p := range []string{ProviderClaude, ProviderGemini} {
+			for _, s := range a.MCPFor(p) {
+				out[p] = append(out[p], s.Name)
+			}
+		}
+		return out
+	}
+	unnamed := load("agents: {mcp: {a: {command: a}, b: {command: b, providers: [gemini]}}}")
+	if unnamed.Names(ProviderGemini) || !unnamed.Wants(ProviderGemini) {
+		t.Errorf("an entry naming gemini: names %v, wants %v; want false, true", unnamed.Names(ProviderGemini), unnamed.Wants(ProviderGemini))
+	}
+	if got := targets(unnamed); !slices.Equal(got[ProviderGemini], []string{"b"}) || !slices.Equal(got[ProviderClaude], []string{"a"}) {
+		t.Errorf("unnamed targets = %v", got)
+	}
+	if untouched := load("agents: {mcp: {a: {command: a}}}"); untouched.Wants(ProviderGemini) || len(untouched.MCPFor(ProviderGemini)) != 0 {
+		t.Error("a config that does not name gemini wants it")
+	}
+	named := load("agents: {providers: [claude, gemini], mcp: {a: {command: a}, b: {command: b, providers: [claude]}}}")
+	if !named.Wants(ProviderGemini) || !slices.Equal(targets(named)[ProviderGemini], []string{"a"}) {
+		t.Errorf("named targets = %v", targets(named))
+	}
+	if load("agents: {providers: [claude]}").Wants(ProviderGemini) {
+		t.Error("a config that leaves gemini out wants it")
+	}
+	for _, provider := range []string{ProviderCodex, ProviderGemini} {
+		if !OptIn(provider) {
+			t.Errorf("%s is not opt-in", provider)
+		}
+	}
+	if OptIn(ProviderClaude) || OptIn(ProviderOpencode) {
+		t.Error("claude and opencode are not opt-in")
+	}
+	plugins := load("agents: {providers: [claude, gemini], marketplaces: {sai: o/sai}, plugins: [a@sai]}")
+	if got := plugins.PluginProviders(plugins.Plugins[0]); slices.Contains(got, ProviderGemini) {
+		t.Errorf("plugin providers = %v, gemini has no plugins", got)
 	}
 }
 
