@@ -138,6 +138,8 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	settings, settingsErr := m.planCodexSettings()
 	profiles, profileFailed, profileErr := m.planProfiles()
 	errs = append(errs, profileErr)
+	skills, skillFailed, skillErr := m.planSkills()
+	errs = append(errs, skillErr)
 	var changes []engine.Change
 	var klaudiushChange *engine.Change
 	var klaudiushErr error
@@ -151,16 +153,18 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 			errs = append(errs, err)
 			delete(instructions, p)
 			delete(profiles, p)
+			delete(skills, p)
 			continue
 		}
 		var providerSettingsErr error
 		if p == config.ProviderCodex {
 			providerSettingsErr = settingsErr
 		}
-		if err := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p], profileFailed[p], providerSettingsErr); err != nil {
+		if err := errors.Join(hookFailed[p], permFailed[p], mcpFailed[p], profileFailed[p], skillFailed[p], providerSettingsErr); err != nil {
 			errs = append(errs, err)
 			delete(instructions, p)
 			delete(profiles, p)
+			delete(skills, p)
 			continue
 		}
 		changes = append(changes, instructions[p]...)
@@ -173,6 +177,8 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		}
 		changes = append(changes, profiles[p]...)
 		delete(profiles, p)
+		changes = append(changes, skills[p]...)
+		delete(skills, p)
 		b, ok := backends[p]
 		if !ok {
 			continue
@@ -196,6 +202,9 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	}
 	for _, p := range slices.Sorted(maps.Keys(profiles)) {
 		changes = append(changes, profiles[p]...)
+	}
+	for _, p := range slices.Sorted(maps.Keys(skills)) {
+		changes = append(changes, skills[p]...)
 	}
 	if m.Agents.Hooks != nil && m.Agents.Hooks.Klaudiush && klaudiushChange == nil && len(changes) > 0 && klaudiushErr == nil {
 		klaudiushChange = m.klaudiushFinalizeChange()
@@ -222,6 +231,7 @@ func (m *Module) Refresh(ctx context.Context) error {
 		}
 		errs = append(errs, b.refresh(ctx, d))
 	}
+	errs = append(errs, m.refreshSkills(ctx))
 	return errors.Join(errs...)
 }
 

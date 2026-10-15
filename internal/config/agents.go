@@ -41,6 +41,7 @@ type Agents struct {
 	Permissions        *AgentPermissions      `yaml:"permissions" jsonschema_description:"Shell command permissions declared once for the managed agents: command prefixes the agents may run without asking (allow), must have reviewed (review) or must never run (deny). Written to Claude Code's settings.json, a Codex rules file, and to opencode through the agentPermissions template function."`
 	MCP                map[string]MCPServer   `yaml:"mcp" jsonschema_description:"MCP servers by name, each a stdio server ('command') or an HTTP server ('url'), declared once for the managed agents. Registered at user scope in Claude Code (~/.claude.json) and Codex (config.toml, edited in place); opencode gets them through the agentMCP template function. Secrets are never written: name the environment variables that hold them. A server of the same name that zakwas did not add is adopted when identical and fails the plan when it differs; removing a server here removes only servers zakwas added."`
 	Profiles           map[string]Profile     `yaml:"profiles" jsonschema_description:"Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) and an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name an opencode template also defines under 'agent' fails the plan. Removing a profile removes only the files zakwas rendered."`
+	Skills             []Skill                `yaml:"skills" jsonschema_description:"Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex and opencode. Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them."`
 	Opencode           *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
 	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade' and 'self-update' (Claude Code in settings.json, Codex in its rules file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected. Default true; false removes the rules zakwas added."`
 }
@@ -164,6 +165,67 @@ type Profile struct {
 type ProfileProvider struct {
 	Model     string         `yaml:"model" jsonschema:"minLength=1" jsonschema_description:"Model for this provider, in its own spelling, e.g. 'sonnet' for Claude Code, 'gpt-5' for Codex, 'anthropic/claude-sonnet-4' for opencode."`
 	Overrides map[string]any `yaml:"overrides" jsonschema_description:"Extra top-level frontmatter keys (Claude Code, opencode) or settings (Codex), written as is. Values are re-typed by YAML, so quote ones that must stay strings (dates, versions). A key zakwas sets from the profile's own fields is rejected."`
+}
+
+// Skill is one agents.skills entry. In YAML it is either the path of a local
+// skill directory or a mapping.
+type Skill struct {
+	Path      string   `yaml:"path" jsonschema:"required,minLength=1" jsonschema_description:"Skill directory holding SKILL.md, named like the skill. Without 'git': relative to the directory holding zakwas.yaml, or absolute or '~/...'. With 'git': a relative path inside the repository."`
+	Git       string   `yaml:"git" jsonschema:"minLength=1" jsonschema_description:"Git source of the skill: GitHub 'owner/repo' or a clone URL. zakwas clones it on apply into ~/.local/share/zakwas/skills and pulls it on 'zakwas upgrade'. Omit for a skill on disk."`
+	Ref       string   `yaml:"ref" jsonschema:"minLength=1" jsonschema_description:"Branch or tag to clone, only with 'git'. Default: the repository's default branch."`
+	Providers []string `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode" jsonschema_description:"Providers to link this skill for; must be in agents.providers. Default: agents.providers, with Codex opt-in as for plugins. Codex and opencode share ~/.agents/skills."`
+}
+
+func (s *Skill) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		return n.Decode(&s.Path)
+	}
+	if err := knownKeys(n, "path", "git", "ref", "providers"); err != nil {
+		return err
+	}
+	type plain Skill
+	return n.Decode((*plain)(s))
+}
+
+// Name is the skill's name: the last element of its path, which is both the
+// link's name and what SKILL.md must call the skill.
+func (s Skill) Name() string { return filepath.Base(filepath.Clean(s.Path)) }
+
+// NamedSkill is one agents.skills entry resolved for a provider.
+type NamedSkill struct {
+	Name string
+	Skill
+}
+
+// SkillsFor returns the agents.skills targeting provider, sorted by name.
+// Like plugins, a skill without its own providers reaches Codex only when
+// zakwas.yaml names codex.
+func (a *Agents) SkillsFor(provider string) []NamedSkill {
+	if a == nil {
+		return nil
+	}
+	var out []NamedSkill
+	for _, s := range a.Skills {
+		if slices.Contains(a.targets(s.Providers), provider) {
+			out = append(out, NamedSkill{Name: s.Name(), Skill: s})
+		}
+	}
+	slices.SortFunc(out, func(x, y NamedSkill) int { return strings.Compare(x.Name, y.Name) })
+	return out
+}
+
+// NamesInSkill reports whether a skill lists provider in its own providers,
+// which makes the provider strict for skills.
+func (a *Agents) NamesInSkill(provider string) bool {
+	if a == nil {
+		return false
+	}
+	for _, s := range a.Skills {
+		if slices.Contains(s.Providers, provider) {
+			return true
+		}
+	}
+	return a.Names(provider)
 }
 
 // Profile tool categories, the values of Profile.Tools.
@@ -316,7 +378,7 @@ func (a *Agents) targets(own []string) []string {
 
 // GuardedCommands are the zakwas commands that change the system or zakwas
 // itself, which the guard keeps agents from running.
-var GuardedCommands = []string{"apply", "upgrade", "self-update"}
+var GuardedCommands = []string{"apply", "upgrade", "self-update", "approve"}
 
 // GuardEnabled reports whether the guard is on: it is, for any agents
 // section, unless it sets guard to false.
@@ -581,6 +643,7 @@ func (a *Agents) validate() []error {
 	errs = append(errs, a.validatePermissions(checkProviders)...)
 	errs = append(errs, a.validateMCP(checkProviders)...)
 	errs = append(errs, a.validateProfiles(checkProviders)...)
+	errs = append(errs, a.validateSkills(checkProviders)...)
 	seen := map[string]int{}
 	for i, p := range a.Plugins {
 		what := fmt.Sprintf("agents.plugins[%d]", i)
@@ -841,6 +904,66 @@ func (a *Agents) validateProfiles(checkProviders func(what string, list, allowed
 				}
 			}
 		}
+	}
+	return errs
+}
+
+var skillName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func (a *Agents) validateSkills(checkProviders func(what string, list, allowed []string, allowedWhat string)) []error {
+	var errs []error
+	folded := map[string]int{}
+	for i, s := range a.Skills {
+		what := fmt.Sprintf("agents.skills[%d]", i)
+		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		word := func(field, v string) bool {
+			if strings.ContainsFunc(v, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+				fail("%s %q must not contain spaces or control characters", field, v)
+				return false
+			}
+			return true
+		}
+		clean := filepath.Clean(s.Path)
+		switch {
+		case strings.TrimSpace(s.Path) == "":
+			fail("path is required")
+			continue
+		case strings.TrimSpace(s.Path) != s.Path || strings.ContainsFunc(s.Path, unicode.IsControl):
+			fail("path %q must not have leading or trailing whitespace or control characters", s.Path)
+			continue
+		case s.Path == "~" || clean == "." || clean == "..":
+			fail("path %q must point at a skill directory", s.Path)
+			continue
+		}
+		if s.Git == "" {
+			if s.Ref != "" {
+				fail("ref only applies to a skill with git")
+			}
+		} else {
+			switch {
+			case !word("git", s.Git):
+			case strings.HasPrefix(s.Git, "-") || strings.Contains(s.Git, "#"):
+				fail("git %q must be a repository, without a leading '-' or a '#ref'; set ref instead", s.Git)
+			}
+			switch {
+			case filepath.IsAbs(s.Path) || strings.HasPrefix(s.Path, "~") || clean == ".." || strings.HasPrefix(clean, "../"):
+				fail("path %q must be relative to the root of the git repository", s.Path)
+			case slices.ContainsFunc(strings.Split(clean, "/"), func(e string) bool { return strings.EqualFold(e, ".git") }):
+				fail("path %q goes into .git", s.Path)
+			}
+			if s.Ref != "" && word("ref", s.Ref) && strings.HasPrefix(s.Ref, "-") {
+				fail("ref %q must not start with '-'", s.Ref)
+			}
+		}
+		name := s.Name()
+		if !skillName.MatchString(name) {
+			fail("name %q (the last element of path) may only contain letters, digits, '.', '_' and '-', and must start with a letter or digit", name)
+		}
+		if first, dup := folded[strings.ToLower(name)]; dup {
+			fail("skill %q is already declared by agents.skills[%d]; skill names are compared without case, since macOS file names are", name, first)
+		}
+		folded[strings.ToLower(name)] = i
+		checkProviders(what+".providers", s.Providers, a.DefaultProviders(), "agents.providers")
 	}
 	return errs
 }

@@ -66,7 +66,7 @@ func TestGuardDeniesApplyAndEditsInClaude(t *testing.T) {
 
 	m.Guard = false
 	changes := plan(t, m)
-	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-26 deny") {
+	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-34 deny") {
 		t.Fatalf("plan = %q", targets(changes))
 	}
 	apply(t, changes)

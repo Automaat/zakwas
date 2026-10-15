@@ -271,6 +271,7 @@ The `claude` (Claude Code), `codex` (Codex) and `opencode` providers are converg
 | `mcp` | map | no | | MCP server name → `{command, args, env, envVars}` for a stdio server or `{url, headers, headerEnv, bearerTokenEnv, oauth}` for an HTTP one, each with optional `providers`. See [mcp](#mcp). |
 | `codex.settings` | map | no | | Selected global Codex config.toml values, edited in place independently of profiles. See [global Codex settings](#global-codex-settings). |
 | `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex and opencode: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode` blocks. See [profiles](#profiles). |
+| `skills` | list | no | | Standalone skills linked into every managed agent: a path, or `{path, git, ref, providers}`. See [skills](#skills). |
 | `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 | `guard` | bool | no | `true` | Keep the managed agents from applying this config. See [guard](#guard). |
 
@@ -549,13 +550,47 @@ How each field maps:
 - The files are protected copies, like [`instructions`](#instructions): a file already there is backed up first. zakwas records their hashes in `~/.local/state/zakwas/agent-profiles.json`. Removing a profile, a provider, or the whole `agents` section removes only the files zakwas rendered (destructive in the plan; one edited since is backed up instead).
 - Claude Code and every named provider are strict, failing their own plan when a profile can't be rendered; Codex gets profiles only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, written only once `opencode` is on `PATH`.
 
+### skills
+
+`agents.skills` links skills that don't come from a plugin marketplace, such as a skill kept in the config repo or one skill of another repository, into every managed agent's skills directory. Agents disagree on where they look, so zakwas links each skill where the agent reads it:
+
+| Provider | Link |
+|---|---|
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/<name>` |
+| Codex, opencode | `~/.agents/skills/<name>`, one link for both (Gemini CLI and Copilot CLI read it too) |
+
+```yaml
+agents:
+  skills:
+    - dotfiles/skills/review
+    - ~/work/skills/deploy
+    - {git: owner/skills, path: skills/pdf, ref: v1}
+    - {path: dotfiles/skills/codex-only, providers: [codex]}
+```
+
+| Field | Description |
+|---|---|
+| `path` | Required. The skill directory, holding `SKILL.md`: relative to the directory holding `zakwas.yaml`, absolute or `~/…`. With `git`, a path inside the repository. The last element is the skill's name. |
+| `git` | A GitHub `owner/repo` or a clone URL: the skill is `path` inside that repository. |
+| `ref` | A branch or tag to clone, only with `git`. Default: the repository's default branch. |
+| `providers` | Providers to link for; default `agents.providers`, with Codex opt-in as for plugins. |
+
+A skill written as a plain string is its `path`.
+
+- The directory name must equal the `name` in the frontmatter of its `SKILL.md`, and two skills may not share a name, ignoring case. Either fails the plan. A skill without a name fails too, since Codex skips it.
+- zakwas only creates and removes its own links, recorded in `~/.local/state/zakwas/skills.json`. A directory, file or link at that path that zakwas did not make fails the plan instead of being replaced; this includes skills installed by `npx skills`, whose links and `~/.agents/.skill-lock.json` zakwas never touches. A link you made to the same directory is left alone.
+- `plan` never fetches. `apply` clones missing git sources with `git clone --depth 1` into `~/.local/share/zakwas/skills/<source>` (shared by every skill of one repository and `ref`), checks every skill of the clone and then links them, in one `<provider> skills` step of the plan. `zakwas upgrade` pulls the clones; the links point into them, so a newer skill needs no relink. A skill that resolves outside its repository through a symlink fails.
+- Removing a skill, a provider, or the whole `agents` section removes only the links zakwas made (destructive in the plan; a link changed since is only forgotten), then the clones no skill uses anymore (a clone a tracked link still points into is kept until that link has moved).
+- zakwas won't write through a symlinked parent under `$HOME`, so when `~/.claude` or `~/.agents` is a link into your repo the plan fails; point `CLAUDE_CONFIG_DIR` elsewhere or unlink it. opencode's `opencode.skillsDir`, which holds plugin skills, is not used for these.
+- Claude Code and every named provider are strict, failing their own plan when a skill can't be linked; Codex gets skills only when `zakwas.yaml` names `codex`; opencode by the all-providers default is best effort, linked only once `opencode` is on `PATH`.
+
 ### guard
 
 An agent that can run `zakwas apply`, or edit the config repo or zakwas state, can widen its own permissions, add hooks or install marketplaces, because `apply` writes agent config files the agent may not edit itself. One prompt injection in a README is enough. So with an `agents` section, zakwas keeps the managed agents from applying the config unless you set `guard: false`:
 
-- **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade` and `zakwas self-update`, also with a flag before the command (`zakwas -c zakwas.yaml apply`) and, for Claude Code and opencode, when run by path (`~/.local/bin/zakwas apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
+- **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade`, `zakwas self-update` and `zakwas approve`, also with a flag before the command (`zakwas -c zakwas.yaml apply`) and, for Claude Code and opencode, when run by path (`~/.local/bin/zakwas apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
 - **Edits.** Claude Code is also denied edits (`Edit(…)` rules, which cover its file tools) to the config repo's main checkout, and to the checkout zakwas runs from when that is a linked worktree of it, and to `~/.local/state/zakwas`. Worktrees agents create outside that checkout stay editable, so an agent can still propose a change as a branch; one created inside it is covered by the rule. A repo that holds your home directory can't be denied, and the plan says so. These rules don't stop a shell command that writes a file; the command rules above are what stop `apply`. They match the command as the agent writes it, so a wrapper (`sh -c`, a script, a PTY) is outside what they stop.
-- **Refusal.** `zakwas apply` and `zakwas upgrade` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and propose changes.
+- **Refusal.** `zakwas apply`, `zakwas upgrade` and `zakwas approve` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and, with `zakwas propose`, save a change for you to [approve](commands.md#approve) in a terminal.
 - **Providers that can't be protected.** The plan lists a managed provider the guard can't cover, under `agents`: opencode when no template renders `agentPermissions "opencode"` into its `opencode.json`. Such a warning doesn't count as a change, so `check` stays clean.
 
 Codex is guarded only when `zakwas.yaml` names `codex`, like its other settings. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
