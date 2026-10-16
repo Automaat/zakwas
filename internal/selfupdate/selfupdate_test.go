@@ -239,6 +239,7 @@ func TestAttested(t *testing.T) {
 }
 
 func TestManagedByLinux(t *testing.T) {
+	testutil.SkipOnWindows(t, "the install paths are POSIX (Homebrew and mise layouts)")
 	home := "/home/me"
 	tests := []struct {
 		name string

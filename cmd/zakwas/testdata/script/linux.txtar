@@ -1,3 +1,4 @@
+[windows] skip 'it runs the Linux flow with chmod, sh fakes and symlinks'
 env ZAKWAS_TEST_GOOS=linux
 env XDG_CONFIG_HOME=$WORK/home/xdg
 env CLAUDE_CONFIG_DIR=$WORK/claude

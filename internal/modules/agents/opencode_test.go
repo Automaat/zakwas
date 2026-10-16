@@ -353,7 +353,7 @@ func TestOpencodeSkillsDirDefaults(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newOpencode(t, config.Agents{Opencode: tt.opencode})
 			if tt.realHome {
-				t.Setenv("HOME", m.Paths.Home)
+				testutil.SetHome(t, m.Paths.Home)
 			}
 			t.Setenv("XDG_CONFIG_HOME", tt.xdg)
 			if got, want := m.opencodeBackend().skillsDir, tt.want(m.Paths.Home); got != want {
@@ -989,7 +989,7 @@ func TestOpencodeFilesFollowXDGConfigHome(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m, _ := newOpencode(t, config.Agents{})
 			if tt.realHome {
-				t.Setenv("HOME", m.Paths.Home)
+				testutil.SetHome(t, m.Paths.Home)
 			}
 			t.Setenv("XDG_CONFIG_HOME", tt.xdg)
 			base := tt.base(m.Paths.Home)
@@ -1007,6 +1007,7 @@ func TestOpencodeFilesFollowXDGConfigHome(t *testing.T) {
 }
 
 func TestOpencodeSkillsMoveWhenSkillsDirChanges(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}},

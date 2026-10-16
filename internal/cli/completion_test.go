@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func completion(t *testing.T, shell string) string {
@@ -83,6 +84,7 @@ func TestCompletionScriptsParse(t *testing.T) {
 }
 
 func TestBashCompletion(t *testing.T) {
+	testutil.SkipOnWindows(t, "needs bash with the generated completion loaded")
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash not installed")

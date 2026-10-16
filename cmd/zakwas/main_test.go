@@ -75,8 +75,8 @@ func TestExtraPathDirs(t *testing.T) {
 		goos string
 		want []string
 	}{
-		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", "/home/u/.local/bin"}},
-		{"linux", []string{"/usr/local/bin", "/home/u/.local/bin"}},
+		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join("/home/u", ".local", "bin")}},
+		{"linux", []string{"/usr/local/bin", filepath.Join("/home/u", ".local", "bin")}},
 		{"windows", []string{filepath.Join("/home/u", ".local", "bin")}},
 	}
 	for _, tt := range tests {

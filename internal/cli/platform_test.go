@@ -16,6 +16,7 @@ import (
 	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func moduleNames(mods []engine.Module) []string {
@@ -118,6 +119,7 @@ func TestLinuxOnlyNamesAnUnsupportedModule(t *testing.T) {
 }
 
 func TestLinuxImmutableWarnsOnceAndStaysClean(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture needs the links module (symlinks) next to files")
 	env := linuxSetup(t, "protect: {immutable: true}\n"+linksOnly+"files: [{src: dotfiles/zshrc, dst: ~/.config/rc}]\n")
 	plan := invoke(env, "", "plan")
 	if plan.code != ExitOK || strings.Count(plan.stdout, "protect.immutable is macOS-only; files are read-only copies") != 1 {

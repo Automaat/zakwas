@@ -936,7 +936,7 @@ system: {sudoTouchID: true}
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := LoadFor(writeConfig(t, tt.yaml), "/h", tt.goos)
+			_, err := LoadFor(writeConfig(t, tt.yaml), testutil.Abs("/h"), tt.goos)
 			if len(tt.want) == 0 {
 				if err != nil {
 					t.Fatal(err)

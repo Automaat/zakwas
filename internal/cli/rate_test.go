@@ -7,6 +7,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/proposal"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestRateTreatsARelocatedAgentHomeAsSensitive(t *testing.T) {
@@ -33,7 +34,7 @@ func TestRateTreatsARelocatedAgentHomeAsSensitive(t *testing.T) {
 
 func TestRateTreatsOpencodeUnderXDGConfigHomeAsSensitive(t *testing.T) {
 	home, xdg := t.TempDir(), t.TempDir()
-	t.Setenv("HOME", home)
+	testutil.SetHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	target := filepath.Join(xdg, "opencode", "AGENTS.md")
 	plan := engine.Plan{{Module: "agents", Changes: []engine.Change{{Action: engine.Update, Target: target}}}}
