@@ -16,7 +16,7 @@ import (
 )
 
 func TestSelfUpdate(t *testing.T) {
-	selfUpdateAs(t, "darwin")
+	testutil.SkipOnWindows(t, "self-update is not supported on Windows yet; see TestSelfUpdateIsNotSupportedOnWindowsYet")
 	base := selfupdatetest.Serve(t, "1.2.3", runtime.GOARCH, "new binary")
 	tests := []struct {
 		name    string
@@ -121,7 +121,7 @@ func (g *ghFake) Run(_ context.Context, c runner.Cmd) (runner.Result, error) {
 }
 
 func TestSelfUpdateAttestation(t *testing.T) {
-	selfUpdateAs(t, "darwin")
+	testutil.SkipOnWindows(t, "self-update is not supported on Windows yet; see TestSelfUpdateIsNotSupportedOnWindowsYet")
 	tests := []struct {
 		name     string
 		version  string
