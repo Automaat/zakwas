@@ -68,7 +68,7 @@ The deny rules are the boundary, because the agent's own runtime enforces them. 
 
 Codex, Gemini CLI and Copilot CLI are guarded only when `agents.providers`, a marketplace's or a plugin's `providers` names them. Naming one only in an `mcp`, `skills`, `profiles`, `permissions` or `hooks` entry converges it but leaves it unguarded. A guard that can't cover a managed provider is a warning in `plan`, not a change, so `check` stays clean.
 
-On Windows the Claude and Codex rules deny `zakwas apply` as a Bash command only. An agent can run the same command from PowerShell or `cmd`, and no rule stops it; the refusal inside zakwas, which looks for the agent's environment variables, is the only barrier there. Treat the guard as incomplete on Windows until the PowerShell and `cmd` rules land.
+On Windows the Claude and Codex rules deny `zakwas apply` as a Bash command only, and name `zakwas`, not `zakwas.exe`. An agent can run the same command from PowerShell or `cmd`, or as `zakwas.exe`, and no rule stops it; the refusal inside zakwas, which looks for the agent's environment variables, is the only barrier there. Treat the guard as incomplete on Windows until the PowerShell and `cmd` rules land.
 
 ### Proposals and who may approve
 

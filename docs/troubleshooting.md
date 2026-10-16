@@ -105,6 +105,7 @@ Windows support is early; the agent features and the portable core run, see [age
 - `symlinks are not supported on Windows yet`: `links` and `agents.skills` need symlinks. Use `files` for the first; skills wait for a later release.
 - `zakwas: self-update is not supported on Windows yet`: download the newer zip or run `install.ps1` again.
 - `claude: command not found` while it works in your terminal: zakwas starts agent CLIs without a shell, so they must be on `PATH` as `.exe` or `.cmd`. npm's `claude.cmd` and `codex.cmd` are found; a `.ps1` alone is not. Open a new terminal after installing an agent so the process sees the new `PATH`.
+- `stdin is not a terminal, so approve can't ask for confirmation` in Git Bash: mintty hands programs a pipe, not a console. Run `zakwas approve` from PowerShell or Windows Terminal, or prefix it with `winpty`.
 - `Access is denied` replacing a file: another program holds it open, such as an editor or the agent itself. zakwas retries briefly, then fails; close the program and apply again.
 - A managed file is read-only because zakwas set the read-only attribute. `protect.immutable` has no effect on Windows and `plan` says so. Clear it with `attrib -r <file>` only for a quick experiment.
 - Paths in `zakwas.yaml` keep `~/` and `/`; `~\` and `C:\...` also work. A template that writes `{{ .Home }}` into JSON gets backslashes: use `{{ .Home | printf "%q" }}` or write the path with forward slashes.

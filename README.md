@@ -102,7 +102,7 @@ irm https://raw.githubusercontent.com/Automaat/zakwas/main/install.ps1 -OutFile 
 
 `install.ps1` checks the release zip against `checksums.txt` and installs `zakwas.exe` to `%LOCALAPPDATA%\Programs\zakwas`. You can also unzip a `zakwas_X.Y.Z_windows_<arch>.zip` from the [releases](https://github.com/Automaat/zakwas/releases) yourself.
 
-Not supported yet, and reported by `plan` instead of failing at `apply`: the macOS modules (`brew`, `defaults`, `system`, `launchd`), `mise`, `commands` (they run `sh`), `links` and `agents.skills` (they need symlinks), opencode's hook plugin, `zakwas self-update`, and `protect.immutable` (files are only read-only). The guard's deny rules cover the Bash form of `zakwas apply`, not PowerShell or `cmd`; the refusal to apply from an agent session still works. Windows is tested on `windows-latest` only. See [docs/agents.md](docs/agents.md#windows) and [troubleshooting](docs/troubleshooting.md#windows).
+Not supported yet, and reported by `plan` instead of failing at `apply`: the macOS modules (`brew`, `defaults`, `system`, `launchd`), `mise`, `commands` (they run `sh`), `links` and `agents.skills` (they need symlinks), opencode's hook plugin, `zakwas self-update`, and `protect.immutable` (files are only read-only). The guard's deny rules cover the Bash form of `zakwas apply`, not PowerShell, `cmd` or `zakwas.exe`; the refusal to apply from an agent session still works. Windows is tested on `windows-latest` only. See [docs/agents.md](docs/agents.md#windows) and [troubleshooting](docs/troubleshooting.md#windows).
 
 ## Protected dotfiles
 

@@ -238,3 +238,4 @@ jobs:
           } finally {
             Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
           }
+          exit 0

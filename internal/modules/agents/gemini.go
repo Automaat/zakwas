@@ -503,6 +503,9 @@ func (m *Module) planGeminiStaleUnlinks(tracked []string) (changes []engine.Chan
 // kept reports a link zakwas made that can't be removed yet because gemini
 // is not installed: its manifest stays until the uninstall has run.
 func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink, kept bool, err error) {
+	if wanted && !install.SymlinksSupported {
+		return nil, false, false, fmt.Errorf("linking the gemini extension: %w", install.ErrSymlinksUnsupported)
+	}
 	have, err := m.geminiLinked()
 	if err != nil {
 		return nil, false, false, err

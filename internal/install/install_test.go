@@ -677,3 +677,14 @@ func TestExecutableCopyConvergesOnTheSecondPlan(t *testing.T) {
 		t.Errorf("a second plan wants %v", c)
 	}
 }
+
+func TestIsLink(t *testing.T) {
+	dir := t.TempDir()
+	info, err := os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isLink(info) {
+		t.Error("a plain directory is not a link")
+	}
+}

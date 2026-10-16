@@ -4,10 +4,13 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
 
 func TestSkillsFailTheirProviderOnWindows(t *testing.T) {
@@ -21,5 +24,15 @@ func TestSkillsFailTheirProviderOnWindows(t *testing.T) {
 	}
 	if len(changes) != 0 {
 		t.Errorf("planned %v although the skill can't be linked", targets(changes))
+	}
+}
+
+func TestGeminiExtensionLinkIsRefusedOnWindows(t *testing.T) {
+	m := &Module{Paths: config.Paths{Home: t.TempDir()}, Runner: runnertest.New()}
+
+	c, _, _, err := m.planGeminiLink(true)
+
+	if c != nil || !errors.Is(err, install.ErrSymlinksUnsupported) {
+		t.Errorf("planGeminiLink = %v, %v; want ErrSymlinksUnsupported", c, err)
 	}
 }

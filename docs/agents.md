@@ -59,7 +59,7 @@ What does not work yet, and fails the plan of just that provider or feature with
 - `agents.skills` and the plugin skills opencode links, which need symlinks
 - opencode command hooks, whose plugin runs through `/bin/sh`
 - the Gemini CLI provider's extension link
-- guard deny rules for PowerShell and `cmd` (Claude's `Bash(...)` rules and Codex's `forbidden` rules are written; the refusal to apply from an agent session works)
+- guard deny rules for PowerShell and `cmd`, and for the `zakwas.exe` spelling of the command (Claude's `Bash(zakwas ...)` rules and Codex's `forbidden` rules are written for `zakwas`; the refusal to apply from an agent session works)
 
 zakwas keeps the line endings of the files it edits: a `config.toml` or `settings.json` saved with CRLF stays CRLF, and files it creates use LF.
 
