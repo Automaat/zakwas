@@ -113,6 +113,14 @@ func TestApplyMCPServerWithOAuthClient(t *testing.T) {
 		{"client id with a flow character", &OAuth{ClientID: "a,b"}, "      oauth: {clientId: \"a,b\"}\n"},
 		{"client id with a question mark", &OAuth{ClientID: "a?b"}, "      oauth: {clientId: \"a?b\"}\n"},
 		{"quotes in client id and scope", &OAuth{ClientID: `a'b"c\d`, Scope: "it's:ok a'b"}, `      oauth: {clientId: a'b"c\d, scope: it's:ok a'b}` + "\n"},
+		{"client id that is a merge key", &OAuth{ClientID: "<<"}, "      oauth: {clientId: \"<<\"}\n"},
+		{"scope that is a merge key", &OAuth{ClientID: "c", Scope: "<<"}, "      oauth: {clientId: c, scope: \"<<\"}\n"},
+		{"client id that is a tilde", &OAuth{ClientID: "~"}, "      oauth: {clientId: \"~\"}\n"},
+		{"client id that is null", &OAuth{ClientID: "null"}, "      oauth: {clientId: \"null\"}\n"},
+		{"client id that is a date", &OAuth{ClientID: "2001-01-01"}, "      oauth: {clientId: \"2001-01-01\"}\n"},
+		{"client id that is a boolean", &OAuth{ClientID: "true", Scope: "off"}, "      oauth: {clientId: \"true\", scope: \"off\"}\n"},
+		{"client id that is an anchor", &OAuth{ClientID: "&a"}, "      oauth: {clientId: \"&a\"}\n"},
+		{"client id that is an alias", &OAuth{ClientID: "*a"}, "      oauth: {clientId: \"*a\"}\n"},
 		{"scope with a question mark", &OAuth{ClientID: "c", Scope: "https://x/y?z"}, "      oauth: {clientId: c, scope: \"https://x/y?z\"}\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,4 +410,68 @@ func derefPort(p *int) int {
 		return 0
 	}
 	return *p
+}
+
+func TestApplyQuotesEveryYAMLHazardInEveryField(t *testing.T) {
+	hazards := []string{"<<", "~", "null", "Null", "true", "False", "yes", "off", "12", "0x1f", "1e3", ".inf", "2001-01-01", "-", "-x", "*a", "&a", "!t", "|", ">", "%x", "@x", "`x", "a: b", "a #b", "x:", "[a]", "{a}"}
+	for _, h := range hazards {
+		t.Run(h, func(t *testing.T) {
+			cfg, home := newRepo(t, baseConfig)
+			ops := []Op{
+				{Kind: AddMarketplace, Name: "mk", Source: h},
+				{Kind: AddMCP, Name: "srv", Server: &Server{Command: h, Args: []string{h, "-y"}}},
+			}
+			withOAuth := !strings.Contains(h, " ")
+			if withOAuth {
+				ops = append(ops, Op{Kind: AddMCP, Name: "web", Server: &Server{URL: "https://example.com/mcp", OAuth: &OAuth{ClientID: h, Scope: h}}})
+			}
+			withRule := !strings.ContainsAny(h, "<>*&|`[]{}")
+			command := "git log"
+			if withRule {
+				command = h
+			}
+			ops = append(ops, Op{Kind: AddPermission, Decision: "deny", Command: command, Justification: h})
+			res, err := Apply(ops, cfg, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := res.Config.Agents
+			if got := a.Marketplaces["mk"].Source; got != h {
+				t.Errorf("marketplace source = %q", got)
+			}
+			if srv := a.MCP["srv"]; srv.Command != h || len(srv.Args) != 2 || srv.Args[0] != h {
+				t.Errorf("command server = %+v", srv)
+			}
+			if o := a.MCP["web"].OAuth; withOAuth && (o.ClientID != h || o.Scope != h) {
+				t.Errorf("oauth = %+v", o)
+			}
+			found := false
+			for _, r := range a.Permissions.Deny {
+				found = found || r.Command == strings.Join(strings.Fields(command), " ") && r.Justification == h
+			}
+			if !found {
+				t.Errorf("deny rules = %+v", a.Permissions.Deny)
+			}
+		})
+	}
+}
+
+func TestValidateRefusesTextThatCannotBeWrittenBack(t *testing.T) {
+	for _, tt := range []struct{ name, source string }{
+		{"invalid UTF-8", "a\xffb/c"},
+		{"U+FFFE", "a\ufffeb/c"},
+		{"U+FFFF", "a\uffffb/c"},
+		{"noncharacter U+FDD0", "a\ufdd0b/c"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Op{Kind: AddMarketplace, Name: "mk", Source: tt.source}.Validate()
+			if err == nil || !strings.Contains(err.Error(), "one line of printable text") {
+				t.Errorf("err = %v", err)
+			}
+			err = Op{Kind: AddMCP, Name: "mk", Server: &Server{Command: "x", Args: []string{tt.source}}}.Validate()
+			if err == nil || !strings.Contains(err.Error(), "one line of printable text") {
+				t.Errorf("mcp arg: err = %v", err)
+			}
+		})
+	}
 }

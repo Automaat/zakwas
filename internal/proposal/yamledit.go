@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/Automaat/zakwas/internal/config"
 )
 
 // yamlFile edits YAML as text. Re-encoding through the YAML library would
@@ -40,7 +43,7 @@ func parseYAML(data []byte) (*yamlFile, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var doc yaml.Node
 	if err := dec.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, config.YAMLError(err)
 	}
 	var next yaml.Node
 	if err := dec.Decode(&next); !errors.Is(err, io.EOF) {
@@ -301,16 +304,46 @@ func plainSafe(s string, flow bool) bool {
 		return false
 	}
 	for _, r := range s {
-		if r < ' ' || r == 0x7f || r == 0x85 || r == 0x2028 || r == 0x2029 {
+		if r < ' ' || r == 0x7f || r == 0x85 || r == 0xfeff || r == 0x2028 || r == 0x2029 {
 			return false
 		}
 	}
-	var got map[string]any
-	if err := yaml.Unmarshal([]byte("k: "+s), &got); err != nil {
+	if yaml11Word.MatchString(s) {
 		return false
 	}
-	v, ok := got["k"].(string)
-	return ok && v == s
+	return readsAsString(s, "k: "+s, func(n *yaml.Node) *yaml.Node { return mapNode(n, 1) }) &&
+		readsAsString(s, s+": v", func(n *yaml.Node) *yaml.Node { return mapNode(n, 0) }) &&
+		readsAsString(s, "- "+s, firstItem) &&
+		(!flow || readsAsString(s, "["+s+"]", firstItem))
+}
+
+var yaml11Word = regexp.MustCompile(`(?i)^(y|n|yes|no|on|off)$`)
+
+func mapNode(doc *yaml.Node, i int) *yaml.Node {
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode || len(doc.Content[0].Content) != 2 {
+		return nil
+	}
+	return doc.Content[0].Content[i]
+}
+
+func firstItem(doc *yaml.Node) *yaml.Node {
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.SequenceNode || len(doc.Content[0].Content) != 1 {
+		return nil
+	}
+	return doc.Content[0].Content[0]
+}
+
+// readsAsString parses text with the YAML library and checks that pick finds
+// a plain string node holding s. The node's tag is what the config loader
+// checks: decoding into an untyped value would read << (a merge key), ~,
+// null, numbers and dates back as strings.
+func readsAsString(s, text string, pick func(doc *yaml.Node) *yaml.Node) bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
+		return false
+	}
+	n := pick(&doc)
+	return n != nil && n.Kind == yaml.ScalarNode && n.ShortTag() == "!!str" && n.Value == s
 }
 
 func flowList(items []string) string {
