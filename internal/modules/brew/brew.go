@@ -84,7 +84,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 // installerCommit pins the Homebrew installer script, so a compromised or
 // broken upstream HEAD can't reach machines until Renovate proposes it.
 // renovate: datasource=git-refs depName=https://github.com/Homebrew/install branch=main
-const installerCommit = "9e97b91c0a30be8077f231ea094aaaec3c39d7b4"
+const installerCommit = "be041513824fd2666a0e93cf5c3b0ca3bb0eb4b6"
 
 // homebrewInstall primes sudo while a terminal is attached, so the official
 // installer can run NONINTERACTIVE (no "press RETURN") with cached credentials.
