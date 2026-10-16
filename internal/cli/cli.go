@@ -47,19 +47,38 @@ var commandList = []struct{ name, args, help string }{
 	{"proposals", "", "list pending proposals"},
 	{"approve", "ID", "show a proposal's diff and plan, confirm, apply it and commit it"},
 	{"mcp", "[--enable-apply]", "serve config reads and proposals to coding agents over MCP"},
-	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this machine"},
+	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
 	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
 	{"completion", "zsh|bash|fish", "print a shell completion script"},
 	{"schema", "", "print the JSON Schema for zakwas.yaml (for editor validation)"},
 	{"version", "", "print the zakwas version"},
 }
 
-func usage() string {
+var commandHelpOther = map[string]string{
+	"upgrade": "refresh agent marketplaces, then apply (picks up new versions)",
+}
+
+func commandHelp(name, goos string) string {
+	for _, c := range commandList {
+		if c.name != name {
+			continue
+		}
+		if goos != platform.Darwin {
+			if help, ok := commandHelpOther[name]; ok {
+				return help
+			}
+		}
+		return strings.ReplaceAll(c.help, "this Mac", "this "+platform.Machine(goos))
+	}
+	return ""
+}
+
+func usage(goos string) string {
 	var b strings.Builder
-	b.WriteString("zakwas converges this machine to zakwas.yaml.\n\nUsage:\n  zakwas [flags] <command>\n\nCommands:\n")
+	b.WriteString("zakwas converges this " + platform.Machine(goos) + " to zakwas.yaml.\n\nUsage:\n  zakwas [flags] <command>\n\nCommands:\n")
 	for _, c := range commandList {
 		name := strings.TrimSpace(c.name + " " + c.args)
-		fmt.Fprintf(&b, "  %-30s %s\n", name, c.help)
+		fmt.Fprintf(&b, "  %-30s %s\n", name, commandHelp(c.name, goos))
 	}
 	b.WriteString("\nFlags (plan, apply, upgrade, check):\n")
 	return b.String()
@@ -398,7 +417,11 @@ func refresh(ctx context.Context, env Env, cfg *config.Config, mods []engine.Mod
 		}
 	}
 	if cfg.Brew == nil && cfg.Agents == nil {
-		errOut.print("zakwas: upgrade needs a brew or agents section in zakwas.yaml\n")
+		sections := "a brew or agents section"
+		if !platform.Supported("brew", env.goos()) {
+			sections = "an agents section"
+		}
+		errOut.print("zakwas: upgrade needs " + sections + " in zakwas.yaml\n")
 		return ExitUsage, false
 	}
 	if brewSelected {
@@ -429,7 +452,7 @@ func newFlags(errOut io.Writer) (*flag.FlagSet, *options) {
 	fs := flag.NewFlagSet("zakwas", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		_, _ = io.WriteString(fs.Output(), usage())
+		_, _ = io.WriteString(fs.Output(), usage(platform.Current()))
 		fs.PrintDefaults()
 	}
 	fs.StringVar(&o.cfgPath, "c", "", "path to zakwas.yaml (default: search upward from cwd, then $ZAKWAS_CONFIG)")
@@ -439,7 +462,7 @@ func newFlags(errOut io.Writer) (*flag.FlagSet, *options) {
 	fs.BoolVar(&o.noColor, "no-color", false, "disable colors (also NO_COLOR)")
 	fs.BoolVar(&o.asJSON, "json", false, "machine-readable output: a plan document, or JSON lines events for apply")
 	fs.BoolVar(&o.noWait, "no-wait", false, "apply: exit 1 at once when another zakwas run holds the lock, instead of waiting for it")
-	fs.BoolVar(&o.offline, "offline", false, "check: only compare the files zakwas owns with its recorded state, starting no command (fast; skips "+strings.Join(offlineSkipped, ", ")+")")
+	fs.BoolVar(&o.offline, "offline", false, "check: only compare the files zakwas owns with its recorded state, starting no command (fast; skips "+strings.Join(offlineSkippedOn(platform.Current()), ", ")+")")
 	fs.StringVar(&o.outFile, "out", "", "plan: also save the plan to this file, for apply -plan")
 	fs.StringVar(&o.planFile, "plan", "", "apply: apply this saved plan if the machine still matches it, without prompting")
 	return fs, &o

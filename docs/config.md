@@ -369,7 +369,7 @@ agents:
 |---|---|
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` |
 | Codex | `${CODEX_HOME:-~/.codex}/AGENTS.md` |
-| opencode | `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` is ignored, as for skills, and `opencode.skillsDir` doesn't move it) |
+| opencode | `$XDG_CONFIG_HOME/opencode/AGENTS.md`, else `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` is ignored, as for skills, and `opencode.skillsDir` doesn't move it) |
 | Gemini CLI | `${GEMINI_CLI_HOME:-~}/.gemini/zakwas/GEMINI.md`, the context file of the [zakwas extension](#gemini-cli); `~/.gemini/GEMINI.md`, which Gemini's memory tool writes to, is never touched |
 | Copilot CLI | `${COPILOT_HOME:-~/.copilot}/instructions/zakwas.instructions.md`, with `applyTo: "**"` frontmatter added so that Copilot loads it in every session |
 | shared | `~/.agents/AGENTS.md`, only with `sharedInstructions: true`; read by Warp, Cline and Factory Droid, not by Claude Code, Codex or opencode |
@@ -607,7 +607,7 @@ Only declared leaves are updated. Removing a value or the settings block leaves 
 |---|---|---|
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md` (a subagent file; Claude Code scans the directory recursively) | `claude --agent <name>` |
 | Codex | `${CODEX_HOME:-~/.codex}/<name>.config.toml` (layered over `config.toml`) | `codex --profile <name>` |
-| opencode | `~/.config/opencode/agents/<name>.md` | `opencode --agent <name>` |
+| opencode | `$XDG_CONFIG_HOME/opencode/agents/<name>.md`, else `~/.config/opencode/agents/<name>.md` | `opencode --agent <name>` |
 | Gemini CLI | `${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md` (a subagent of the [zakwas extension](#gemini-cli)) | `@<name>` at the start of a prompt, or let Gemini delegate |
 | Copilot CLI | `${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md` (a custom agent; only when `copilot` is named) | `copilot --agent <name>` |
 

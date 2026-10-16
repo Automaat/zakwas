@@ -69,6 +69,14 @@ func Name(goos string) string {
 	return goos
 }
 
+// Machine is what messages call the computer zakwas runs on.
+func Machine(goos string) string {
+	if goos == Darwin {
+		return "Mac"
+	}
+	return "machine"
+}
+
 // Supported reports whether module runs on goos. An unknown module is
 // unsupported everywhere.
 func Supported(module, goos string) bool {

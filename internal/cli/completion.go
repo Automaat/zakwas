@@ -189,7 +189,7 @@ func (m completionModel) zsh() string {
 	}
 	b.WriteString("  )\n  commands=(\n")
 	for _, c := range commandList {
-		fmt.Fprintf(&b, "    %s\n", zshQuote(c.name+":"+c.help))
+		fmt.Fprintf(&b, "    %s\n", zshQuote(c.name+":"+commandHelp(c.name, platform.Current())))
 	}
 	b.WriteString("  )\n")
 	b.WriteString("  _arguments -C $global_flags '1:command:->command' '*::arg:->args'\n")
@@ -245,7 +245,7 @@ func (m completionModel) fish() string {
 	b.WriteString("# fish completion for zakwas; load with: zakwas completion fish | source\n")
 	b.WriteString("complete -c zakwas -f\n")
 	for _, c := range commandList {
-		fmt.Fprintf(&b, "complete -c zakwas -n __fish_use_subcommand -a %s -d %s\n", c.name, fishQuote(c.help))
+		fmt.Fprintf(&b, "complete -c zakwas -n __fish_use_subcommand -a %s -d %s\n", c.name, fishQuote(commandHelp(c.name, platform.Current())))
 	}
 	planCond := fishQuote("__fish_use_subcommand; or __fish_seen_subcommand_from " + strings.Join(planCommands, " "))
 	for _, f := range m.global {

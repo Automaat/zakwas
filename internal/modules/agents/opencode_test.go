@@ -942,3 +942,36 @@ func TestOpencodePrunesWithoutOpencodeInstalled(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestOpencodeFilesFollowXDGConfigHome(t *testing.T) {
+	xdg := t.TempDir()
+	tests := []struct {
+		name     string
+		xdg      string
+		realHome bool
+		base     func(home string) string
+	}{
+		{"unset", "", true, func(home string) string { return filepath.Join(home, ".config") }},
+		{"absolute", xdg, true, func(string) string { return xdg }},
+		{"another home", xdg, false, func(home string) string { return filepath.Join(home, ".config") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newOpencode(t, config.Agents{})
+			if tt.realHome {
+				t.Setenv("HOME", m.Paths.Home)
+			}
+			t.Setenv("XDG_CONFIG_HOME", tt.xdg)
+			base := tt.base(m.Paths.Home)
+			if got, want := m.instructionsPath(config.ProviderOpencode), filepath.Join(base, "opencode", "AGENTS.md"); got != want {
+				t.Errorf("instructions = %q, want %q", got, want)
+			}
+			if got, want := m.profilePath(config.ProviderOpencode, "review"), filepath.Join(base, "opencode", "agents", "review.md"); got != want {
+				t.Errorf("profile = %q, want %q", got, want)
+			}
+			if got, want := m.opencodeCommandHooksPath(), filepath.Join(base, "opencode", "plugins", "zakwas-hooks.js"); got != want {
+				t.Errorf("hooks = %q, want %q", got, want)
+			}
+		})
+	}
+}

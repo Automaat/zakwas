@@ -99,3 +99,36 @@ func TestPlatformTableMatchesTheSourceOfTruth(t *testing.T) {
 		t.Errorf("documented options %v, platform options %v", documentedOptions, features)
 	}
 }
+
+func TestREADMEListsTheMacOnlySections(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var line string
+	for l := range strings.SplitSeq(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(l, "macOS only: "); ok {
+			line, _, _ = strings.Cut(rest, ". ")
+		}
+	}
+	if line == "" {
+		t.Fatal("README.md has no 'macOS only: ...' line")
+	}
+	var listed []string
+	for i, part := range strings.Split(line, "`") {
+		if i%2 == 1 {
+			listed = append(listed, part)
+		}
+	}
+	want := platform.UnsupportedModules(platform.Linux)
+	for _, f := range platform.Features {
+		if !platform.FeatureSupported(f.Name, platform.Linux) && f.Fallback == "" {
+			want = append(want, f.Name)
+		}
+	}
+	slices.Sort(listed)
+	slices.Sort(want)
+	if !slices.Equal(listed, want) {
+		t.Errorf("README lists %v as macOS only, platform says %v", listed, want)
+	}
+}

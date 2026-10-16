@@ -11,6 +11,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/modules/agents"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/proposal"
 )
 
@@ -341,7 +342,7 @@ func TestCaptureIsListedWithTheCommands(t *testing.T) {
 	for _, c := range commandList {
 		found = found || c.name == "capture"
 	}
-	if !found || !strings.Contains(usage(), "capture [--write]") {
+	if !found || !strings.Contains(usage(platform.Current()), "capture [--write]") {
 		t.Error("capture is missing from the command list")
 	}
 }

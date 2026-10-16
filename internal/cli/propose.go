@@ -17,10 +17,11 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/proposal"
 )
 
-const proposeUsage = `Usage: zakwas propose OPERATION [flags]
+const proposeUsageText = `Usage: zakwas propose OPERATION [flags]
 
 Saves a change to the config repo as a proposal, with its plan and risk tier.
 Nothing is edited: review it with 'zakwas proposals' and apply it with
@@ -37,6 +38,33 @@ Operations:
 
 Flags:
 `
+
+func proposeUsage(goos string) string {
+	var out []string
+	for line := range strings.SplitAfterSeq(proposeUsageText, "\n") {
+		kind := strings.Fields(line)
+		if len(kind) > 0 && proposal.KindError(kind[0], goos) != nil {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "")
+}
+
+// printDefaultsExcept is PrintDefaults without the flag named hidden, for a
+// flag that stays defined but does nothing on this system.
+func printDefaultsExcept(fs *flag.FlagSet, hidden string) {
+	shown := flag.NewFlagSet(fs.Name(), flag.ContinueOnError)
+	shown.SetOutput(fs.Output())
+	fs.VisitAll(func(f *flag.Flag) {
+		if f.Name == hidden {
+			return
+		}
+		shown.Var(f.Value, f.Name, f.Usage)
+		shown.Lookup(f.Name).DefValue = f.DefValue
+	})
+	shown.PrintDefaults()
+}
 
 type listFlag []string
 
@@ -67,8 +95,12 @@ func newProposeFlags(errOut io.Writer) (*flag.FlagSet, *proposeOptions) {
 	fs := flag.NewFlagSet("zakwas propose", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		_, _ = io.WriteString(fs.Output(), proposeUsage)
-		fs.PrintDefaults()
+		_, _ = io.WriteString(fs.Output(), proposeUsage(platform.Current()))
+		hidden := ""
+		if !platform.Supported("brew", platform.Current()) {
+			hidden = "cask"
+		}
+		printDefaultsExcept(fs, hidden)
 	}
 	fs.StringVar(&o.cfgPath, "c", "", "path to zakwas.yaml (default: search upward from cwd, then $ZAKWAS_CONFIG)")
 	fs.BoolVar(&o.asJSON, "json", false, "print the proposal as JSON")
@@ -160,14 +192,17 @@ var opFlags = map[string][]string{
 	proposal.AddMCP:           {"providers", "command", "url", "bearer-token-env", "arg", "env-var", "oauth-client-id", "oauth-callback-port", "oauth-scope"},
 }
 
-func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string) (proposal.Op, error) {
+func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string, goos string) (proposal.Op, error) {
 	if len(pos) == 0 {
 		return proposal.Op{}, errUsage
 	}
 	kind, rest := pos[0], pos[1:]
 	allowed, known := opFlags[kind]
 	if !known {
-		return proposal.Op{}, fmt.Errorf("unknown operation %q; use one of %s", kind, strings.Join(proposal.Kinds, ", "))
+		return proposal.Op{}, fmt.Errorf("unknown operation %q; use one of %s", kind, strings.Join(proposal.KindsFor(goos), ", "))
+	}
+	if err := proposal.KindError(kind, goos); err != nil {
+		return proposal.Op{}, err
 	}
 	var stray []string
 	fs.Visit(func(f *flag.Flag) {
@@ -237,7 +272,7 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 	if !ok {
 		return code
 	}
-	op, err := opFromArgs(fs, o, pos)
+	op, err := opFromArgs(fs, o, pos, env.goos())
 	if err != nil {
 		if errors.Is(err, errUsage) {
 			fs.Usage()
@@ -413,7 +448,7 @@ func evaluate(ctx context.Context, env Env, cfg *config.Config, ops []proposal.O
 // the plan it will run is complete and stays away from sensitive paths.
 func rate(env Env, ops []proposal.Op, plan engine.Plan) (string, []string) {
 	tier, reasons := proposal.Classify(ops)
-	sens := proposal.Sensitive{Home: env.Home, Extra: []string{absFromCwd(env, env.ClaudeConfigDir), absFromCwd(env, env.CodexHome), absFromCwd(env, env.GeminiHome), absFromCwd(env, env.CopilotHome)}}
+	sens := proposal.Sensitive{Home: env.Home, Extra: []string{absFromCwd(env, env.ClaudeConfigDir), absFromCwd(env, env.CodexHome), absFromCwd(env, env.GeminiHome), absFromCwd(env, env.CopilotHome), opencodeConfigDir(env)}}
 	for _, mp := range plan {
 		if mp.Err != nil {
 			reasons = append(reasons, fmt.Sprintf("the %s plan is incomplete: %v", mp.Module, mp.Err))
@@ -486,4 +521,13 @@ func printable(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// opencodeConfigDir is opencode's config home when $XDG_CONFIG_HOME moves it
+// out of ~/.config, which the sensitive list already covers.
+func opencodeConfigDir(env Env) string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); env.Home == os.Getenv("HOME") && filepath.IsAbs(xdg) {
+		return filepath.Join(xdg, "opencode")
+	}
+	return ""
 }

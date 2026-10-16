@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +14,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/install"
 	"github.com/Automaat/zakwas/internal/platform"
+	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
 
@@ -181,5 +185,80 @@ func TestInitOnLinuxSkipsBrewAndMise(t *testing.T) {
 	}
 	if _, err := config.LoadFor(filepath.Join(repo, "zakwas.yaml"), home, platform.Linux); err != nil {
 		t.Errorf("generated config does not load on Linux: %v", err)
+	}
+}
+
+func TestAdvertisedSurfaceFollowsThePlatform(t *testing.T) {
+	macOnly := []string{"Homebrew", "brew", "add-brew", "pin-mise", "cask", "Mac"}
+	tests := []struct {
+		goos      string
+		mentions  bool
+		kindCount int
+	}{
+		{platform.Darwin, true, 7},
+		{platform.Linux, false, 5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			if got := len(proposal.KindsFor(tt.goos)); got != tt.kindCount {
+				t.Errorf("%d operations, want %d", got, tt.kindCount)
+			}
+			mcpTools := &mcpTools{env: Env{GOOS: tt.goos}}
+			var surface []string
+			surface = append(surface, usage(tt.goos), commandHelp("init", tt.goos), commandHelp("upgrade", tt.goos), initUsage(tt.goos), proposeUsage(tt.goos), mcpInstructions(tt.goos))
+			surface = append(surface, strings.Join(offlineSkippedOn(tt.goos), ","))
+			for _, tool := range mcpTools.tools() {
+				surface = append(surface, tool.Title, tool.Description)
+				if tool.Name == "zakwas_propose" {
+					schema, err := json.Marshal(tool.Schema)
+					if err != nil {
+						t.Fatal(err)
+					}
+					surface = append(surface, string(schema))
+				}
+			}
+			text := strings.Join(surface, "\n")
+			for _, word := range macOnly {
+				if got := strings.Contains(text, word); got != tt.mentions {
+					i := strings.Index(text, word)
+					t.Errorf("surface mentions %q = %v, want %v: ...%s...", word, got, tt.mentions, text[max(0, i-60):min(len(text), i+60)])
+				}
+			}
+		})
+	}
+}
+
+func TestLinuxProposeRefusesMacOnlyOperations(t *testing.T) {
+	for _, args := range [][]string{{"add-brew", "jq"}, {"pin-mise", "jq", "1.8.0"}} {
+		env := linuxSetup(t, linksOnly)
+		r := invoke(env, "", append([]string{"propose"}, args...)...)
+		if r.code == ExitOK || !strings.Contains(r.stderr, args[0]+": ") || !strings.Contains(r.stderr, "not supported on Linux") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+}
+
+func TestPrintDefaultsExceptHidesOneFlag(t *testing.T) {
+	var buf bytes.Buffer
+	fs := flag.NewFlagSet("t", flag.ContinueOnError)
+	fs.SetOutput(&buf)
+	fs.Bool("cask", false, "add-brew: a cask")
+	fs.String("providers", "x", "who")
+	if err := fs.Parse([]string{"-providers", "y"}); err != nil {
+		t.Fatal(err)
+	}
+	printDefaultsExcept(fs, "cask")
+	got := buf.String()
+	if strings.Contains(got, "cask") || !strings.Contains(got, "-providers string") || !strings.Contains(got, `(default "x")`) {
+		t.Errorf("output:\n%s", got)
+	}
+	var all bytes.Buffer
+	fs.SetOutput(&all)
+	printDefaultsExcept(fs, "")
+	var want bytes.Buffer
+	fs.SetOutput(&want)
+	fs.PrintDefaults()
+	if all.String() != want.String() {
+		t.Errorf("nothing hidden differs from PrintDefaults:\n%s\nwant\n%s", all.String(), want.String())
 	}
 }
