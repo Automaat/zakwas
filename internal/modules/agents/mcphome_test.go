@@ -304,3 +304,23 @@ func TestCaptureRoundTripUnderHome(t *testing.T) {
 		t.Errorf("reason = %q", reason)
 	}
 }
+
+func TestCaptureTildeReasonOnlyWhenTheTildeIsTheOnlyGap(t *testing.T) {
+	m, fake := newModule(t, config.Agents{Providers: []string{config.ProviderClaude}})
+	writeFile(t, m.claudeJSONPath(), `{"mcpServers": {
+  "lit": {"type": "stdio", "command": "~/.local/bin/tool"},
+  "lit-env": {"type": "stdio", "command": "~/.local/bin/tool", "env": {"A": "b"}},
+  "lit-extra": {"type": "stdio", "command": "~/.local/bin/tool", "timeout": 5}}}`)
+	fake.OnOK(marketList, "[]")
+	fake.OnOK(pluginList, `{"installed": [], "available": []}`)
+	got := capture(t, m)
+	if c := find(t, got, KindMCP, "lit"); !strings.Contains(c.Skip, "literal ~") {
+		t.Errorf("lit = %q", c.Skip)
+	}
+	for name, key := range map[string]string{"lit-env": "env", "lit-extra": "timeout"} {
+		c := find(t, got, KindMCP, name)
+		if strings.Contains(c.Skip, "literal ~") || !strings.Contains(c.Skip, "("+key+")") {
+			t.Errorf("%s = %q", name, c.Skip)
+		}
+	}
+}

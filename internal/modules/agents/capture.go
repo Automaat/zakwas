@@ -333,8 +333,11 @@ func roundTrip(store mcpStore, name string, server CapturedServer, have mcpEntry
 	if want.canon == have.canon {
 		return ""
 	}
-	if server.mcp().HasHomeRef() {
-		return "has a literal ~ in its command or args, which the agent does not expand and zakwas.yaml would; put the absolute path there, then capture it again"
+	if literal, err := store.render(name, server.mcp()); err == nil {
+		if server.mcp().HasHomeRef() && literal.canon == have.canon {
+			return "has a literal ~ in its command or args, which the agent does not expand and zakwas.yaml would; put the absolute path there, then capture it again"
+		}
+		want = literal
 	}
 	return fmt.Sprintf("has settings capture can't declare (%s), which may hold literal values; add it to zakwas.yaml by hand",
 		strings.Join(differingKeys(have.value, want.value), ", "))

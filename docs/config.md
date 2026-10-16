@@ -451,6 +451,7 @@ Agents start a stdio server without a shell, so a literal `~/.local/bin/x` in th
 | each `env` value | a value that starts with `~/` | a bare `~`, `a~/x`, `~user/x`, `$HOME/x` |
 | `envVars`, `url`, `headers`, `headerEnv`, `bearerTokenEnv`, `oauth` | nothing | everything |
 
+- Quote a bare `~` in YAML: unquoted, `~` is null, so `args: [~]` drops the element and `env: {K: ~}` writes an empty value. `~/x` needs no quotes.
 - The text after `~/` is kept as written, `..` and a trailing `/` included.
 - `$HOME` and other variables are not expanded. Write `~/…` instead.
 - It is the same for every provider, Gemini CLI and the `agentMCP` function for opencode included; the agent's config holds the absolute path, and so do `plan` diffs.

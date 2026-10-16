@@ -882,7 +882,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Arguments of the command. An argument that is ~ or starts with ~/ is expanded to your home directory; a ~ elsewhere in it (--dir=~/x), ~user and $HOME are not. Otherwise written to the agents' config as is, so keep secrets out of them.",
+                "description": "Arguments of the command. An argument that is ~ (quoted in YAML, since a bare ~ is null) or starts with ~/ is expanded to your home directory; a ~ elsewhere in it (--dir=~/x), ~user and $HOME are not. Otherwise written to the agents' config as is, so keep secrets out of them.",
                 "type": [
                   "array",
                   "null"
