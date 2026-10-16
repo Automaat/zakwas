@@ -47,7 +47,7 @@ func (m *Module) Plan(_ context.Context) ([]engine.Change, error) {
 		if mode == 0 {
 			mode = defaultMode
 		}
-		want, err := Render(m.Paths.Src(f.Src), data, Funcs(m.Agents))
+		want, err := Render(m.Paths.Src(f.Src), data, Funcs(m.Agents, m.Paths.Home))
 		if err != nil {
 			return nil, err
 		}
@@ -86,13 +86,13 @@ func RenderText(name, text string, data any, funcs template.FuncMap) ([]byte, er
 }
 
 // Funcs are the functions templates can call; agents may be nil.
-func Funcs(agents *config.Agents) template.FuncMap {
+func Funcs(agents *config.Agents, home string) template.FuncMap {
 	return template.FuncMap{
 		"agentPermissions": func(provider string, catchAll ...string) (string, error) {
 			return agentPermissions(agents, provider, catchAll...)
 		},
 		"agentMCP": func(provider string) (string, error) {
-			return agentMCP(agents, provider)
+			return agentMCP(agents, provider, home)
 		},
 	}
 }
@@ -226,7 +226,7 @@ func opencodeServer(s config.MCPServer) opencodeMCP {
 
 // agentMCP renders agents.mcp as opencode's mcp object, one line of JSON
 // holding the servers that target opencode.
-func agentMCP(agents *config.Agents, provider string) (string, error) {
+func agentMCP(agents *config.Agents, provider, home string) (string, error) {
 	if provider != config.ProviderOpencode {
 		return "", fmt.Errorf("agentMCP: provider %q is not supported, only %s", provider, config.ProviderOpencode)
 	}
@@ -240,10 +240,13 @@ func agentMCP(agents *config.Agents, provider string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if err := s.HomeError(home); err != nil {
+			return "", fmt.Errorf("agentMCP: agents.mcp.%s: %w", s.Name, err)
+		}
 		var value bytes.Buffer
 		enc := json.NewEncoder(&value)
 		enc.SetEscapeHTML(false)
-		if err := enc.Encode(opencodeServer(s.MCPServer)); err != nil {
+		if err := enc.Encode(opencodeServer(s.ExpandHome(home))); err != nil {
 			return "", err
 		}
 		b.Write(key)

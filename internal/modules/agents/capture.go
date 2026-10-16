@@ -311,7 +311,7 @@ func (m *Module) captureMCP(provider string, store mcpStore) ([]Candidate, error
 		c := Candidate{Provider: provider, Kind: KindMCP, Name: name, Found: m.Paths.Pretty(store.path())}
 		server, reason := capturedServer(provider, have[name].value)
 		if reason == "" {
-			reason = roundTrip(store, name, server, have[name])
+			reason = roundTrip(store, name, server, have[name], m.Paths.Home)
 		}
 		if reason != "" {
 			c.Skip = reason
@@ -325,13 +325,19 @@ func (m *Module) captureMCP(provider string, store mcpStore) ([]Candidate, error
 
 // roundTrip returns why server, rendered the way zakwas.yaml would have it
 // rendered, isn't the entry that is there, or "".
-func roundTrip(store mcpStore, name string, server CapturedServer, have mcpEntry) string {
-	want, err := store.render(name, server.mcp())
+func roundTrip(store mcpStore, name string, server CapturedServer, have mcpEntry, home string) string {
+	want, err := store.render(name, server.mcp().ExpandHome(home))
 	if err != nil {
 		return "can't be declared: " + err.Error()
 	}
 	if want.canon == have.canon {
 		return ""
+	}
+	if literal, err := store.render(name, server.mcp()); err == nil {
+		if server.mcp().HasHomeRef() && literal.canon == have.canon {
+			return "has a literal ~ in its command or args, which the agent does not expand and zakwas.yaml would; put the absolute path there, then capture it again"
+		}
+		want = literal
 	}
 	return fmt.Sprintf("has settings capture can't declare (%s), which may hold literal values; add it to zakwas.yaml by hand",
 		strings.Join(differingKeys(have.value, want.value), ", "))

@@ -235,7 +235,7 @@ Not captured
 
 - anything that may hold a credential, by what it is passed with or how it looks: a flag or name such as `--token`, `--password`, `-p`, `-k`, `-t`, `--pin`, `--session-id`, `-u USER:VALUE`, `--header "Authorization: ..."`, `NAME_KEY=VALUE` or `export NAME VALUE` (a name containing PASS, PWD, PAT, KEY, TOKEN, SECRET, CRED or AUTH), `login VALUE`, `/password:VALUE`; a DSN or URL with user info, a password, a query or a fragment; a JSON value with a credential key; a JWT, base64, long hex or long mixed-case token, a known token prefix (`ghp_`, `sk-`, `sk_live_`, `AKIA`, ...); a URL path segment that isn't a plain lower-case word, version or short ID; a marketplace source or ref that does; a name or environment variable name that does, or that isn't upper case. This covers marketplace sources, MCP commands, arguments and URLs, Claude allow rules and Codex approvals. The value is never printed or echoed in a reason: a skipped rule is shown as `Bash(...)` or `prefix_rule on line N`, a skipped name as `(name withheld)`. A Codex rule's `justification` is free text and never read or declared;
 - a disabled plugin (declaring it would enable it) and a plugin whose marketplace `zakwas.yaml` doesn't declare for that provider and capture can't either (a plugin installed in two providers whose marketplaces of one name differ is declared for the provider whose marketplace is);
-- an MCP server with settings `agents.mcp` can't express here (literal `env` values or headers, which may be secrets; a URL with a query, a fragment or credentials; options such as timeouts; an `oauth` object with a key that names a secret, or with settings beyond the client ID, callback port and scopes), one whose name another provider uses for a different server, and one `zakwas.yaml` declares for other providers only;
+- an MCP server with settings `agents.mcp` can't express here (literal `env` values or headers, which may be secrets; a URL with a query, a fragment or credentials; options such as timeouts; an `oauth` object with a key that names a secret, or with settings beyond the client ID, callback port and scopes), one whose name another provider uses for a different server, one with a literal leading `~` in its `command` or `args` (the agent doesn't expand it, `zakwas.yaml` would; put the absolute path in the agent's config first), and one `zakwas.yaml` declares for other providers only. A captured path stays absolute;
 - a Claude rule that isn't a command prefix (`Read(...)`, `WebFetch(...)`, an exact `Bash(cmd)` rule, `Bash(*)`), and a Codex rule whose pattern has alternatives, that spans lines or whose decision isn't `allow`, `prompt` or `forbidden`; when one command is saved with several decisions, only the strictest is declared;
 - an operation that wouldn't apply to `zakwas.yaml` (a marketplace declared for other providers only, a flow-style list, an invalid rule), with the error.
 
@@ -426,6 +426,7 @@ zakwas schema
 
 Prints the JSON Schema of `zakwas.yaml` (see [config.md](config.md)). Editors with the YAML language server use it through the first line `zakwas init` writes:
 
+<!-- recipe: skip -->
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json
 ```

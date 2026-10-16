@@ -5,7 +5,7 @@ zakwas is maintained by one person, so answers are best effort. Where to go:
 | You have | Go to |
 |---|---|
 | A first-use problem, an error message, or a surprise in `zakwas plan` | [docs/troubleshooting.md](../docs/troubleshooting.md) |
-| A question about a config key or command | [docs/config.md](../docs/config.md), [docs/commands.md](../docs/commands.md), [docs/examples.md](../docs/examples.md) |
+| A question about a config key or command | [docs/config.md](../docs/config.md), [docs/commands.md](../docs/commands.md), [docs/recipes.md](../docs/recipes.md) |
 | Coding agents (Claude Code, Codex, opencode, Gemini CLI, Copilot CLI) | [docs/agents.md](../docs/agents.md) |
 | A bug | [Open a bug report](https://github.com/Automaat/zakwas/issues/new?template=bug.yml) |
 | An idea for a module, option or command | [Open a feature request](https://github.com/Automaat/zakwas/issues/new?template=feature.yml) |

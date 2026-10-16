@@ -32,6 +32,7 @@ It gives completion, hover docs and validation (unknown keys, missing required f
 
 Put this on the first line of `zakwas.yaml`:
 
+<!-- recipe: skip -->
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json
 ```
@@ -42,6 +43,7 @@ To pin the schema to your zakwas version instead of `main`, save it next to the 
 zakwas schema > zakwas.schema.json
 ```
 
+<!-- recipe: skip -->
 ```yaml
 # yaml-language-server: $schema=./zakwas.schema.json
 ```
@@ -430,8 +432,8 @@ opencode applies the last pattern that matches. The function therefore writes th
 
 | Key | For | Description |
 |---|---|---|
-| `command`, `args` | stdio | The command that starts the server, and its arguments. |
-| `env` | stdio | Environment variables with their values. Written to the agents' config as is. |
+| `command`, `args` | stdio | The command that starts the server, and its arguments. A leading `~` is expanded to your home directory (see [home directory](#home-directory)). |
+| `env` | stdio | Environment variables with their values. A value starting with `~/` is expanded; the rest is written to the agents' config as is. |
 | `envVars` | stdio | Names of environment variables passed through from the agent's own environment. |
 | `url` | HTTP | `http://` or `https://` URL of the server. |
 | `headers` | HTTP | Header names with their values. Written to the agents' config as is. |
@@ -440,7 +442,28 @@ opencode applies the last pattern that matches. The function therefore writes th
 | `oauth` | HTTP | `true`: the server signs in with OAuth and registers its own client; `plan` and `apply` show the login command. A mapping `{clientId, callbackPort, scope}`: a pre-registered OAuth client, written to every provider that can take it (see [OAuth clients](#oauth-clients)). Not combined with `bearerTokenEnv` or an `Authorization` header. |
 | `providers` | both | Providers to register the server with; must be in `agents.providers`. |
 
-Secrets never go into the config zakwas writes: `envVars`, `headerEnv` and `bearerTokenEnv` name the environment variable and each agent reads it in its own way. `env`, `headers`, `args` and the `url` are written as they are, so keep tokens out of them (a `url` can't hold a user name or password, and `plan` diffs hide query values).
+#### Home directory
+
+Agents start a stdio server without a shell, so a literal `~/.local/bin/x` in the config they read fails to spawn. zakwas therefore replaces a leading `~` with your home directory (the one `~/…` means in `files` destinations) before it writes a server, so `zakwas.yaml` stays the same on every machine and user:
+
+| Field | Expanded | Left as written |
+|---|---|---|
+| `command` | `~` and `~/rest` | `~user/x`, `a~/x`, `~x`, `$HOME/x` |
+| each `args` element | an element that is `~` or starts with `~/` | `--dir=~/x` (the `~` is not at the start), `~user/x`, `$HOME/x` |
+| each `env` value | a value that starts with `~/` | a bare `~`, `a~/x`, `~user/x`, `$HOME/x` |
+| `envVars`, `url`, `headers`, `headerEnv`, `bearerTokenEnv`, `oauth` | nothing | everything |
+
+- Quote a bare `~` in YAML: unquoted, `~` is null, so `args: [~]` drops the element and `env: {K: ~}` writes an empty value. `~/x` needs no quotes.
+- The text after `~/` is kept as written, `..` and a trailing `/` included. A trailing `/` of the home itself is dropped (`~` and `~/x` give `/h` and `/h/x` for `HOME=/h/`).
+- When a `~` has to be expanded and `HOME` is not an absolute path, the provider's plan fails and names the server, as `files` and `templates` do for `~/…` destinations. Servers without a leading `~` are not affected.
+- `$HOME` and other variables are not expanded. Write `~/…` instead.
+- It is the same for every provider, Gemini CLI and the `agentMCP` function for opencode included; the agent's config holds the absolute path, and so do `plan` diffs.
+- The comparison with an existing server uses the expanded value. A server already registered with `/Users/me/.local/bin/x` is adopted when `zakwas.yaml` says `~/.local/bin/x`, and the plan is empty after `apply`. A server registered with a literal `~/…` differs from the declaration, so its provider's plan fails as for any other difference.
+- The record of what zakwas registered (`agent-mcp.json`) holds hashes of the expanded entries, so a `~` path is per machine, as the config file is.
+- [Capture](commands.md#capture) proposes paths as the agent has them, so an absolute path stays absolute; it skips a server holding a literal `~`.
+- A `~` is not a `$`, so it never keeps a server out of Gemini CLI.
+
+Secrets never go into the config zakwas writes: `envVars`, `headerEnv` and `bearerTokenEnv` name the environment variable and each agent reads it in its own way. `env`, `headers`, `args` and the `url` are written as they are (apart from a leading `~`, see [home directory](#home-directory)), so keep tokens out of them (a `url` can't hold a user name or password, and `plan` diffs hide query values).
 
 ```yaml
 agents:
@@ -565,6 +588,7 @@ Only declared leaves are updated. Removing a value or the settings block leaves 
 
 ```yaml
 agents:
+  providers: [claude, codex]
   mcp:
     datadog: {url: https://mcp.example.com/mcp}
     devtools: {command: devtools-mcp}
@@ -782,7 +806,7 @@ launchd:
     log: ~/Library/Logs/zakwas-check.log
 ```
 
-The [daily drift notification](examples.md#daily-drift-notification) recipe builds on this.
+The [daily drift notification](recipes.md#daily-drift-notification) recipe builds on this.
 
 ## defaults
 
