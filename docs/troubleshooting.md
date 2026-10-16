@@ -7,6 +7,7 @@ What a new user runs into first, and what to do. Every message below is what zak
 - [The plan shows `edited in place` or `not managed yet` and a `.zakwas-bak` file](#the-plan-shows-edited-in-place-or-not-managed-yet-and-a-zakwas-bak-file)
 - [`Operation not permitted` on a managed file](#operation-not-permitted-on-a-managed-file)
 - [Homebrew or mise is missing](#homebrew-or-mise-is-missing)
+- [`not supported on Linux`](#not-supported-on-linux)
 - [`agents: plan failed: ... is not installed`](#agents-plan-failed--is-not-installed)
 - [`refusing to apply from a ... session`](#refusing-to-apply-from-a--session)
 - [Where zakwas keeps its state](#where-zakwas-keeps-its-state)
@@ -52,7 +53,7 @@ Adding `*.zakwas-bak*` to your config repo's `.gitignore` is what `zakwas init` 
 
 ## `Operation not permitted` on a managed file
 
-With `protect.immutable: true`, installed files are read-only and carry the macOS `uchg` flag, so `rm`, `chmod`, `:w!` and `echo >>` all fail with `Operation not permitted`. That is the protection working. The change belongs in the repo, followed by `zakwas apply`.
+On macOS, with `protect.immutable: true`, installed files are read-only and carry the macOS `uchg` flag, so `rm`, `chmod`, `:w!` and `echo >>` all fail with `Operation not permitted`. That is the protection working. The change belongs in the repo, followed by `zakwas apply`.
 
 For a quick experiment on one file:
 
@@ -68,9 +69,25 @@ zakwas installs what it needs. With a `brew` section and no `brew` on `PATH`, th
 
 - Homebrew is installed with the official installer, pinned to one commit. It needs `sudo`, so run `apply` in a terminal and expect a password prompt.
 - mise is a pinned release downloaded to `~/.local/bin/mise`, with its SHA256 checked first. If your Brewfile lists `mise`, the Homebrew one is used instead.
-- `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` are added to `PATH` for the rest of the run, so later modules find what an earlier one installed. A shell that is already open does not see them; open a new terminal after the first `apply`.
+- `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` are added to `PATH` for the rest of the run (on Linux, `/usr/local/bin` and `~/.local/bin`), so later modules find what an earlier one installed. A shell that is already open does not see them; open a new terminal after the first `apply`.
 
 Details: [security.md](security.md#tools-zakwas-bootstraps) and [security.md](security.md#sudo).
+
+## `not supported on Linux`
+
+```
+zakwas: zakwas.yaml: brew: not supported on Linux (it bootstraps Homebrew for macOS and manages casks); see docs/config.md#platform-support
+```
+
+`brew`, `mise`, `defaults`, `launchd` and `system.sudoTouchID` are macOS only. Every command (`plan`, `check`, `apply`, `--only`, `propose`) rejects a config that uses one on Linux, naming each, before anything changes; exit code 1 for a config, 64 for `--only`. Remove the section for the Linux machine. To share one repo between a Mac and a Linux box, keep a second config for Linux (see `examples/linux/zakwas.yaml`) and pass `-c`; the dotfile sources can be shared.
+
+Other Linux notes:
+
+- `protect.immutable: true` is accepted. There is no `uchg` flag, so installed files stay read-only (`0444`) and hash-tracked; `check` stays clean and the plan prints `protect.immutable is macOS-only; files are read-only copies` once. A read-only file is still removable by its owner (`rm -f`), and `apply` restores it.
+- zakwas does not install your agent CLIs. A missing one is reported per provider, as in the next section; install it first (Claude Code's installer puts `claude` in `~/.local/bin`, which zakwas adds to `PATH`).
+- The installer needs `curl`, `tar`, `sha256sum` (or `shasum`) and, to clone your repo, `git`. It prints a `PATH` hint when `~/.local/bin` is not on `PATH`.
+- A hung `check` in `commands` is stopped with its whole process group, so a shell that forks (dash) does not outlive the 30-second timeout.
+- Names compared without case (overlapping destinations, skill names) stay case-insensitive, even though Linux file systems are not: `~/.Foo` and `~/.foo` are rejected as overlapping.
 
 ## `agents: plan failed: ... is not installed`
 

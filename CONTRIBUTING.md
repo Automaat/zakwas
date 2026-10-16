@@ -6,7 +6,7 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Se
 
 ## Scope
 
-zakwas converges a Mac (macOS only) to a `zakwas.yaml`. It is pre-1.0, so config keys can still change between minor versions. A change fits when it makes a plan more accurate, adds a typed way to manage something a user would otherwise script in `commands`, or adds a coding agent the `agents` module can render for. Nothing user-specific belongs in code or `examples/`: no personal paths, taps or keys.
+zakwas converges a Mac, or a Linux machine for the modules that support it, to a `zakwas.yaml`. macOS comes first; Linux is limited to what [Platform support](docs/config.md#platform-support) lists. It is pre-1.0, so config keys can still change between minor versions. A change fits when it makes a plan more accurate, adds a typed way to manage something a user would otherwise script in `commands`, or adds a coding agent the `agents` module can render for. Nothing user-specific belongs in code or `examples/`: no personal paths, taps or keys.
 
 ## Setup
 
@@ -30,11 +30,20 @@ HOME=$(mktemp -d) /tmp/zakwas -c examples/zakwas.yaml plan --only system,files,t
 
 [CLAUDE.md](CLAUDE.md) (also read as `AGENTS.md`) describes the layout, the module order and the rules each module keeps. It is the reference for what follows, so read it before a larger change.
 
+### Testing on Linux
+
+On a Linux machine the setup above works as is: `mise install && mise run test`. The `ubuntu` CI job runs `go build`, `go vet`, `golangci-lint`, `go test -race ./...` (unit tests and the e2e scripts), plans and applies [`examples/linux/zakwas.yaml`](examples/linux/zakwas.yaml) and smoke-tests `install.sh`. From a Mac, `GOOS=linux go build ./... && GOOS=linux go vet ./...` catches build errors, and a container runs the tests: cross-compile a package's test binary and run it where its sources are (the tests need `git` and `ssh-keygen`; use a throwaway `$HOME`):
+
+```bash
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go test -c -o /tmp/cli.test ./internal/cli
+docker run --rm -v "$PWD:/src" -v /tmp/cli.test:/cli.test -w /src/internal/cli your-image-with-git /cli.test
+```
+
 ## Making a change
 
 ### Add a module
 
-Follow [Adding a module](CLAUDE.md#adding-a-module) and keep the [module order](CLAUDE.md#module-order). In short: a package under `internal/modules/<name>/` that implements `engine.Module`, config in `internal/config` (validated in `Validate`), wiring in `cli.Modules`, and docs in `README.md`, `docs/config.md` and `examples/zakwas.yaml`.
+Follow [Adding a module](CLAUDE.md#adding-a-module) and keep the [module order](CLAUDE.md#module-order). Register it in `internal/platform` with the systems it supports, and add it to the table in `docs/config.md`. In short: a package under `internal/modules/<name>/` that implements `engine.Module`, config in `internal/config` (validated in `Validate`), wiring in `cli.Modules`, and docs in `README.md`, `docs/config.md` and `examples/zakwas.yaml`.
 
 ### Add an agent provider
 
@@ -72,6 +81,10 @@ Add it to `commandList` in `internal/cli/cli.go`, which feeds usage and shell co
 - A module test converges twice and asserts the second plan is empty.
 - End-to-end tests are [testscript](https://pkg.go.dev/github.com/rogpeppe/go-internal/testscript) files in `cmd/zakwas/testdata/script/*.txtar`, run with fake `brew`, `mise` and agent CLIs. They also hold the plan goldens: when plan output changes on purpose, update them.
 - Tests that need the real macOS `defaults` or mise carry the `integration` build tag.
+- Tests that need macOS itself (the `uchg` flag, `defaults`) call `testutil.RequireDarwin(t, "reason")` from `internal/testutil`, or start an e2e script with `[!darwin] skip 'reason'`; the skip says what is not covered. Do not weaken an assertion to make it pass on both systems.
+- Behavior that differs by operating system takes the system as a parameter (`config.LoadFor`, `cli.Env.GOOS`, `platform.Supported(module, goos)`), not a build tag, so both sides are unit tested on any host. Build tags are only for system calls (`internal/install/flags_*.go`, `internal/modules/agents/swap_*.go`).
+- An e2e script that needs a macOS-only module against fake binaries starts with `env ZAKWAS_TEST_GOOS=darwin`; one that checks Linux behavior starts with `env ZAKWAS_TEST_GOOS=linux`. Both run on any host. The real Linux run is the `ubuntu` CI job.
+- Docs: the platform tables in `docs/config.md` are checked against `internal/platform`; change them together.
 - Machine-readable output (`--json`, apply history) is versioned by `engine.FormatVersion`: adding a field is fine, renaming or removing one bumps the version.
 - Comments explain a non-obvious why, never what.
 

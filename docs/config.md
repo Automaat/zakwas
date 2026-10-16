@@ -1,11 +1,12 @@
 # zakwas.yaml reference
 
-`zakwas.yaml` describes one Mac. zakwas finds it by searching up from the current directory, then `$ZAKWAS_CONFIG`; `-c path` overrides both. The directory holding it is the **config root**: every `src`, `brew.file` and `mise.config` path is relative to it (absolute paths work too).
+`zakwas.yaml` describes one machine, normally a Mac. On Linux some sections are not supported; see [Platform support](#platform-support). zakwas finds it by searching up from the current directory, then `$ZAKWAS_CONFIG`; `-c path` overrides both. The directory holding it is the **config root**: every `src`, `brew.file` and `mise.config` path is relative to it (absolute paths work too).
 
 Every section is optional. Unknown keys are errors, and zakwas reports every problem in the file at once before touching anything.
 
 - [Editor setup](#editor-setup)
 - [Conventions](#conventions)
+- [Platform support](#platform-support)
 - [protect](#protect)
 - [files](#files)
 - [links](#links)
@@ -115,13 +116,37 @@ Other editors (Helix, JetBrains, Sublime) that run yaml-language-server honor th
 
 **Module order**: system → files → links → templates → brew → mise → agents → commands → launchd → defaults. `--only brew,defaults` runs a subset.
 
+## Platform support
+
+zakwas runs on macOS and Linux. Each section below is supported on the systems marked here. A config that uses a section its system does not support fails validation with a one-line error that names the section and the system, for `plan`, `check`, `apply` and the other commands alike; no module is skipped silently. Options of a supported section are listed after the modules.
+
+| Module | macOS | Linux | Why |
+|---|---|---|---|
+| `system` | yes | yes | `dirs` and `sshKey` work everywhere; see `system.sudoTouchID` below |
+| `files` | yes | yes | |
+| `links` | yes | yes | |
+| `templates` | yes | yes | |
+| `brew` | yes | no | bootstraps Homebrew for macOS and manages casks |
+| `mise` | yes | no | its bootstrap installs the macOS build of mise; on Linux install mise yourself and use `commands` or a `files` entry for its config |
+| `agents` | yes | yes | paths follow `$HOME`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$XDG_CONFIG_HOME` and the other variables the agents read |
+| `commands` | yes | yes | `sh -c` in your home directory |
+| `launchd` | yes | no | launchd is macOS's service manager |
+| `defaults` | yes | no | drives the macOS `defaults` tool |
+
+| Option | macOS | Linux | Why |
+|---|---|---|---|
+| `system.sudoTouchID` | yes | no | Touch ID and `pam_tid.so` are macOS only; rejected on Linux |
+| `protect.immutable` | yes | fallback | the `uchg` flag is macOS only; on Linux files stay read-only copies (`0444`, tracked by hash) and the plan warns once |
+
+`--only` with a module the system does not support fails with the same error. Shell completion offers only the modules that run on the current system. File name comparisons (overlapping destinations, skill names) stay case-insensitive on Linux, which is stricter than its file systems need: two names that differ only in case are rejected on both systems.
+
 ## protect
 
 How `files` and `templates` are locked down after zakwas writes them.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `immutable` | bool | `false` | Also set the macOS `uchg` flag, so even the owner can't edit, `chmod` or `rm` the file (`:w!` fails too) without `chflags nouchg`. |
+| `immutable` | bool | `false` | Also set the macOS `uchg` flag, so even the owner can't edit, `chmod` or `rm` the file (`:w!` fails too) without `chflags nouchg`. On Linux there is no such flag: files stay read-only copies and the plan warns once. |
 
 Write bits are always stripped, with or without `immutable`. `plan` flags a file whose protection was removed (`mode 644 → 444`, `set immutable`) and `apply` restores it.
 
@@ -275,7 +300,7 @@ The `claude` (Claude Code), `codex` (Codex), `opencode`, `gemini` (Gemini CLI) a
 | `codex.settings` | map | no | | Selected global Codex config.toml values, edited in place independently of profiles. See [global Codex settings](#global-codex-settings). |
 | `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex, opencode, Gemini CLI and Copilot CLI: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode`, `gemini`, `copilot` blocks. See [profiles](#profiles). |
 | `skills` | list | no | | Standalone skills linked into every managed agent: a path, or `{path, git, ref, providers}`. See [skills](#skills). |
-| `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
+| `opencode.skillsDir` | string | no | `$XDG_CONFIG_HOME/opencode/skills`, else `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 | `guard` | bool | no | `true` | Keep the managed agents from applying this config. See [guard](#guard). |
 
 A marketplace `source` is a GitHub `owner/repo` or a git URL (either optionally with `#ref`), or a local path starting with `./`, `../`, `~/` or `/` (relative paths resolve from the directory holding `zakwas.yaml`). A marketplace targets `agents.providers` unless it lists its own `providers`; a plugin targets its marketplace's providers unless it lists its own, which must be a subset.
@@ -302,7 +327,7 @@ For Copilot CLI, which reads Claude-format marketplaces, `apply` adds missing ma
 
 The Copilot plan fails when `copilot` is not on `PATH`, or when a declared marketplace is already added from a different source or ref. Copilot's list omits the ref, so zakwas reads it from the marketplace's entry in `settings.json`, where Copilot records the ref it added the marketplace with, and none when it was added without one. A declared `#ref` that differs from the recorded ref, or that is declared while the entry records none, fails the plan; remove the marketplace with `copilot plugin marketplace remove <name>` (`--force` when plugins from it are installed, which uninstalls them) and apply again. The error names the ref the marketplace was added with, as `comes from o/mk#old`, or says `(added without a ref)` when the declared ref conflicts with an entry that records none. A marketplace declared without a ref, or with an empty one (`o/mk#`), is not compared by ref, whatever ref it was added with. A marketplace with no entry in `settings.json` (the file is missing or unreadable, or Copilot didn't write one) has no known ref, so only its source is compared. A declared plugin missing from its marketplace fails its install on apply: the plan never browses a marketplace, since Copilot clones one that isn't cached yet. zakwas runs `copilot` from `/` and honors `COPILOT_HOME` (a relative one resolves from the directory zakwas runs in). zakwas never writes Copilot's `config.json` or `settings.json`; Copilot keeps its own marketplace and plugin state in them.
 
-For opencode, which has no plugin system, zakwas links each skill of every declared plugin (the paths its `plugin.json` or marketplace entry lists under `skills`, or else each `skills/<name>/` holding a `SKILL.md`) into `~/.config/opencode/skills/<name>`. `apply` fetches the git marketplaces of those plugins with `git clone --depth 1` into `~/.local/share/zakwas/agents/<name>` (a `#ref` must be a branch or tag) and uses local ones in place; the plugin directory comes from the first of `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` that lists the plugin, and must be inside the marketplace repo, symlinks resolved; skill paths that resolve outside it are skipped.
+For opencode, which has no plugin system, zakwas links each skill of every declared plugin (the paths its `plugin.json` or marketplace entry lists under `skills`, or else each `skills/<name>/` holding a `SKILL.md`) into `opencode/skills/<name>` under `$XDG_CONFIG_HOME` (`~/.config` when unset). `apply` fetches the git marketplaces of those plugins with `git clone --depth 1` into `~/.local/share/zakwas/agents/<name>` (a `#ref` must be a branch or tag) and uses local ones in place; the plugin directory comes from the first of `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` that lists the plugin, and must be inside the marketplace repo, symlinks resolved; skill paths that resolve outside it are skipped.
 
 `plan` never fetches: a marketplace not fetched yet shows as a fetch, followed by one step that links its plugins' skills and applies the other listed changes, checking every skill name before linking any. Under `prune`, links of those plugins' skills that the fetched copy no longer ships are removed in the same step; any other removal that only shows up after the fetch is left for the next plan. `zakwas upgrade` pulls the fetched copies first; the links point into them, so skill updates need no relink.
 
@@ -724,7 +749,7 @@ Machine-level setup.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `dirs` | list | `[]` | Directories to create (below). |
-| `sudoTouchID` | bool | `false` | Allow Touch ID for `sudo` by adding `pam_tid.so` to `/etc/pam.d/sudo_local`, which survives macOS updates. |
+| `sudoTouchID` | bool | `false` | Allow Touch ID for `sudo` by adding `pam_tid.so` to `/etc/pam.d/sudo_local`, which survives macOS updates. macOS only; rejected on Linux. |
 | `sshKey` | object | none | Generate an SSH key when missing (below). |
 
 `dirs` entries:

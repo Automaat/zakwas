@@ -1,6 +1,6 @@
 # zakwas
 
-Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, links, templates, brew, mise, agents, defaults, system, commands, launchd). Users keep the config in their own repo; see `examples/`.
+Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, links, templates, brew, mise, agents, defaults, system, commands, launchd). Linux runs the agents, files, links, templates, commands and system (dirs, sshKey) modules. Users keep the config in their own repo; see `examples/`.
 
 ## Layout
 
@@ -9,6 +9,8 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `cmd/zakwas/` | entrypoint + testscript e2e tests (`testdata/script/*.txtar`) |
 | `internal/cli/` | flag parsing, module wiring, exit codes, apply history |
 | `internal/config/` | `zakwas.yaml` schema, `Validate`, config discovery |
+| `internal/platform/` | which module and option runs on which OS (`Supported`, `ModuleError`); the one source for validation, wiring and the `docs/config.md` tables |
+| `internal/testutil/` | `RequireDarwin`/`RequireLinux` skip helpers for OS-bound tests |
 | `internal/engine/` | `Module` interface, plan/apply |
 | `internal/modules/<name>/` | one package per module |
 | `internal/proposal/` | typed config edits (byte-splicing), proposal store, risk tiers |
@@ -16,13 +18,13 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `internal/install/` | protected-copy writer + hash state (`~/.local/state/zakwas/files.json`) |
 | `internal/lock/` | flock that serializes `apply`/`upgrade` (`~/.local/state/zakwas/lock`) |
 | `internal/runner/` | exec abstraction; `runnertest.Fake` for tests |
-| `install.sh` | fresh-Mac installer: CLT, zakwas binary from the release, clone, apply |
-| `examples/` | example config repo; CI plans and applies it |
+| `install.sh` | fresh-machine installer (macOS and Linux): CLT on macOS, zakwas binary from the release, clone, apply |
+| `examples/` | example config repo; CI plans and applies it. `examples/linux/` is the Linux-supported subset, planned and applied by the `ubuntu` CI job |
 | `schema/` | generated `zakwas.schema.json` (embedded for `zakwas schema`); generator in `internal/schemagen` |
 | `internal/selfupdate/` | release download + verification for `self-update` |
 | `internal/docs/` | test that loads (and, for `agents`, plans) the YAML blocks in `README.md` and `docs/*.md`; skip a non-config block with `<!-- recipe: skip -->` |
 | `docs/` | user docs: config reference, commands, recipes, agents guide, security, troubleshooting |
-| `.goreleaser.yaml` | darwin release binaries, published on `v*` tags |
+| `.goreleaser.yaml` | darwin and linux (amd64, arm64) release binaries, published on `v*` tags; the Homebrew cask is darwin-only (`ids: [darwin]`) |
 
 ## Commands
 
@@ -49,6 +51,7 @@ system → files → links → templates → brew → mise → agents → comman
 
 ## Rules
 
+- Platform support lives in `internal/platform`: darwin runs every module; linux runs agents, files, links, templates, commands and system (`dirs`, `sshKey`). `brew`, `mise`, `defaults`, `launchd` and `system.sudoTouchID` are rejected by `config.Validate` on Linux with a one-line error naming the section and the OS, and `cli.Modules` does not construct them there. OS-dependent logic takes `goos` as a parameter (`config.LoadFor`, `cli.Env.GOOS`), never a build tag, so both sides are unit tested on any host; build tags only select syscalls. `protect.immutable` on Linux keeps files read-only and warns once from the `files` module. A new module must be registered in `platform.Modules`, and the tables in `docs/config.md` must match it (a test checks). Tests that need macOS call `testutil.RequireDarwin`; e2e scripts set `env ZAKWAS_TEST_GOOS=darwin|linux`. The real Linux run is the `ubuntu` CI job.
 - `plan`/`check` must never change the system; every brew call (apply too) sets `HOMEBREW_NO_AUTO_UPDATE=1`, so only `zakwas upgrade` refreshes Homebrew. Likewise only `upgrade` refreshes agent marketplaces.
 - `engine.Build` plans modules concurrently (and brew runs its read-only queries together), so `Plan` and `Warnings` must not write state shared with other modules; modules that share a struct (e.g. the `files`/`templates` installer) guard it. Output stays in module order.
 - agents: each provider is a `backend` in `internal/modules/agents` (claude, codex, opencode, copilot). A provider that fails to plan returns its error alongside the other providers' changes, which still apply; each change's `Group` is its provider, so an apply failure stops only that provider. Codex and Copilot are opt-in (`config.OptIn`): converged only when `zakwas.yaml` names them. Copilot's own state is `$COPILOT_HOME/{config,settings}.json`: zakwas only reads `settings.json` (marketplace refs) and never writes either; it owns `hooks/zakwas.json`, `instructions/zakwas.instructions.md` and `agents/<name>.agent.md` as protected copies and edits `mcp-config.json` in place; its plan never runs `copilot plugin marketplace browse`, which clones. Tests that run a real `copilot` must set `COPILOT_HOME` and `HOME` to temp dirs. Never pass `-y`/`--accept-command` to `claude plugin`; never prune project/local-scope installs. Codex prune only touches marketplaces in `$CODEX_HOME/config.toml` and their plugins. Tests that run a real `codex` must set `CODEX_HOME` to a temp dir. opencode has no plugin system: zakwas links skills into its skills dir, tracks its links in `~/.local/state/zakwas/opencode.json` and fetches git marketplaces only in apply (pulls only in `upgrade`); plugins that reach opencode only by the default providers are best effort. `agents.instructions` links one file per provider via `install.PlanLink` (shared with `links`), tracked in `~/.local/state/zakwas/instructions.json`; same strict/opt-in/best-effort rules. `agents.permissions` adds rules to Claude's `settings.json` (only the ones zakwas added are tracked, in `~/.local/state/zakwas/agent-permissions.json`, and ever removed) and owns `$CODEX_HOME/rules/zakwas.rules`; opencode gets them only through the `agentPermissions` template function, since its `opencode.json` is usually a template. `agents.skills` links standalone skills (Claude `~/.claude/skills`, Codex and opencode `~/.agents/skills`) and tracks its links and git clones in `~/.local/state/zakwas/skills.json`; it only ever replaces or removes its own links, never `npx skills` installs. `agents.mcp` registers servers at user scope: Claude's `.claude.json` (`$CLAUDE_CONFIG_DIR` aware) is edited directly because `claude mcp get` starts the server, and Codex's `[mcp_servers.<name>]` tables are edited as text in place (`tomledit.go`), never with `codex mcp add`; only servers recorded in `~/.local/state/zakwas/agent-mcp.json` are changed or removed, a same-named unowned server is adopted when identical and fails that provider's plan when not; opencode gets them through the `agentMCP` template function. Gemini is opt-in like Codex (`config.OptIn`, `Agents.Wants`) and has no `backend`: `gemini.go` renders one extension (`~/.gemini/zakwas`, linked with `gemini extensions link --consent`, which `plan` detects by reading gemini's install record, never by running it) holding the manifest with MCP servers, hooks, and the context file and subagents the instructions and profiles planners write there, plus the whole user policy file `policies/zakwas.toml` (extension rules rank below user ones and can't allow, so all permission, guard and profile rules live there: deny 900/990 > ask 700 > allow 500 > profile 400); files are installer copies tracked in `gemini-files.json`, unlink goes before the files go; never write `~/.gemini/settings.json` or `GEMINI.md`; `GEMINI_CLI_HOME` moves `.gemini` and `.agents`; servers whose command, args, url, env or headers hold a literal `$` (Gemini expands it) or whose name has `_` are left out with a warning; the manifest of an unmanaged extension stays tracked until `gemini` can uninstall it.

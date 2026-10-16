@@ -5,7 +5,7 @@ description: Use when the user wants to add or remove an agent plugin, permissio
 
 # zakwas
 
-zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent settings, plugins, permissions, MCP servers, hooks, Brewfile entries and mise pins. A hand edit to a managed file is reverted by the next `zakwas apply`, and agents are denied `apply`. Propose the change instead; the user approves it.
+zakwas converges this machine (macOS or Linux) to a `zakwas.yaml` in a config repo. It owns agent settings, plugins, permissions, MCP servers, hooks, Brewfile entries and mise pins. A hand edit to a managed file is reverted by the next `zakwas apply`, and agents are denied `apply`. Propose the change instead; the user approves it.
 
 ## Never
 
