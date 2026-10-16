@@ -158,7 +158,7 @@ func (m *Module) skillWant(p, dir string, s config.NamedSkill, strict bool) skil
 	case s.Git != "":
 		src := newSkillSource(s.Skill)
 		w.source, w.subpath = &src, filepath.Clean(s.Path)
-	case s.Path == "~" || strings.HasPrefix(s.Path, "~/"):
+	case config.IsHomePath(s.Path):
 		w.local = m.Paths.Dst(s.Path)
 	default:
 		w.local = filepath.Clean(m.Paths.Src(s.Path))
@@ -510,6 +510,9 @@ func skillMDName(data []byte) (string, bool) {
 // anything else at the path, such as an `npx skills` install, fails the plan.
 func (m *Module) planSkillLink(w skillWant, st skillsState) (*engine.Change, error) {
 	link, target := w.link, m.skillTarget(w)
+	if !install.SymlinksSupported {
+		return nil, fmt.Errorf("skill %q: linking it into %s: %w", w.name, m.Paths.Pretty(link), install.ErrSymlinksUnsupported)
+	}
 	if err := install.CheckParents(m.Paths, link); err != nil {
 		return nil, fmt.Errorf("skill %q: %w", w.name, err)
 	}

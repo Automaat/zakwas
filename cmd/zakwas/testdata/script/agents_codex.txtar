@@ -1,3 +1,4 @@
+[windows] skip 'the fake claude and codex are sh scripts'
 chmod 755 bin/claude
 chmod 755 bin/codex
 mkdir state codex

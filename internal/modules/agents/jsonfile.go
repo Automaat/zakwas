@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/Automaat/zakwas/internal/fsutil"
 )
 
 // object is a JSON object that keeps its key order, so editing one field of
@@ -187,6 +189,11 @@ func writeBytesIf(path string, out, read []byte) error {
 	if info.Mode().Perm()&0o200 == 0 {
 		return fmt.Errorf("%s is read-only; if zakwas installs it from your repo, make the change there", path)
 	}
+	existing := read
+	if existing == nil {
+		existing, _ = os.ReadFile(path)
+	}
+	out = withLineEnding(out, existing)
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".zakwas-*")
 	if err != nil {
 		return err
@@ -213,7 +220,17 @@ func writeBytesIf(path string, out, read []byte) error {
 			return errChanged
 		}
 	}
-	return os.Rename(tmp.Name(), path)
+	return fsutil.Rename(tmp.Name(), path)
+}
+
+// withLineEnding converts rendered LF text to the line ending of the file it
+// replaces, so an edit on Windows doesn't turn a CRLF file into a mixed or
+// LF one. A new or LF file keeps LF.
+func withLineEnding(out, existing []byte) []byte {
+	if lineEnding(existing) != "\r\n" {
+		return out
+	}
+	return bytes.ReplaceAll(bytes.ReplaceAll(out, []byte("\r\n"), []byte("\n")), []byte("\n"), []byte("\r\n"))
 }
 
 // createObject writes o to path only if nothing is there yet: the hard

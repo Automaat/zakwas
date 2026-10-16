@@ -16,12 +16,12 @@ func ExpandHome(home, v string) string {
 	if home == "" {
 		return v
 	}
-	base := strings.TrimRight(home, "/")
+	base := strings.TrimRight(home, "/"+string(filepath.Separator))
 	if v == "~" {
 		return cmp.Or(base, "/")
 	}
-	if rest, ok := strings.CutPrefix(v, "~/"); ok {
-		return base + "/" + rest
+	if rest, ok := CutHome(v); ok {
+		return base + string(filepath.Separator) + filepath.FromSlash(rest)
 	}
 	return v
 }
@@ -48,7 +48,7 @@ func (s MCPServer) ExpandHome(home string) MCPServer {
 	}
 	s.Env = maps.Clone(s.Env)
 	for k, v := range s.Env {
-		if strings.HasPrefix(v, "~/") {
+		if _, ok := CutHome(v); ok {
 			s.Env[k] = ExpandHome(home, v)
 		}
 	}

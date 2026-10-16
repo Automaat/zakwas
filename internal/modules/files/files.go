@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
@@ -23,6 +24,15 @@ type Module struct {
 }
 
 func (m *Module) Name() string { return "files" }
+
+// Warnings says once that protect.immutable can't be honored here: only
+// macOS has the flag, so installed copies are only read-only.
+func (m *Module) Warnings(context.Context) []string {
+	if m.Installer == nil || !m.Installer.Immutable || install.ImmutableSupported {
+		return nil
+	}
+	return []string{"protect.immutable has no effect on " + runtime.GOOS + ": installed files are read-only copies without the immutable flag"}
+}
 
 func (m *Module) Plan(_ context.Context) ([]engine.Change, error) {
 	wanted := map[string]bool{}

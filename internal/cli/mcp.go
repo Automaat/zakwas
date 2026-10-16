@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Automaat/zakwas/internal/config"
@@ -87,9 +86,8 @@ func runMCP(ctx context.Context, env Env, args []string, out, errOut *console) i
 		ex.Stdout, ex.NoStdin = ex.Stderr, true
 		ex.Env = append(ex.Env, LockHeldEnv+"="+strconv.Itoa(os.Getpid()))
 	}
-	signal.Ignore(syscall.SIGPIPE)
-	defer signal.Reset(syscall.SIGPIPE)
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+	defer ignoreBrokenPipe()()
+	ctx, stop := signal.NotifyContext(ctx, terminationSignals...)
 	defer stop()
 	t := &mcpTools{env: env, cfgPath: o.cfgPath, enableApply: o.enableApply}
 	srv := &mcp.Server{

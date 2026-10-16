@@ -36,6 +36,7 @@ func TestScripts(t *testing.T) {
 				}
 			})
 			env.Setenv("HOME", home)
+			env.Setenv("USERPROFILE", home)
 			env.Setenv("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
 			env.Setenv("ZAKWAS_PAM_FILE", filepath.Join(env.WorkDir, "sudo_local"))
 			return nil

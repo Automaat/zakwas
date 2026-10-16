@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -85,12 +86,27 @@ func run() int {
 // binaries up in PATH on every call, so later modules find them.
 func extendPath(home string) {
 	dirs := filepath.SplitList(os.Getenv("PATH"))
-	for _, d := range []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(home, ".local", "bin")} {
-		if !slices.Contains(dirs, d) {
+	for _, d := range installDirs(home, runtime.GOOS) {
+		if !slices.ContainsFunc(dirs, func(have string) bool { return samePathEntry(have, d, runtime.GOOS) }) {
 			dirs = append(dirs, d)
 		}
 	}
 	_ = os.Setenv("PATH", strings.Join(dirs, string(os.PathListSeparator)))
+}
+
+func installDirs(home, goos string) []string {
+	userBin := filepath.Join(home, ".local", "bin")
+	if goos == "windows" {
+		return []string{userBin}
+	}
+	return []string{"/opt/homebrew/bin", "/usr/local/bin", userBin}
+}
+
+func samePathEntry(a, b, goos string) bool {
+	if goos == "windows" {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return a == b
 }
 
 // colorOutput follows no-color.org: colors only on a terminal, never when
@@ -99,7 +115,7 @@ func colorOutput() bool {
 	if _, set := os.LookupEnv("NO_COLOR"); set || os.Getenv("TERM") == "dumb" {
 		return false
 	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
+	return term.IsTerminal(int(os.Stdout.Fd())) && enableANSI(os.Stdout) && enableANSI(os.Stderr)
 }
 
 func hostname() string {

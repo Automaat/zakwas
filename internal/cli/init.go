@@ -147,7 +147,7 @@ func absFrom(cwd, home, path string) string {
 	if path == "~" {
 		return home
 	}
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+	if rest, ok := config.CutHome(path); ok {
 		return filepath.Join(home, rest)
 	}
 	if filepath.IsAbs(path) {

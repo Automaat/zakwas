@@ -683,7 +683,7 @@ func (a *Agents) validate() []error {
 		switch {
 		case strings.TrimSpace(f) == "":
 			errs = append(errs, fmt.Errorf("agents.instructions[%d]: file is required", i))
-		case f == "~" || strings.HasPrefix(f, "~/"):
+		case IsHomePath(f):
 			errs = append(errs, fmt.Errorf("agents.instructions: %q must be relative to the directory holding zakwas.yaml, or absolute", f))
 		case slices.Contains(a.Instructions[:i], f):
 			errs = append(errs, fmt.Errorf("agents.instructions[%d]: %q is already listed", i, f))
@@ -694,7 +694,7 @@ func (a *Agents) validate() []error {
 	}
 	if a.Opencode != nil {
 		dir := a.Opencode.SkillsDir
-		if dir != "" && !filepath.IsAbs(dir) && !strings.HasPrefix(dir, "~/") {
+		if dir != "" && !filepath.IsAbs(dir) && !IsHomePath(dir) {
 			errs = append(errs, fmt.Errorf("agents.opencode.skillsDir: %q must be absolute or start with ~/", dir))
 		}
 	}

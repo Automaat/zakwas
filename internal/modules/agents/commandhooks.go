@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"reflect"
 	"slices"
 
@@ -405,7 +406,7 @@ func (m *Module) planJSONCommandHooks(provider string, want, owned []commandHook
 
 func (m *Module) opencodeCommandHooksPath() string {
 	base := filepath.Join(m.Paths.Home, ".config")
-	if m.Paths.Home == os.Getenv("HOME") {
+	if m.Paths.Home == envHome() {
 		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
 			base = xdg
 		}
@@ -496,6 +497,8 @@ export default {
 `), nil
 }
 
+var hostOS = runtime.GOOS
+
 func (m *Module) planOpencodeCommandHooks(want []commandHookRegistration) (*engine.Change, error) {
 	path := m.opencodeCommandHooksPath()
 	if err := install.CheckParents(m.Paths, path); err != nil {
@@ -507,6 +510,12 @@ func (m *Module) planOpencodeCommandHooks(want []commandHookRegistration) (*engi
 	}
 	owned := st.Providers[config.ProviderOpencode]
 	pending := st.Pending
+	if len(want) > 0 && hostOS == "windows" {
+		if m.desired(config.ProviderOpencode).named {
+			return nil, errors.New("its plugin runs hooks through /bin/sh, which is not supported on Windows yet")
+		}
+		return nil, nil
+	}
 	if len(want) > 0 && !m.Runner.Installed(config.ProviderOpencode) {
 		if m.desired(config.ProviderOpencode).named {
 			return nil, errors.New("opencode is not installed")

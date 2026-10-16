@@ -1,3 +1,4 @@
+[windows] skip 'the fake brew and mise are sh scripts'
 chmod 755 bin/brew
 chmod 755 bin/mise
 

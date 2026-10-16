@@ -14,6 +14,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/runner"
 )
@@ -58,7 +59,7 @@ type klaudiushConfig struct {
 
 func (m *Module) klaudiushConfigPath() string {
 	base := filepath.Join(m.Paths.Home, ".config")
-	if m.Paths.Home == os.Getenv("HOME") {
+	if m.Paths.Home == envHome() {
 		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
 			base = xdg
 		}
@@ -82,8 +83,8 @@ func (m *Module) klaudiushBinary() (string, error) {
 }
 
 func (m *Module) hookPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(m.Paths.Home, path[2:])
+	if rest, ok := config.CutHome(path); ok {
+		return filepath.Join(m.Paths.Home, rest)
 	}
 	if !filepath.IsAbs(path) {
 		return filepath.Join("/", path)
@@ -228,7 +229,7 @@ func (m *Module) opencodeKlaudiushPath(p klaudiushProvider) string {
 		return m.hookPath(p.PluginPath)
 	}
 	base := filepath.Join(m.Paths.Home, ".config")
-	if m.Paths.Home == os.Getenv("HOME") {
+	if m.Paths.Home == envHome() {
 		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
 			base = xdg
 		}
@@ -385,4 +386,11 @@ func opencodeHookRegistered(path, binary string) (bool, error) {
 			strings.Contains(source, `case "session.idle":`)) ||
 			(strings.Contains(source, `ctx.tool.hook("execute.before",`) &&
 				strings.Contains(source, `case "session.execution.succeeded":`))), nil
+}
+
+// envHome is the home directory the process runs with ($HOME, or the user
+// profile on Windows), which is where XDG_CONFIG_HOME applies.
+func envHome() string {
+	home, _ := os.UserHomeDir()
+	return home
 }

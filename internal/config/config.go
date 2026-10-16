@@ -396,12 +396,30 @@ type Paths struct {
 	Root string
 }
 
+// CutHome splits "~/rest" into rest. Where backslash separates paths, "~\rest"
+// does too. A bare "~" is not matched; callers compare it themselves.
+func CutHome(path string) (rest string, ok bool) {
+	if rest, ok = strings.CutPrefix(path, "~/"); ok {
+		return rest, true
+	}
+	if filepath.Separator == '\\' {
+		return strings.CutPrefix(path, `~\`)
+	}
+	return "", false
+}
+
+// IsHomePath reports whether path is "~" or starts with "~/".
+func IsHomePath(path string) bool {
+	_, ok := CutHome(path)
+	return ok || path == "~"
+}
+
 // Dst expands a destination path.
 func (p Paths) Dst(path string) string {
 	if path == "~" {
 		return p.Home
 	}
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+	if rest, ok := CutHome(path); ok {
 		return filepath.Join(p.Home, rest)
 	}
 	return path
@@ -415,10 +433,29 @@ func (p Paths) Src(path string) string {
 	return filepath.Join(p.Root, path)
 }
 
-// Pretty shortens an absolute path under home back to "~/...".
+// Pretty shortens an absolute path under home back to "~/...", with forward
+// slashes on every platform. Windows paths match the home directory without
+// regard to case.
 func (p Paths) Pretty(path string) string {
-	if rest, ok := strings.CutPrefix(path, p.Home+string(filepath.Separator)); ok {
-		return "~/" + rest
+	if rest, ok := CutDir(path, p.Home); ok {
+		return "~/" + filepath.ToSlash(rest)
 	}
 	return path
+}
+
+// CutDir returns the part of path below dir, ignoring case on Windows.
+func CutDir(path, dir string) (rest string, ok bool) {
+	return cutPathPrefix(path, dir, filepath.Separator == '\\')
+}
+
+func cutPathPrefix(path, dir string, fold bool) (rest string, ok bool) {
+	prefix := dir + string(filepath.Separator)
+	if len(path) < len(prefix) {
+		return "", false
+	}
+	head := path[:len(prefix)]
+	if head == prefix || fold && strings.EqualFold(head, prefix) {
+		return path[len(prefix):], true
+	}
+	return "", false
 }

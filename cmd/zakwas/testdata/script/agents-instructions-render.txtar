@@ -1,3 +1,4 @@
+[windows] skip 'needs symlinks'
 mkdir claude
 env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex

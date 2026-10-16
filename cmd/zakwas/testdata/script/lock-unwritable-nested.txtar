@@ -1,3 +1,4 @@
+[windows] skip 'directory modes have no Windows equivalent'
 [root] skip 'root ignores file modes'
 
 mkdir home/.local/state/zakwas

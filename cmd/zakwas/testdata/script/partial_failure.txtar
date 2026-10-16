@@ -1,3 +1,4 @@
+[windows] skip 'the fake brew is an sh script and links are symlinks'
 chmod 755 bin/brew
 
 ! zakwas apply -y

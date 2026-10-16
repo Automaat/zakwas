@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/Automaat/zakwas/internal/selfupdate"
@@ -32,6 +33,10 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 		return err
 	}); !ok {
 		return code
+	}
+	if runtime.GOOS == "windows" {
+		errOut.print("zakwas: self-update is not supported on Windows yet; download the latest release from " + selfupdate.ReleasesURL + "\n")
+		return ExitUsage
 	}
 	var err error
 	exe := env.Executable

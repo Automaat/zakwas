@@ -1,3 +1,4 @@
+[windows] skip 'launchd is macOS only'
 chmod 755 bin/launchctl
 
 zakwas plan --only launchd

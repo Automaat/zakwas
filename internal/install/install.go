@@ -18,6 +18,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/fsutil"
 )
 
 // Installer writes protected copies. State is loaded from StatePath on first
@@ -37,6 +38,10 @@ type Installer struct {
 func ReadOnly(perm fs.FileMode) fs.FileMode {
 	return perm.Perm() &^ 0o222
 }
+
+// ImmutableSupported reports whether this platform has the immutable flag
+// that protect.immutable sets: only macOS does.
+const ImmutableSupported = immutableSupported
 
 // Plan returns the change that makes dst a protected copy of want, or nil.
 func (in *Installer) Plan(dst string, want []byte, perm fs.FileMode) (*engine.Change, error) {
@@ -78,7 +83,7 @@ func (in *Installer) Plan(dst string, want []byte, perm fs.FileMode) (*engine.Ch
 		return c
 	}
 	if bytes.Equal(have, want) {
-		reasons, err := in.protectionDrift(dst, info.Mode().Perm(), perm)
+		reasons, err := in.protectionDrift(dst, info.Mode().Perm(), statPerm(perm))
 		if err != nil {
 			return nil, err
 		}
@@ -315,7 +320,8 @@ func CheckParents(paths config.Paths, dst string) error {
 }
 
 func within(path, dir string) bool {
-	return strings.HasPrefix(path, dir+string(filepath.Separator))
+	_, ok := config.CutDir(path, dir)
+	return ok
 }
 
 func resolvesInto(link, root string) bool {
@@ -402,16 +408,8 @@ func WriteAtomic(dst string, data []byte, perm fs.FileMode) (err error) {
 	if err = os.Chmod(tmp.Name(), perm); err != nil {
 		return err
 	}
-	if err = os.Rename(tmp.Name(), dst); err != nil {
+	if err = fsutil.Rename(tmp.Name(), dst); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(dst))
-}
-
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	return errors.Join(d.Sync(), d.Close())
+	return fsutil.SyncDir(filepath.Dir(dst))
 }

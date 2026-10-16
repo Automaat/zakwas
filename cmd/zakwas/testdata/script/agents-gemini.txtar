@@ -1,3 +1,4 @@
+[windows] skip 'the fake gemini is an sh script and skills are symlinks'
 chmod 755 bin/gemini
 env CLAUDE_CONFIG_DIR=$WORK/claude
 

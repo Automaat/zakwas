@@ -141,6 +141,12 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 	if !installed {
 		return o.planPruneOnly(d, st), nil
 	}
+	if !install.SymlinksSupported && len(d.plugins) > 0 {
+		if slices.Contains(slices.Collect(maps.Values(d.explicit)), true) {
+			return nil, fmt.Errorf("opencode: plugin skills are linked into %s: %w", o.paths.Pretty(o.skillsDir), install.ErrSymlinksUnsupported)
+		}
+		return nil, nil
+	}
 	var fetches []engine.Change
 	pending := map[string]bool{}
 	if fetch {

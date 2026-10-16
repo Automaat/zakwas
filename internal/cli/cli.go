@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -621,9 +622,8 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if _, err := os.Lstat(launchd.StatePath(env.Home)); len(cfg.Launchd) > 0 || err == nil {
 		mods = append(mods, &launchd.Module{Jobs: cfg.Launchd, Paths: paths, Runner: env.Runner, UID: env.UID})
 	}
-	return append(mods,
-		&defaults.Module{Defaults: cfg.Defaults, Runner: env.Runner},
-	)
+	mods = append(mods, &defaults.Module{Defaults: cfg.Defaults, Runner: env.Runner})
+	return forPlatform(runtime.GOOS, cfg, env, mods)
 }
 
 // absFromCwd makes an agent's config dir ($CLAUDE_CONFIG_DIR, $CODEX_HOME,

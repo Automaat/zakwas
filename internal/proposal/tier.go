@@ -105,8 +105,10 @@ func (s Sensitive) Touches(text string) (string, bool) {
 		switch {
 		case tok == "~":
 			tok = s.Home
-		case strings.HasPrefix(tok, "~/"):
-			tok = filepath.Join(s.Home, tok[2:])
+		default:
+			if rest, ok := config.CutHome(tok); ok {
+				tok = filepath.Join(s.Home, rest)
+			}
 		}
 		if !filepath.IsAbs(tok) {
 			continue

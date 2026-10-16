@@ -156,3 +156,36 @@ jobs:
         run: |
           ~/.local/bin/mise --version
           "$RUNNER_TEMP/zakwas" -c examples/zakwas.yaml check --only files,mise
+
+  windows:
+    name: windows
+    # Windows support is early: the agent features and the portable core are
+    # built and tested here. The macOS-only modules and tests that need sh,
+    # POSIX file modes or symlinks are skipped with a reason.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: build
+        run: go build ./...
+
+      - name: build for arm64
+        env:
+          GOARCH: arm64
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: vet for arm64
+        env:
+          GOARCH: arm64
+        run: go vet ./...
+
+      - name: test
+        run: go test ./...

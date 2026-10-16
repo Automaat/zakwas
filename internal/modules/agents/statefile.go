@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/Automaat/zakwas/internal/fsutil"
 )
 
 // loadState reads a JSON state file into v; a missing file leaves v as is.
@@ -45,5 +47,5 @@ func saveState(path string, v any) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return fsutil.Rename(tmp.Name(), path)
 }
