@@ -1,6 +1,6 @@
 # Examples
 
-Complete, working config: [`examples/`](../examples).
+Complete, working config: [`examples/`](../examples), whose [`zakwas.yaml`](../examples/zakwas.yaml) also has an `agents` section (MCP servers, instructions, a skill and a profile). The snippets below are the pieces, one feature each.
 
 ## Minimal: dotfiles only
 
