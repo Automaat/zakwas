@@ -114,10 +114,10 @@ check_release_url() {
 
 verify_checksum() {
     local archive="$1"
-    if command -v sha256sum &>/dev/null; then
-        grep "  $archive\$" checksums.txt | sha256sum -c --status
-    else
+    if command -v shasum &>/dev/null; then
         grep "  $archive\$" checksums.txt | shasum -a 256 -c -s
+    else
+        grep "  $archive\$" checksums.txt | sha256sum -c --status
     fi
 }
 
