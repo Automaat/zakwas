@@ -164,6 +164,9 @@ func TestScalar(t *testing.T) {
 		{"say \"hi\"", false, `say "hi"`},
 		{"tab\there", false, `"tab\there"`},
 		{"https://example.com/mcp", false, "https://example.com/mcp"},
+		{"~/.local/bin/x", false, "~/.local/bin/x"},
+		{"~", false, `"~"`},
+		{"~", true, `"~"`},
 	}
 	for _, tt := range tests {
 		if got := scalar(tt.in, tt.flow); got != tt.want {

@@ -176,11 +176,12 @@ func geminiServerEntry(s config.MCPServer) geminiServer {
 func (m *Module) geminiServers() (servers map[string]geminiServer, skipped map[string][]string) {
 	servers, skipped = map[string]geminiServer{}, map[string][]string{}
 	for _, s := range m.Agents.MCPFor(config.ProviderGemini) {
-		if gaps := geminiServerGaps(s.Name, s.MCPServer); len(gaps) > 0 {
+		server := s.ExpandHome(m.Paths.Home)
+		if gaps := geminiServerGaps(s.Name, server); len(gaps) > 0 {
 			skipped[s.Name] = gaps
 			continue
 		}
-		servers[s.Name] = geminiServerEntry(s.MCPServer)
+		servers[s.Name] = geminiServerEntry(server)
 	}
 	return servers, skipped
 }
@@ -540,6 +541,9 @@ func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink, kept boo
 // which needs the manifest, is the last change.
 func (m *Module) planGemini() ([]engine.Change, error) {
 	wanted := m.Agents.Wants(config.ProviderGemini)
+	if err := m.mcpHomeError(config.ProviderGemini); err != nil {
+		return nil, fmt.Errorf("gemini: mcp: %w", err)
+	}
 	statePath := m.geminiStatePath()
 	if info, err := os.Lstat(statePath); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 		return nil, fmt.Errorf("gemini: %s is a symlink; remove it", m.Paths.Pretty(statePath))

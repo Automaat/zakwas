@@ -192,7 +192,7 @@ func (m *Module) opencodeTemplateAgents() (map[string]string, error) {
 			continue
 		}
 		src := filepath.Clean(m.Paths.Src(f.Src))
-		data, err := templates.Render(src, templates.Data{Home: m.Paths.Home, Vars: m.Vars}, templates.Funcs(&m.Agents))
+		data, err := templates.Render(src, templates.Data{Home: m.Paths.Home, Vars: m.Vars}, templates.Funcs(&m.Agents, m.Paths.Home))
 		if err != nil {
 			continue
 		}
