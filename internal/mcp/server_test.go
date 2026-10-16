@@ -370,8 +370,8 @@ func TestClosingInputLetsCallsInFlightFinish(t *testing.T) {
 	_ = c.in.Close()
 
 	select {
-	case <-c.errCh:
-		t.Fatal("Serve returned while a call was still running")
+	case err := <-c.errCh:
+		t.Fatalf("Serve returned while a call was still running: %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
 	close(release)
@@ -407,7 +407,10 @@ func TestClosingInputFailsAFormNobodyCanAnswer(t *testing.T) {
 		t.Fatal("the form was never failed")
 	}
 	select {
-	case <-c.errCh:
+	case err := <-c.errCh:
+		if err != nil {
+			t.Errorf("Serve returned %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Serve did not return")
 	}
