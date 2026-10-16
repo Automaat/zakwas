@@ -111,6 +111,14 @@ func TestApplyMCPServerWithOAuthClient(t *testing.T) {
 		{"client id with a flow character", &OAuth{ClientID: "a,b"}, "      oauth: {clientId: \"a,b\"}\n"},
 		{"client id with a question mark", &OAuth{ClientID: "a?b"}, "      oauth: {clientId: \"a?b\"}\n"},
 		{"quotes in client id and scope", &OAuth{ClientID: `a'b"c\d`, Scope: "it's:ok a'b"}, `      oauth: {clientId: a'b"c\d, scope: it's:ok a'b}` + "\n"},
+		{"client id that is a merge key", &OAuth{ClientID: "<<"}, "      oauth: {clientId: \"<<\"}\n"},
+		{"scope that is a merge key", &OAuth{ClientID: "c", Scope: "<<"}, "      oauth: {clientId: c, scope: \"<<\"}\n"},
+		{"client id that is a tilde", &OAuth{ClientID: "~"}, "      oauth: {clientId: \"~\"}\n"},
+		{"client id that is null", &OAuth{ClientID: "null"}, "      oauth: {clientId: \"null\"}\n"},
+		{"client id that is a date", &OAuth{ClientID: "2001-01-01"}, "      oauth: {clientId: \"2001-01-01\"}\n"},
+		{"client id that is a boolean", &OAuth{ClientID: "true", Scope: "off"}, "      oauth: {clientId: \"true\", scope: \"off\"}\n"},
+		{"client id that is an anchor", &OAuth{ClientID: "&a"}, "      oauth: {clientId: \"&a\"}\n"},
+		{"client id that is an alias", &OAuth{ClientID: "*a"}, "      oauth: {clientId: \"*a\"}\n"},
 		{"scope with a question mark", &OAuth{ClientID: "c", Scope: "https://x/y?z"}, "      oauth: {clientId: c, scope: \"https://x/y?z\"}\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -392,4 +400,46 @@ func derefPort(p *int) int {
 		return 0
 	}
 	return *p
+}
+
+func TestApplyQuotesEveryYAMLHazardInEveryField(t *testing.T) {
+	hazards := []string{"<<", "~", "null", "Null", "true", "False", "yes", "off", "12", "0x1f", "1e3", ".inf", "2001-01-01", "-", "-x", "*a", "&a", "!t", "|", ">", "%x", "@x", "`x", "a: b", "a #b", "x:", "[a]", "{a}"}
+	for _, h := range hazards {
+		t.Run(h, func(t *testing.T) {
+			cfg, home := newRepo(t, baseConfig)
+			ops := []Op{
+				{Kind: AddMarketplace, Name: "mk", Source: h},
+				{Kind: AddMCP, Name: "srv", Server: &Server{Command: h, Args: []string{h, "-y"}}},
+			}
+			withOAuth := !strings.Contains(h, " ")
+			if withOAuth {
+				ops = append(ops, Op{Kind: AddMCP, Name: "web", Server: &Server{URL: "https://example.com/mcp", OAuth: &OAuth{ClientID: h, Scope: h}}})
+			}
+			withRule := !strings.ContainsAny(h, "<>*&|`[]{}")
+			if withRule {
+				ops = append(ops, Op{Kind: AddPermission, Decision: "deny", Command: h, Justification: h})
+			}
+			res, err := Apply(ops, cfg, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := res.Config.Agents
+			if got := a.Marketplaces["mk"].Source; got != h {
+				t.Errorf("marketplace source = %q", got)
+			}
+			if srv := a.MCP["srv"]; srv.Command != h || len(srv.Args) != 2 || srv.Args[0] != h {
+				t.Errorf("command server = %+v", srv)
+			}
+			if o := a.MCP["web"].OAuth; withOAuth && (o.ClientID != h || o.Scope != h) {
+				t.Errorf("oauth = %+v", o)
+			}
+			found := false
+			for _, r := range a.Permissions.Deny {
+				found = found || r.Command == strings.Join(strings.Fields(h), " ") && r.Justification == h
+			}
+			if withRule && !found {
+				t.Errorf("deny rules = %+v", a.Permissions.Deny)
+			}
+		})
+	}
 }

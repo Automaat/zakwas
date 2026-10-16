@@ -969,7 +969,7 @@
                     "type": "string",
                     "minLength": 1,
                     "pattern": "^[\\p{L}\\p{N}\\p{P}\\p{S}]+$",
-                    "description": "OAuth client ID registered for this server with its authorization server or gateway, as a string (quote a number). A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are. Only letters, digits, punctuation and symbols are accepted: spaces, control and invisible characters, combining marks, and the blank letters U+115F, U+1160, U+3164, U+FFA0 and U+2800 are rejected."
+                    "description": "OAuth client ID registered for this server with its authorization server or gateway, as a string: quote a value YAML reads as another type, such as '12345', 'true', '2024-01-01' or 'null'. A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are. Only letters, digits, punctuation and symbols are accepted: spaces, control and invisible characters, combining marks, and the blank letters U+115F, U+1160, U+3164, U+FFA0 and U+2800 are rejected."
                   },
                   "callbackPort": {
                     "maximum": 65535,

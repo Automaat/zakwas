@@ -132,10 +132,10 @@ func Parse(data []byte, path, home string) (*Config, error) {
 	dec.KnownFields(true)
 	var c Config
 	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, YAMLError(err))
 	}
 	if err := rejectNullProfileNames(data); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, YAMLError(err))
 	}
 	root, err := resolveRoot(path)
 	if err != nil {
