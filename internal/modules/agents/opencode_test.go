@@ -323,6 +323,35 @@ func TestOpencodeSkillsDir(t *testing.T) {
 	assertLink(t, filepath.Join(m.Paths.Home, "custom", "skills", "s"), filepath.Join(root, "plugins", "a", "skills", "s"))
 }
 
+func TestOpencodeSkillsDirDefaults(t *testing.T) {
+	xdg := t.TempDir()
+	tests := []struct {
+		name     string
+		xdg      string
+		realHome bool
+		opencode *config.Opencode
+		want     func(home string) string
+	}{
+		{"no XDG", "", true, nil, func(home string) string { return filepath.Join(home, ".config", "opencode", "skills") }},
+		{"XDG_CONFIG_HOME", xdg, true, nil, func(string) string { return filepath.Join(xdg, "opencode", "skills") }},
+		{"relative XDG_CONFIG_HOME is ignored", "rel/config", true, nil, func(home string) string { return filepath.Join(home, ".config", "opencode", "skills") }},
+		{"XDG is ignored for another home", xdg, false, nil, func(home string) string { return filepath.Join(home, ".config", "opencode", "skills") }},
+		{"explicit skillsDir wins", xdg, true, &config.Opencode{SkillsDir: "~/custom"}, func(home string) string { return filepath.Join(home, "custom") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newOpencode(t, config.Agents{Opencode: tt.opencode})
+			if tt.realHome {
+				t.Setenv("HOME", m.Paths.Home)
+			}
+			t.Setenv("XDG_CONFIG_HOME", tt.xdg)
+			if got, want := m.opencodeBackend().skillsDir, tt.want(m.Paths.Home); got != want {
+				t.Errorf("skillsDir = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestOpencodeManifests(t *testing.T) {
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"cdx": {Source: "./cdx"}, "pr": {Source: "./pr"}},

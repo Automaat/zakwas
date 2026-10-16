@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
@@ -105,7 +106,7 @@ func TestInit(t *testing.T) {
 	}
 	before := snapshot(t, home)
 
-	r := invoke(Env{Home: home, Cwd: work, Runner: fake}, "", "init", "repo", "--add", "~/.zshrc", "--add", filepath.Join(home, ".config/git"), "--add", "../"+filepath.Base(home)+"/.local/bin/tool with space")
+	r := invoke(Env{Home: home, Cwd: work, Runner: fake, GOOS: platform.Darwin}, "", "init", "repo", "--add", "~/.zshrc", "--add", filepath.Join(home, ".config/git"), "--add", "../"+filepath.Base(home)+"/.local/bin/tool with space")
 	if r.code != ExitOK {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
 	}
@@ -184,7 +185,7 @@ mise:
 		}
 	}
 
-	cfg, err := config.Load(filepath.Join(repo, "zakwas.yaml"), home)
+	cfg, err := config.LoadFor(filepath.Join(repo, "zakwas.yaml"), home, platform.Darwin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +201,7 @@ func TestInitWithoutBrewAndMise(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := runnertest.New().Missing("brew", "mise").OnOK(gitInit, "")
-	r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo, "--add", "~/.config/mise/config.toml")
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo, "--add", "~/.config/mise/config.toml")
 	if r.code != ExitOK {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
 	}
@@ -227,7 +228,7 @@ func TestInitTrustsDumpedTaps(t *testing.T) {
 		brewfile: brewfile,
 		content:  "tap \"acme/tools\"\nbrew \"jq\"\n",
 	}
-	r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo)
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo)
 	if r.code != ExitOK {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
 	}
@@ -306,7 +307,7 @@ func TestInitRejects(t *testing.T) {
 			}
 			before := snapshot(t, filepath.Dir(repo))
 			fake := runnertest.New()
-			r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", append([]string{"init"}, tt.args(home, repo)...)...)
+			r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", append([]string{"init"}, tt.args(home, repo)...)...)
 			if r.code != ExitUsage {
 				t.Errorf("exit %d, want %d\nstderr: %s", r.code, ExitUsage, r.stderr)
 			}
@@ -347,7 +348,7 @@ func TestInitCleansUpAfterFailure(t *testing.T) {
 			fake := runnertest.New().
 				OnOK(miseLs, `{}`).
 				On(brewDump+filepath.Join(repo, "Brewfile"), runner.Result{ExitCode: 1, Stderr: "boom"})
-			r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo, "--add", "~/.zshrc")
+			r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo, "--add", "~/.zshrc")
 			if r.code != ExitErr || !strings.Contains(r.stderr, "boom") {
 				t.Errorf("exit %d, stderr %q", r.code, r.stderr)
 			}
@@ -380,7 +381,7 @@ func TestInitRollsBackInvalidMiseConfig(t *testing.T) {
 	}
 	repo := filepath.Join(t.TempDir(), "new/repo")
 	fake := runnertest.New().Missing("brew").OnOK(miseLs, `{}`)
-	r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo)
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo)
 	if r.code != ExitErr || !strings.Contains(r.stderr, "not valid TOML") {
 		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/rogpeppe/go-internal/testscript"
@@ -13,7 +14,10 @@ import (
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
-		"zakwas": func() { os.Exit(run()) },
+		"zakwas": func() {
+			goosOverride = os.Getenv("ZAKWAS_TEST_GOOS")
+			os.Exit(run())
+		},
 	})
 }
 
@@ -62,4 +66,46 @@ func linkTo(ts *testscript.TestScript, neg bool, args []string) {
 	if ok == neg {
 		ts.Fatalf("%s → %q (err %v), want %s", args[0], got, err, ts.MkAbs(args[1]))
 	}
+}
+
+func TestExtraPathDirs(t *testing.T) {
+	tests := []struct {
+		goos string
+		want []string
+	}{
+		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", "/home/u/.local/bin"}},
+		{"linux", []string{"/usr/local/bin", "/home/u/.local/bin"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			if got := extraPathDirs(tt.goos, "/home/u"); !slices.Equal(got, tt.want) {
+				t.Errorf("extraPathDirs(%q) = %v, want %v", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtendPathKeepsOrderAndSkipsDuplicates(t *testing.T) {
+	t.Setenv("PATH", "/usr/local/bin:/bin")
+	extendPath("/home/u")
+	got := filepath.SplitList(os.Getenv("PATH"))
+	if got[0] != "/usr/local/bin" || got[1] != "/bin" {
+		t.Errorf("PATH reordered: %v", got)
+	}
+	if n := countOf(got, "/usr/local/bin"); n != 1 {
+		t.Errorf("/usr/local/bin appears %d times: %v", n, got)
+	}
+	if !slices.Contains(got, "/home/u/.local/bin") {
+		t.Errorf("~/.local/bin missing: %v", got)
+	}
+}
+
+func countOf(list []string, want string) int {
+	n := 0
+	for _, s := range list {
+		if s == want {
+			n++
+		}
+	}
+	return n
 }

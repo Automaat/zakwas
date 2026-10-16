@@ -131,3 +131,16 @@ func TestExecStreamStdin(t *testing.T) {
 		})
 	}
 }
+
+func TestExecGroupInterruptsChildren(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := NewExec().Run(ctx, Cmd{Name: "sh", Args: []string{"-c", "sleep 20; true"}, Group: true})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want deadline exceeded", err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Errorf("took %s; the forked sleep outlived the timeout", d)
+	}
+}

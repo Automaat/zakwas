@@ -10,7 +10,7 @@ import (
 // already there is exchanged atomically, so dir is never missing for a
 // concurrent plan; next then holds the old copy, which the caller removes.
 // FAT volumes answer the exchange of two non-empty dirs with ENOTEMPTY, so
-// that, like ENOTSUP and EINVAL, falls back to renameAside, which keeps the
+// that, like ENOTSUP, EINVAL and ENOSYS, falls back to renameAside, which keeps the
 // old copy when anything else fails.
 func replaceDir(next, dir string) error {
 	return replaceDirWith(exchangeDirs, next, dir)
@@ -29,7 +29,7 @@ func replaceDirWith(exchange func(a, b string) error, next, dir string) error {
 		switch {
 		case err == nil:
 			return nil
-		case errors.Is(err, errors.ErrUnsupported), errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.ENOTEMPTY):
+		case errors.Is(err, errors.ErrUnsupported), errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.ENOSYS), errors.Is(err, syscall.ENOTEMPTY):
 			return renameAside(next, dir)
 		case !errors.Is(err, os.ErrNotExist):
 			return err

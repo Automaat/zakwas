@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -25,6 +26,11 @@ type Cmd struct {
 	Env    []string
 	Stdin  string
 	Stream bool
+	// Group runs the command in its own process group and interrupts the
+	// whole group on cancel, so a shell that forks its last command (dash)
+	// doesn't outlive the timeout. Only for commands that never read a
+	// terminal: a background group is stopped when it does.
+	Group bool
 }
 
 // String renders the command the way a user would type it.
@@ -87,6 +93,10 @@ func (e *Exec) Installed(name string) bool {
 func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	if c.Group && !c.Stream {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGINT) }
+	}
 	cmd.WaitDelay = WaitDelay
 	cmd.Dir = c.Dir
 	cmd.Env = slices.Concat(os.Environ(), e.Env, c.Env)

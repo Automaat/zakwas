@@ -6,10 +6,14 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
-// ModuleNames lists every module in apply order, for --only completion.
-var ModuleNames = []string{"system", "files", "links", "templates", "brew", "mise", "agents", "commands", "launchd", "defaults"}
+// ModuleNames lists every module in apply order.
+var ModuleNames = platform.Names()
+
+func completionModules() []string { return platform.SupportedModules(platform.Current()) }
 
 var shells = []string{"zsh", "bash", "fish"}
 
@@ -148,7 +152,7 @@ func (m completionModel) bash() string {
 	fmt.Fprintf(&b, "            %s) ((i++)) ;;\n", strings.Join(withValue, "|"))
 	b.WriteString("            -*) ;;\n            *) cmd=${COMP_WORDS[i]}; break ;;\n        esac\n    done\n")
 	b.WriteString("    case $prev in\n")
-	fmt.Fprintf(&b, "        -only|--only)\n            local prefix=''\n            [[ $cur == *,* ]] && prefix=${cur%%,*},\n            COMPREPLY=($(compgen -P \"$prefix\" -W '%s' -- \"${cur##*,}\"))\n            return ;;\n", strings.Join(ModuleNames, " "))
+	fmt.Fprintf(&b, "        -only|--only)\n            local prefix=''\n            [[ $cur == *,* ]] && prefix=${cur%%,*},\n            COMPREPLY=($(compgen -P \"$prefix\" -W '%s' -- \"${cur##*,}\"))\n            return ;;\n", strings.Join(completionModules(), " "))
 	fmt.Fprintf(&b, "        %s) return ;;\n", strings.Join(append(fileFlags, valueFlags...), "|"))
 	b.WriteString("    esac\n    case $cmd in\n")
 	fmt.Fprintf(&b, "        '') if [[ $cur == -* ]]; then words='%s'; else words='%s'; fi ;;\n", strings.Join(spelled, " "), strings.Join(commandNames(), " "))
@@ -225,7 +229,7 @@ func zshSpec(f complFlag, repeat string) string {
 	case fileValue:
 		spec += ":file:_files"
 	case moduleValue:
-		spec += ":module:_sequence compadd - " + strings.Join(ModuleNames, " ")
+		spec += ":module:_sequence compadd - " + strings.Join(completionModules(), " ")
 	case freeValue:
 		spec += ":" + f.name + ": "
 	}
@@ -275,7 +279,7 @@ func fishFlag(cond string, f complFlag) string {
 	case fileValue:
 		opt += " -r -F"
 	case moduleValue:
-		opt += " -x -a " + fishQuote(strings.Join(ModuleNames, " "))
+		opt += " -x -a " + fishQuote(strings.Join(completionModules(), " "))
 	case freeValue:
 		opt += " -x"
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/lock"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 	"github.com/Automaat/zakwas/schema"
@@ -41,7 +42,7 @@ func setup(t *testing.T, cfg string) (Env, string) {
 			t.Fatal(err)
 		}
 	}
-	return Env{Home: home, Cwd: root, Runner: runnertest.New()}, home
+	return Env{Home: home, Cwd: root, Runner: runnertest.New(), GOOS: platform.Darwin}, home
 }
 
 func invoke(env Env, stdin string, args ...string) result {

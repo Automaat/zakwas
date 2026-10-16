@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 // FileName is the config file zakwas looks for.
@@ -33,6 +35,18 @@ type Config struct {
 	// Root is the directory holding zakwas.yaml; relative sources resolve from it.
 	Root string `yaml:"-"`
 	Path string `yaml:"-"`
+
+	// GOOS is the operating system the config is validated for; empty
+	// means the one zakwas runs on.
+	GOOS string `yaml:"-"`
+}
+
+// OS is the operating system the config is validated for.
+func (c *Config) OS() string {
+	if c.GOOS != "" {
+		return c.GOOS
+	}
+	return platform.Current()
 }
 
 // Protect controls how files and templates are locked down. Write bits are
@@ -118,16 +132,26 @@ type Command struct {
 // Load reads and validates the config at path; home expands "~" in
 // destinations.
 func Load(path, home string) (*Config, error) {
+	return LoadFor(path, home, "")
+}
+
+// LoadFor is Load for the operating system goos; empty means this one.
+func LoadFor(path, home, goos string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return Parse(data, path, home)
+	return ParseFor(data, path, home, goos)
 }
 
 // Parse validates config bytes as if they were the file at path, so an edit
 // can be checked before it is written.
 func Parse(data []byte, path, home string) (*Config, error) {
+	return ParseFor(data, path, home, "")
+}
+
+// ParseFor is Parse for the operating system goos; empty means this one.
+func ParseFor(data []byte, path, home, goos string) (*Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var c Config
@@ -143,6 +167,7 @@ func Parse(data []byte, path, home string) (*Config, error) {
 	}
 	c.Root = root
 	c.Path = filepath.Join(root, filepath.Base(path))
+	c.GOOS = goos
 	if err := c.Validate(home); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -176,7 +201,9 @@ func Find(dir string) (string, error) {
 
 // Validate reports every structural problem at once.
 func (c *Config) Validate(home string) error {
-	var errs []error
+	goos := c.OS()
+	errs := c.platformErrors(goos)
+	here := func(module string) bool { return platform.Supported(module, goos) }
 	paths := Paths{Home: home, Root: c.Root}
 	var claimed []claim
 	claimDst := func(dst, what string) {
@@ -215,7 +242,7 @@ func (c *Config) Validate(home string) error {
 			errs = append(errs, fmt.Errorf("templates.files[%d]: mode %s must be octal permissions readable by the owner, e.g. 0o644", i, octal(t.Mode)))
 		}
 	}
-	if c.Brew != nil {
+	if c.Brew != nil && here("brew") {
 		if c.Brew.File == "" {
 			errs = append(errs, errors.New("brew.file is required"))
 		}
@@ -225,7 +252,7 @@ func (c *Config) Validate(home string) error {
 			errs = append(errs, fmt.Errorf("brew.cleanup: %q is not one of none, uninstall, zap", c.Brew.Cleanup))
 		}
 	}
-	if c.Mise != nil && c.Mise.Config == "" {
+	if c.Mise != nil && here("mise") && c.Mise.Config == "" {
 		errs = append(errs, errors.New("mise.config is required"))
 	}
 	type defaultKey struct {
@@ -234,6 +261,9 @@ func (c *Config) Validate(home string) error {
 	}
 	defaultsSeen := map[defaultKey]int{}
 	for i, d := range c.Defaults {
+		if !here("defaults") {
+			break
+		}
 		if d.Domain == "" || d.Key == "" {
 			errs = append(errs, fmt.Errorf("defaults[%d]: domain and key are required", i))
 		}
@@ -271,13 +301,41 @@ func (c *Config) Validate(home string) error {
 	if c.Agents != nil {
 		errs = append(errs, c.Agents.validate()...)
 	}
-	errs = append(errs, c.validateLaunchd(paths, claimDst)...)
+	if here("launchd") {
+		errs = append(errs, c.validateLaunchd(paths, claimDst)...)
+	}
 	for i, cmd := range c.Commands {
 		if cmd.Name == "" || cmd.Check == "" || cmd.Run == "" {
 			errs = append(errs, fmt.Errorf("commands[%d]: name, check and run are required", i))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// platformErrors names every section that needs another operating system
+// than goos, one line each.
+func (c *Config) platformErrors(goos string) []error {
+	used := map[string]bool{
+		"brew":     c.Brew != nil,
+		"mise":     c.Mise != nil,
+		"launchd":  len(c.Launchd) > 0,
+		"defaults": len(c.Defaults) > 0,
+	}
+	var errs []error
+	for _, m := range platform.Modules {
+		if !used[m.Name] {
+			continue
+		}
+		if err := platform.ModuleError(m.Name, goos); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if c.System.SudoTouchID {
+		if err := platform.FeatureError("system.sudoTouchID", goos); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 // yamlDate prints a timestamp the way it was most likely written.

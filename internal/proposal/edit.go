@@ -16,6 +16,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/modules/brew"
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 // Edit is one file an operation list changes. Rel is its path relative to
@@ -68,7 +69,7 @@ func Apply(ops []Op, cfg *config.Config, home string) (*Result, error) {
 	if len(res.Edits) == 0 {
 		return nil, errors.New("the operations change nothing")
 	}
-	newCfg, err := config.Parse(e.files[cfg.Path].New, cfg.Path, home)
+	newCfg, err := config.ParseFor(e.files[cfg.Path].New, cfg.Path, home, cfg.GOOS)
 	if err != nil {
 		return nil, fmt.Errorf("the edited config is invalid: %w", err)
 	}
@@ -109,6 +110,9 @@ func (e *editor) apply(op Op) error {
 	paths := config.Paths{Home: e.home, Root: e.cfg.Root}
 	switch op.Kind {
 	case AddBrew:
+		if err := platform.ModuleError("brew", e.cfg.OS()); err != nil {
+			return fmt.Errorf("add-brew: %w", err)
+		}
 		if e.cfg.Brew == nil {
 			return errors.New("zakwas.yaml has no brew section")
 		}
@@ -119,6 +123,9 @@ func (e *editor) apply(op Op) error {
 		f.New, err = addBrew(f.New, op.Name, op.Cask)
 		return err
 	case PinMise:
+		if err := platform.ModuleError("mise", e.cfg.OS()); err != nil {
+			return fmt.Errorf("pin-mise: %w", err)
+		}
 		if e.cfg.Mise == nil {
 			return errors.New("zakwas.yaml has no mise section")
 		}

@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,7 @@ import (
 	"github.com/Automaat/zakwas/internal/modules/mise"
 	"github.com/Automaat/zakwas/internal/modules/system"
 	"github.com/Automaat/zakwas/internal/modules/templates"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/schema"
 )
@@ -45,7 +47,7 @@ var commandList = []struct{ name, args, help string }{
 	{"proposals", "", "list pending proposals"},
 	{"approve", "ID", "show a proposal's diff and plan, confirm, apply it and commit it"},
 	{"mcp", "[--enable-apply]", "serve config reads and proposals to coding agents over MCP"},
-	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
+	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this machine"},
 	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
 	{"completion", "zsh|bash|fish", "print a shell completion script"},
 	{"schema", "", "print the JSON Schema for zakwas.yaml (for editor validation)"},
@@ -54,7 +56,7 @@ var commandList = []struct{ name, args, help string }{
 
 func usage() string {
 	var b strings.Builder
-	b.WriteString("zakwas converges this Mac to zakwas.yaml.\n\nUsage:\n  zakwas [flags] <command>\n\nCommands:\n")
+	b.WriteString("zakwas converges this machine to zakwas.yaml.\n\nUsage:\n  zakwas [flags] <command>\n\nCommands:\n")
 	for _, c := range commandList {
 		name := strings.TrimSpace(c.name + " " + c.args)
 		fmt.Fprintf(&b, "  %-30s %s\n", name, c.help)
@@ -105,10 +107,15 @@ type Env struct {
 	// LockHeldBy is $ZAKWAS_LOCK_HELD: the pid of the zakwas run this
 	// process was started from, which holds the run lock.
 	LockHeldBy string
+	// GOOS is the operating system modules and config are checked against;
+	// empty means the one zakwas runs on (tests set it).
+	GOOS string
 	// AgentSession names the coding agent this run was started from, from
 	// DetectAgentSession; empty for a person's terminal.
 	AgentSession string
 }
+
+func (e Env) goos() string { return cmp.Or(e.GOOS, platform.Current()) }
 
 func (e Env) now() time.Time {
 	if e.Now != nil {
@@ -174,7 +181,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		env.Runner = offlineRunner{}
 	}
 
-	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
+	cfg, err := loadConfig(o.cfgPath, env)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr
@@ -194,7 +201,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		saved = &doc
 		o.only = strings.Join(doc.Only, ",")
 	}
-	mods, err := selectModules(Modules(cfg, env), o.only)
+	mods, err := selectModules(Modules(cfg, env), o.only, env.goos())
 	if err == nil && o.offline {
 		mods, err = offlineModules(mods, o.only != "")
 	}
@@ -247,7 +254,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 	doc := newPlanDoc(env, cfg.Path, commit, onlyList, plan, o.diff)
 	if o.offline {
-		doc.Offline, doc.Skipped = true, offlineNotChecked(mods)
+		doc.Offline, doc.Skipped = true, offlineNotChecked(mods, env.goos())
 	}
 	switch {
 	case o.asJSON && cmd == "plan", o.asJSON && cmd == "check":
@@ -259,7 +266,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return ExitErr
 		}
 		if o.offline {
-			out.print(offlineNote(style, offlineNotChecked(mods)))
+			out.print(offlineNote(style, offlineNotChecked(mods, env.goos())))
 		}
 	}
 
@@ -545,10 +552,10 @@ func parseCommand(fs *flag.FlagSet, out *console, parse func() error) (int, bool
 	return ExitUsage, false
 }
 
-func loadConfig(flagPath, cwd, home string) (*config.Config, error) {
+func loadConfig(flagPath string, env Env) (*config.Config, error) {
 	path := flagPath
 	if path == "" {
-		found, err := config.Find(cwd)
+		found, err := config.Find(env.Cwd)
 		switch {
 		case err == nil:
 			path = found
@@ -558,7 +565,7 @@ func loadConfig(flagPath, cwd, home string) (*config.Config, error) {
 			return nil, err
 		}
 	}
-	return config.Load(path, home)
+	return config.LoadFor(path, env.Home, env.GOOS)
 }
 
 // Modules returns every configured module in apply order. Order matters:
@@ -566,18 +573,21 @@ func loadConfig(flagPath, cwd, home string) (*config.Config, error) {
 // agent CLIs brew or mise install, commands may need tools from any, and
 // launchd jobs may run what commands set up.
 func Modules(cfg *config.Config, env Env) []engine.Module {
+	goos := env.goos()
+	here := func(module string) bool { return platform.Supported(module, goos) }
 	paths := config.Paths{Home: env.Home, Root: cfg.Root}
-	installer := &install.Installer{Paths: paths, StatePath: install.StatePath(env.Home), Immutable: cfg.Protect.Immutable}
+	immutable := cfg.Protect.Immutable && platform.FeatureSupported("protect.immutable", goos)
+	installer := &install.Installer{Paths: paths, StatePath: install.StatePath(env.Home), Immutable: immutable}
 	mods := []engine.Module{
 		&system.Module{System: cfg.System, Paths: paths, Runner: env.Runner, PAMFile: env.PAMFile},
-		&files.Module{Files: cfg.Files, Keep: templateDsts(cfg, paths), Paths: paths, Installer: installer},
+		&files.Module{Files: cfg.Files, Keep: templateDsts(cfg, paths), Paths: paths, Installer: installer, Immutable: cfg.Protect.Immutable, GOOS: goos},
 		&links.Module{Links: cfg.Links, Paths: paths},
 		&templates.Module{Templates: cfg.Templates, Agents: cfg.Agents, Paths: paths, Installer: installer},
 	}
-	if cfg.Brew != nil {
+	if cfg.Brew != nil && here("brew") {
 		mods = append(mods, &brew.Module{Brew: *cfg.Brew, Paths: paths, Runner: env.Runner})
 	}
-	if cfg.Mise != nil {
+	if cfg.Mise != nil && here("mise") {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Paths: paths, Runner: env.Runner})
 	}
 	agentsCfg := cfg.Agents
@@ -611,19 +621,20 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		mods = append(mods, &agents.Module{
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
 			Guard: cfg.Agents.GuardEnabled(), TemplateSources: templateSrcs(cfg, paths),
-			Vars: cfg.Templates.Vars, Immutable: cfg.Protect.Immutable, TemplateFiles: cfg.Templates.Files,
+			Vars: cfg.Templates.Vars, Immutable: immutable, TemplateFiles: cfg.Templates.Files,
 			Destinations:    cfg.Destinations(paths),
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),
 			GeminiHome: absFromCwd(env, env.GeminiHome), CopilotHome: absFromCwd(env, env.CopilotHome),
 		})
 	}
 	mods = append(mods, &commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner})
-	if _, err := os.Lstat(launchd.StatePath(env.Home)); len(cfg.Launchd) > 0 || err == nil {
+	if _, err := os.Lstat(launchd.StatePath(env.Home)); here("launchd") && (len(cfg.Launchd) > 0 || err == nil) {
 		mods = append(mods, &launchd.Module{Jobs: cfg.Launchd, Paths: paths, Runner: env.Runner, UID: env.UID})
 	}
-	return append(mods,
-		&defaults.Module{Defaults: cfg.Defaults, Runner: env.Runner},
-	)
+	if here("defaults") {
+		mods = append(mods, &defaults.Module{Defaults: cfg.Defaults, Runner: env.Runner})
+	}
+	return mods
 }
 
 // absFromCwd makes an agent's config dir ($CLAUDE_CONFIG_DIR, $CODEX_HOME,
@@ -652,7 +663,7 @@ func templateSrcs(cfg *config.Config, paths config.Paths) []string {
 	return srcs
 }
 
-func selectModules(all []engine.Module, only string) ([]engine.Module, error) {
+func selectModules(all []engine.Module, only, goos string) ([]engine.Module, error) {
 	if only == "" {
 		return all, nil
 	}
@@ -665,7 +676,11 @@ func selectModules(all []engine.Module, only string) ([]engine.Module, error) {
 	for name := range strings.SplitSeq(only, ",") {
 		name = strings.TrimSpace(name)
 		if _, ok := byName[name]; !ok {
-			errs = append(errs, fmt.Errorf("unknown or unconfigured module %q", name))
+			if err := platform.ModuleError(name, goos); err != nil {
+				errs = append(errs, err)
+			} else {
+				errs = append(errs, fmt.Errorf("unknown or unconfigured module %q", name))
+			}
 		}
 		wanted = append(wanted, name)
 	}

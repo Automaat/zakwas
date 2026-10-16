@@ -1,0 +1,101 @@
+env ZAKWAS_TEST_GOOS=linux
+env XDG_CONFIG_HOME=$WORK/home/xdg
+env CLAUDE_CONFIG_DIR=$WORK/claude
+chmod 755 bin/claude
+chmod 755 bin/opencode
+mkdir state
+
+zakwas plan
+stdout -count=1 'protect.immutable is macOS-only; files are read-only copies'
+stdout '\+ ~/.config/app/a'
+stdout '\+ ~/.ssh'
+stdout '\+ claude marketplace sai'
+stdout '\+ opencode skill tool'
+! stdout 'Library'
+! stdout 'set immutable'
+
+zakwas apply -y
+stdout 'Applied \d+ of \d+ steps'
+cmp home/.config/app/a dotfiles/app/a
+linkto home/.zshrc dotfiles/zshrc
+linkto home/xdg/opencode/skills/tool mp/plugins/tool/skills/tool
+! exists home/.config/opencode
+! exists home/Library
+exists state/sai
+exec sh -c 'test "$(ls -l home/.config/app/a | cut -c1-10)" = "-r--r--r--"'
+exec sh -c 'test "$(ls -ld home/.ssh | cut -c1-10)" = "drwx------"'
+grep 'done' home/marker
+
+zakwas check
+stdout -count=1 'protect.immutable is macOS-only'
+
+zakwas plan
+stdout 'No changes'
+
+zakwas check --offline
+stdout 'offline: not checked: system, agents, commands'
+! stdout 'brew|mise|launchd|defaults'
+
+-- zakwas.yaml --
+protect:
+  immutable: true
+files:
+  - {src: dotfiles/app, dst: ~/.config/app}
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+system:
+  dirs:
+    - {path: ~/.ssh, mode: 0o700}
+commands:
+  - name: marker
+    check: test -f ~/marker
+    run: echo done > ~/marker
+agents:
+  guard: false
+  providers: [claude, opencode]
+  marketplaces:
+    sai: {source: Owner/sai, providers: [claude]}
+    mp: {source: ./mp, providers: [opencode]}
+  plugins:
+    - humanize@sai
+    - tool@mp
+-- dotfiles/app/a --
+a
+-- dotfiles/zshrc --
+export EDITOR=vim
+-- mp/.claude-plugin/marketplace.json --
+{"name": "mp", "metadata": {"pluginRoot": "./plugins"}, "plugins": [{"name": "tool", "source": "tool"}]}
+-- mp/plugins/tool/skills/tool/SKILL.md --
+---
+name: tool
+description: test
+---
+-- bin/opencode --
+#!/bin/sh
+exit 0
+-- bin/claude --
+#!/bin/sh
+known="$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json"
+case "$*" in
+  "plugin marketplace list --json")
+    if [ -f "$WORK/state/sai" ]; then
+      echo '[{"name":"sai","source":"github","repo":"Owner/sai","installLocation":"/nowhere"}]'
+    else
+      echo '[]'
+    fi ;;
+  "plugin list --json --available")
+    if [ -f "$WORK/state/humanize" ]; then
+      echo '{"installed":[{"id":"humanize@sai","version":"2.5.0","scope":"user","enabled":true}],"available":[]}'
+    else
+      echo '{"installed":[],"available":[{"pluginId":"humanize@sai","version":"2.5.0"}]}'
+    fi ;;
+  "plugin marketplace add Owner/sai --scope user --json")
+    touch "$WORK/state/sai"
+    mkdir -p "$(dirname "$known")"
+    echo '{"sai":{"source":{"source":"github","repo":"Owner/sai"},"installLocation":"/nowhere"}}' > "$known"
+    echo '{"command":"marketplace-add","outcome":"ok","marketplace":"sai"}' ;;
+  "plugin install humanize@sai --scope user --json")
+    touch "$WORK/state/humanize"
+    echo '{"command":"install","outcome":"ok"}' ;;
+  *) echo "unexpected claude $*" >&2; exit 99 ;;
+esac

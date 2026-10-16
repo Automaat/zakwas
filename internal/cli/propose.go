@@ -246,7 +246,7 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 		}
 		return ExitUsage
 	}
-	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
+	cfg, err := loadConfig(o.cfgPath, env)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr
@@ -311,7 +311,7 @@ func runProposals(env Env, args []string, out, errOut *console) int {
 		fs.Usage()
 		return ExitUsage
 	}
-	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
+	cfg, err := loadConfig(o.cfgPath, env)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr
@@ -399,7 +399,7 @@ func evaluate(ctx context.Context, env Env, cfg *config.Config, ops []proposal.O
 	})
 	ev.modules = names
 	if len(names) > 0 {
-		selected, err := selectModules(mods, strings.Join(names, ","))
+		selected, err := selectModules(mods, strings.Join(names, ","), env.goos())
 		if err != nil {
 			return nil, err
 		}

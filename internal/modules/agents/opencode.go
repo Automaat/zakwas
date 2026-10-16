@@ -33,10 +33,19 @@ func (m *Module) opencodeBackend() *opencode {
 	return &opencode{
 		runner:    m.Runner,
 		paths:     m.Paths,
-		skillsDir: m.Paths.Dst(m.Agents.OpencodeSkillsDir()),
+		skillsDir: m.opencodeSkillsDir(),
 		cacheDir:  filepath.Join(m.Paths.Home, ".local", "share", "zakwas", "agents"),
 		statePath: filepath.Join(m.Paths.Home, ".local", "state", "zakwas", "opencode.json"),
 	}
+}
+
+// opencodeSkillsDir is agents.opencode.skillsDir, else the skills directory
+// under opencode's config home, which follows $XDG_CONFIG_HOME like opencode.
+func (m *Module) opencodeSkillsDir() string {
+	if o := m.Agents.Opencode; o != nil && o.SkillsDir != "" {
+		return m.Paths.Dst(o.SkillsDir)
+	}
+	return filepath.Join(m.xdgConfigHome(), "opencode", "skills")
 }
 
 // opencodeState maps each fetched git marketplace to its source, each

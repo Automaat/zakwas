@@ -488,18 +488,7 @@ const permissionMeta = "*?[]{}()|&;<>$`'\"\\"
 // Opencode configures the opencode provider, which has no plugin system:
 // zakwas links each plugin's skills into its skills directory.
 type Opencode struct {
-	SkillsDir string `yaml:"skillsDir" jsonschema:"minLength=1" jsonschema_description:"Directory opencode loads user skills from, absolute or '~/...'. Default: ~/.config/opencode/skills. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere."`
-}
-
-// DefaultOpencodeSkillsDir is where opencode loads user skills from.
-const DefaultOpencodeSkillsDir = "~/.config/opencode/skills"
-
-// OpencodeSkillsDir is agents.opencode.skillsDir or the default.
-func (a *Agents) OpencodeSkillsDir() string {
-	if a.Opencode != nil && a.Opencode.SkillsDir != "" {
-		return a.Opencode.SkillsDir
-	}
-	return DefaultOpencodeSkillsDir
+	SkillsDir string `yaml:"skillsDir" jsonschema:"minLength=1" jsonschema_description:"Directory opencode loads user skills from, absolute or '~/...'. Default: $XDG_CONFIG_HOME/opencode/skills, or ~/.config/opencode/skills when it is unset. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere."`
 }
 
 // Marketplace is a plugin marketplace. In YAML it is either the source

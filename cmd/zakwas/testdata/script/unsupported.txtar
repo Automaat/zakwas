@@ -1,0 +1,62 @@
+env ZAKWAS_TEST_GOOS=linux
+
+! zakwas plan
+stderr -count=1 'brew: not supported on Linux'
+stderr -count=1 'mise: not supported on Linux'
+stderr -count=1 'defaults: not supported on Linux'
+stderr -count=1 'launchd: not supported on Linux'
+stderr -count=1 'system.sudoTouchID: not supported on Linux'
+stderr 'docs/config.md#platform-support'
+! stdout .
+
+! zakwas check
+stderr 'brew: not supported on Linux'
+
+! zakwas apply -y
+stderr 'brew: not supported on Linux'
+! exists home/.local/state/zakwas/history.jsonl
+
+cp zakwas-ok.yaml zakwas.yaml
+zakwas plan
+stdout '\+ ~/.zshrc'
+
+! zakwas plan --only brew
+stderr 'brew: not supported on Linux'
+stderr 'docs/config.md#platform-support'
+! stderr 'unknown or unconfigured'
+
+! zakwas plan --only nope
+stderr 'unknown or unconfigured module "nope"'
+
+! zakwas propose add-brew jq
+stderr 'brew: not supported on Linux'
+
+env ZAKWAS_TEST_GOOS=darwin
+cp zakwas-mac.yaml zakwas.yaml
+zakwas plan --only links
+stdout '\+ ~/.zshrc'
+
+-- zakwas.yaml --
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+brew: {file: Brewfile}
+mise: {config: mise.toml}
+defaults:
+  - {domain: com.apple.dock, key: autohide, value: true}
+launchd:
+  - {label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}
+system:
+  sudoTouchID: true
+-- zakwas-ok.yaml --
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+-- zakwas-mac.yaml --
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+brew: {file: Brewfile}
+-- Brewfile --
+brew "jq"
+-- mise.toml --
+[tools]
+-- dotfiles/zshrc --
+export EDITOR=vim

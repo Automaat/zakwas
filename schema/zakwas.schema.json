@@ -1359,7 +1359,7 @@
           "properties": {
             "skillsDir": {
               "minLength": 1,
-              "description": "Directory opencode loads user skills from, absolute or '~/...'. Default: ~/.config/opencode/skills. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere.",
+              "description": "Directory opencode loads user skills from, absolute or '~/...'. Default: $XDG_CONFIG_HOME/opencode/skills, or ~/.config/opencode/skills when it is unset. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere.",
               "type": [
                 "string",
                 "null"

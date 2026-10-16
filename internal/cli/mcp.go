@@ -43,7 +43,7 @@ since an agent starts it in any directory.
 Flags:
 `
 
-const mcpInstructions = `zakwas keeps this Mac's setup in a config repo. Read it with zakwas_config, zakwas_plan and zakwas_check.
+const mcpInstructions = `zakwas keeps this machine's setup in a config repo. Read it with zakwas_config, zakwas_plan and zakwas_check.
 To change the setup, never edit agent config files or zakwas.yaml: call zakwas_propose, which saves a proposal and changes nothing.
 To record what was added in an agent by hand, call zakwas_capture and pass the operations it returns to zakwas_propose.
 Then tell the user the proposal's id and tier. A proposal applies only after the user confirms it; when zakwas_apply isn't offered, or for a high risk proposal, give the user the command in the proposal's "next" field to run in a terminal.
@@ -110,7 +110,7 @@ type mcpTools struct {
 }
 
 func (t *mcpTools) load() (*config.Config, error) {
-	return loadConfig(t.cfgPath, t.env.Cwd, t.env.Home)
+	return loadConfig(t.cfgPath, t.env)
 }
 
 func objectSchema(properties map[string]any, required ...string) map[string]any {
@@ -143,12 +143,12 @@ func (t *mcpTools) tools() []mcp.Tool {
 		},
 		{
 			Name: "zakwas_plan", Title: "Plan the config", ReadOnly: true, Schema: objectSchema(planProps),
-			Description: "What `zakwas apply` would change on this Mac, as JSON. Changes nothing.",
+			Description: "What `zakwas apply` would change on this machine, as JSON. Changes nothing.",
 			Handler:     func(ctx context.Context, c *mcp.Call) (mcp.Result, error) { return t.plan(ctx, c, false) },
 		},
 		{
 			Name: "zakwas_check", Title: "Check for drift", ReadOnly: true, Schema: objectSchema(planProps),
-			Description: "Whether this Mac drifted from the config: {\"drift\": bool} with the plan. Changes nothing.",
+			Description: "Whether this machine drifted from the config: {\"drift\": bool} with the plan. Changes nothing.",
 			Handler:     func(ctx context.Context, c *mcp.Call) (mcp.Result, error) { return t.plan(ctx, c, true) },
 		},
 		{
@@ -268,7 +268,7 @@ func (t *mcpTools) plan(ctx context.Context, c *mcp.Call, check bool) (mcp.Resul
 		return mcp.Result{}, err
 	}
 	only := strings.Join(args.Only, ",")
-	mods, err := selectModules(Modules(cfg, t.env), only)
+	mods, err := selectModules(Modules(cfg, t.env), only, t.env.goos())
 	if err != nil {
 		return mcp.Result{}, err
 	}
