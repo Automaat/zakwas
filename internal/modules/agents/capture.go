@@ -441,6 +441,9 @@ func capturedOAuth(provider string, v map[string]any) (*CapturedOAuth, string) {
 	} else {
 		out.Scope, _ = raw["scopes"].(string)
 	}
+	if looksSecret(strings.Fields(out.Scope)) {
+		return nil, "its oauth scopes " + credentialReason
+	}
 	problems := config.MCPOAuth{ClientID: out.ClientID, CallbackPort: out.CallbackPort, Scope: out.Scope}.Problems()
 	if len(problems) > 0 {
 		return nil, "its oauth settings can't be declared: " + problems[0]

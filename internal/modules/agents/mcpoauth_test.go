@@ -356,6 +356,8 @@ func TestCaptureReadsOAuthClients(t *testing.T) {
   "secret": {"type": "http", "url": "https://mcp.example.com/secret", "oauth": {"clientId": "0oa1zlwt4wuQdH7xt358", "clientSecret": "LEAKO1"}},
   "snake": {"type": "http", "url": "https://mcp.example.com/snake", "oauth": {"clientId": "0oa1zlwt4wuQdH7xt358", "client_secret": "LEAKO2"}},
   "metadata": {"type": "http", "url": "https://mcp.example.com/metadata", "oauth": {"clientId": "0oa1zlwt4wuQdH7xt358", "authServerMetadataUrl": "https://auth.example.com/meta"}},
+  "tokscope": {"type": "http", "url": "https://mcp.example.com/tokscope", "oauth": {"clientId": "0oa1zlwt4wuQdH7xt358", "scopes": "ghp_abcdefghijklmnopqrstuvwxyz0123456789AB"}},
+  "badscope": {"type": "http", "url": "https://mcp.example.com/badscope", "oauth": {"clientId": "0oa1zlwt4wuQdH7xt358", "scopes": "read \"x\" LEAKO4"}},
   "spaced": {"type": "http", "url": "https://mcp.example.com/spaced", "oauth": {"clientId": "has space"}},
   "portonly": {"type": "http", "url": "https://mcp.example.com/portonly", "oauth": {"callbackPort": 54661}},
   "stdio": {"type": "stdio", "command": "srv", "oauth": {"clientId": "0oa1zlwt4wuQdH7xt358"}}}}`)
@@ -417,7 +419,9 @@ callback_url = "http://localhost:54661/cb"
 		"csecret":  "may hold a credential",
 		"metadata": "has settings capture can't declare (oauth)",
 		"curl":     "has settings capture can't declare (oauth)",
-		"spaced":   "its oauth settings can't be declared: oauth.clientId may not hold spaces or control characters",
+		"tokscope": "its oauth scopes may hold a credential",
+		"badscope": "its oauth settings can't be declared: oauth.scope must be scope names",
+		"spaced":   "its oauth settings can't be declared: oauth.clientId may not hold spaces, control characters or invisible characters",
 		"portonly": "has settings capture can't declare (oauth)",
 		"stdio":    "has settings capture can't declare (oauth)",
 	} {

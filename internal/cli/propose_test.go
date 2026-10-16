@@ -154,7 +154,7 @@ func TestProposeMCPServerWithOAuthClient(t *testing.T) {
 	if p.Tier != proposal.TierHigh {
 		t.Errorf("tier = %s", p.Tier)
 	}
-	if got := p.Ops[0].Server.OAuth; got == nil || *got != (proposal.OAuth{ClientID: "0oa1abcdEXAMPLE", CallbackPort: 54661, Scope: "read write"}) {
+	if got := p.Ops[0].Server.OAuth; got == nil || got.ClientID != "0oa1abcdEXAMPLE" || got.CallbackPort == nil || *got.CallbackPort != 54661 || got.Scope != "read write" {
 		t.Errorf("saved oauth = %+v", got)
 	}
 	if after := readFile(t, filepath.Join(env.Cwd, "zakwas.yaml")); after != before {
@@ -170,8 +170,10 @@ func TestProposeMCPServerWithOAuthClient(t *testing.T) {
 		{"scope without a client", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-scope", "read"}, "oauth needs a client id"},
 		{"client on a command server", []string{"propose", "add-mcp", "a", "-command", "x", "-oauth-client-id", "c"}, "oauth belongs to a url server"},
 		{"client with a bearer token", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-bearer-token-env", "T"}, "oauth can't be combined with a bearer token"},
+		{"port zero", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-oauth-callback-port", "0"}, "between 1 and 65535"},
+		{"port zero without a client", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-callback-port", "0"}, "oauth needs a client id"},
 		{"port out of range", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-oauth-callback-port", "65536"}, "must be between 1 and 65535"},
-		{"client with a space", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c d"}, "may not hold spaces"},
+		{"client with a space", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c d"}, "may not hold spaces, control characters or invisible characters"},
 		{"scope with a quote", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-oauth-scope", `a"b`}, "oauth.scope"},
 		{"flag on another operation", []string{"propose", "add-brew", "jq", "-oauth-client-id", "c"}, "add-brew doesn't take -oauth-client-id"},
 	} {

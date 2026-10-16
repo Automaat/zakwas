@@ -287,6 +287,7 @@ func TestMCPProposeListsAndDiscards(t *testing.T) {
 		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"callback_port": 1}}},
 		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "client_secret": "LEAKP1"}}},
 		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "callback_port": 0.5}}},
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "callback_port": 0}}},
 	} {
 		if r := c.tool("zakwas_propose", bad, nil); !r.isErr || strings.Contains(r.text, "LEAKP1") {
 			t.Errorf("%v: error %v, text %s", bad, r.isErr, r.text)

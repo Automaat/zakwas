@@ -57,7 +57,7 @@ type Server struct {
 // parts only, since a client secret has no place in the config repo.
 type OAuth struct {
 	ClientID     string `json:"client_id"`
-	CallbackPort int    `json:"callback_port,omitempty"`
+	CallbackPort *int   `json:"callback_port,omitempty"`
 	Scope        string `json:"scope,omitempty"`
 }
 
@@ -165,6 +165,9 @@ func (s *Server) validateOAuth() []error {
 	if s.BearerTokenEnv != "" {
 		errs = append(errs, errors.New("oauth can't be combined with a bearer token"))
 	}
+	if p := s.OAuth.CallbackPort; p != nil && (*p < 1 || *p > 65535) {
+		errs = append(errs, errors.New("oauth callback port must be between 1 and 65535"))
+	}
 	for _, problem := range s.OAuth.config().Problems() {
 		errs = append(errs, errors.New(problem))
 	}
@@ -172,7 +175,11 @@ func (s *Server) validateOAuth() []error {
 }
 
 func (o *OAuth) config() config.MCPOAuth {
-	return config.MCPOAuth{ClientID: o.ClientID, CallbackPort: o.CallbackPort, Scope: o.Scope}
+	out := config.MCPOAuth{ClientID: o.ClientID, Scope: o.Scope}
+	if o.CallbackPort != nil {
+		out.CallbackPort = *o.CallbackPort
+	}
+	return out
 }
 
 // Summary is the operation in one line.

@@ -216,8 +216,13 @@ func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string) (proposal.Op,
 		op.Server = &proposal.Server{
 			Command: o.command, Args: o.args, URL: o.url, EnvVars: o.envVars, BearerTokenEnv: o.bearerTokenEnv,
 		}
-		if o.oauthClientID != "" || o.oauthPort != 0 || o.oauthScope != "" {
-			op.Server.OAuth = &proposal.OAuth{ClientID: o.oauthClientID, CallbackPort: o.oauthPort, Scope: o.oauthScope}
+		portSet := false
+		fs.Visit(func(f *flag.Flag) { portSet = portSet || f.Name == "oauth-callback-port" })
+		if o.oauthClientID != "" || portSet || o.oauthScope != "" {
+			op.Server.OAuth = &proposal.OAuth{ClientID: o.oauthClientID, Scope: o.oauthScope}
+			if portSet {
+				op.Server.OAuth.CallbackPort = &o.oauthPort
+			}
 		}
 	}
 	return op, op.Validate()

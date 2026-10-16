@@ -51,7 +51,11 @@ func (o *MCPOAuth) UnmarshalYAML(n *yaml.Node) error {
 			return err
 		}
 		for i := 0; i+1 < len(n.Content); i += 2 {
-			if v := n.Content[i+1]; n.Content[i].Value == "callbackPort" && v.Kind == yaml.ScalarNode && v.ShortTag() == "!!float" {
+			v := n.Content[i+1]
+			for v.Kind == yaml.AliasNode && v.Alias != nil {
+				v = v.Alias
+			}
+			if n.Content[i].Value == "callbackPort" && v.Kind == yaml.ScalarNode && v.ShortTag() == "!!float" {
 				return fmt.Errorf("line %d: oauth.callbackPort must be a whole number between 1 and %d", v.Line, maxPort)
 			}
 		}
@@ -99,14 +103,16 @@ func (o MCPOAuth) Problems() []string {
 		}
 		return out
 	}
-	if !utf8.ValidString(o.ClientID) || strings.ContainsFunc(o.ClientID, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
-		add("oauth.clientId may not hold spaces or control characters")
+	if !utf8.ValidString(o.ClientID) || strings.ContainsFunc(o.ClientID, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	}) {
+		add("oauth.clientId may not hold spaces, control characters or invisible characters")
 	}
 	if o.CallbackPort != 0 && (o.CallbackPort < 1 || o.CallbackPort > maxPort) {
 		add("oauth.callbackPort %d must be between 1 and %d", o.CallbackPort, maxPort)
 	}
 	if o.Scope != "" && !scopeText.MatchString(o.Scope) {
-		add("oauth.scope %q must be scope names separated by single spaces, without quotes or backslashes", o.Scope)
+		add("oauth.scope must be scope names separated by single spaces, without quotes or backslashes")
 	}
 	return out
 }

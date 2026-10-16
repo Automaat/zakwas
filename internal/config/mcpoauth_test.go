@@ -28,7 +28,7 @@ func TestMCPOAuthDecoding(t *testing.T) {
 		{"empty mapping", "oauth: {}", MCPOAuth{}, "oauth.clientId is required"},
 		{"null client id", "oauth: {clientId: }", MCPOAuth{}, "oauth.clientId is required"},
 		{"empty client id", "oauth: {clientId: ''}", MCPOAuth{}, "oauth.clientId is required"},
-		{"client id with a space", "oauth: {clientId: 'a b'}", MCPOAuth{}, "agents.mcp.slack: oauth.clientId may not hold spaces or control characters"},
+		{"client id with a space", "oauth: {clientId: 'a b'}", MCPOAuth{}, "agents.mcp.slack: oauth.clientId may not hold spaces, control characters or invisible characters"},
 		{"port zero", "oauth: {clientId: c, callbackPort: 0}", MCPOAuth{}, "oauth.callbackPort 0 must be between 1 and 65535"},
 		{"port negative", "oauth: {clientId: c, callbackPort: -1}", MCPOAuth{}, "oauth.callbackPort -1 must be between 1 and 65535"},
 		{"port too high", "oauth: {clientId: c, callbackPort: 65536}", MCPOAuth{}, "oauth.callbackPort 65536 must be between 1 and 65535"},
@@ -101,8 +101,10 @@ func TestMCPOAuthProblemsOfAConfigBuiltInGo(t *testing.T) {
 		{"scope without a client", MCPOAuth{Scope: "a"}, "oauth.clientId is required"},
 		{"port out of range", MCPOAuth{ClientID: "c", CallbackPort: 70000}, "must be between 1 and 65535"},
 		{"negative port", MCPOAuth{ClientID: "c", CallbackPort: -5}, "must be between 1 and 65535"},
-		{"control character", MCPOAuth{ClientID: "c\x07"}, "may not hold spaces or control characters"},
-		{"invalid UTF-8", MCPOAuth{ClientID: "c\xff"}, "may not hold spaces or control characters"},
+		{"control character", MCPOAuth{ClientID: "c\x07"}, "may not hold spaces, control characters or invisible characters"},
+		{"invisible character", MCPOAuth{ClientID: "c\u202ec"}, "invisible characters"},
+		{"zero-width space", MCPOAuth{ClientID: "c\u200bc"}, "invisible characters"},
+		{"invalid UTF-8", MCPOAuth{ClientID: "c\xff"}, "may not hold spaces, control characters or invisible characters"},
 		{"scope", MCPOAuth{ClientID: "c", Scope: " a"}, "oauth.scope"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -123,5 +125,42 @@ func TestMCPOAuthScopes(t *testing.T) {
 	}
 	if got := (MCPOAuth{}).Scopes(); len(got) != 0 {
 		t.Errorf("scopes = %q", got)
+	}
+}
+
+func TestMCPOAuthPortThroughAnAlias(t *testing.T) {
+	for _, tt := range []struct {
+		name, port string
+		reject     bool
+	}{
+		{"whole number", "8080", false},
+		{"fraction", "8080.9", true},
+		{"whole float", "8080.0", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := "agents: {mcp: {t: {command: x, args: [&p " + tt.port + "]}, s: {url: 'https://e.com', oauth: {clientId: c, callbackPort: *p}}}}"
+			_, err := Load(writeConfig(t, body), "/h")
+			if tt.reject != (err != nil) {
+				t.Fatalf("err = %v, reject %v", err, tt.reject)
+			}
+			if err != nil && !strings.Contains(err.Error(), "oauth.callbackPort must be a whole number") {
+				t.Errorf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestMCPOAuthProblemsNeverEchoAValue(t *testing.T) {
+	for _, o := range []MCPOAuth{
+		{ClientID: "c", Scope: `read "LEAKSCOPE1" \x`},
+		{ClientID: "LEAKID1 x"},
+		{ClientID: "LEAKID2\x07"},
+		{ClientID: "LEAKID3", CallbackPort: 70000, Scope: "LEAKSCOPE2  x"},
+	} {
+		for _, p := range o.Problems() {
+			if strings.Contains(p, "LEAK") {
+				t.Errorf("problem %q echoes a value of %+v", p, o)
+			}
+		}
 	}
 }

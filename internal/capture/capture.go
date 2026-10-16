@@ -159,7 +159,10 @@ func opOf(c agents.Candidate) proposal.Op {
 			Command: s.Command, Args: s.Args, URL: s.URL, EnvVars: s.EnvVars, BearerTokenEnv: s.BearerTokenEnv,
 		}
 		if s.OAuth != nil {
-			server.OAuth = &proposal.OAuth{ClientID: s.OAuth.ClientID, CallbackPort: s.OAuth.CallbackPort, Scope: s.OAuth.Scope}
+			server.OAuth = &proposal.OAuth{ClientID: s.OAuth.ClientID, Scope: s.OAuth.Scope}
+			if s.OAuth.CallbackPort != 0 {
+				server.OAuth.CallbackPort = &s.OAuth.CallbackPort
+			}
 		}
 		return proposal.Op{Kind: proposal.AddMCP, Name: c.Name, Server: server}
 	}

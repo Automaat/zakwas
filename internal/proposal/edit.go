@@ -245,8 +245,8 @@ func mcpEntry(indent string, op Op) []string {
 
 func oauthFlow(o *OAuth) string {
 	parts := []string{"clientId: " + scalar(o.ClientID, true)}
-	if o.CallbackPort != 0 {
-		parts = append(parts, "callbackPort: "+strconv.Itoa(o.CallbackPort))
+	if o.CallbackPort != nil {
+		parts = append(parts, "callbackPort: "+strconv.Itoa(*o.CallbackPort))
 	}
 	if o.Scope != "" {
 		parts = append(parts, "scope: "+scalar(o.Scope, true))

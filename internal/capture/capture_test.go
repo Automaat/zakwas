@@ -213,7 +213,7 @@ func TestPlanCarriesTheOAuthClientAcrossProviders(t *testing.T) {
 	if got := summary(res); !slices.Equal(got, []string{"add MCP server docs claude,codex"}) {
 		t.Fatalf("ops = %q, skipped %v", got, skips(res))
 	}
-	if got := res.Ops[0].Server.OAuth; got == nil || *got != (proposal.OAuth{ClientID: "0oa1zlwt4wuQdH7xt358", CallbackPort: 54661, Scope: "read write"}) {
+	if got := res.Ops[0].Server.OAuth; got == nil || got.ClientID != "0oa1zlwt4wuQdH7xt358" || got.CallbackPort == nil || *got.CallbackPort != 54661 || got.Scope != "read write" {
 		t.Errorf("op oauth = %+v", got)
 	}
 	applied, err := proposal.Apply(res.Ops, cfg, home)
