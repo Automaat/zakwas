@@ -416,9 +416,11 @@ func TestApplyQuotesEveryYAMLHazardInEveryField(t *testing.T) {
 				ops = append(ops, Op{Kind: AddMCP, Name: "web", Server: &Server{URL: "https://example.com/mcp", OAuth: &OAuth{ClientID: h, Scope: h}}})
 			}
 			withRule := !strings.ContainsAny(h, "<>*&|`[]{}")
+			command := "git log"
 			if withRule {
-				ops = append(ops, Op{Kind: AddPermission, Decision: "deny", Command: h, Justification: h})
+				command = h
 			}
+			ops = append(ops, Op{Kind: AddPermission, Decision: "deny", Command: command, Justification: h})
 			res, err := Apply(ops, cfg, home)
 			if err != nil {
 				t.Fatal(err)
@@ -435,10 +437,30 @@ func TestApplyQuotesEveryYAMLHazardInEveryField(t *testing.T) {
 			}
 			found := false
 			for _, r := range a.Permissions.Deny {
-				found = found || r.Command == strings.Join(strings.Fields(h), " ") && r.Justification == h
+				found = found || r.Command == strings.Join(strings.Fields(command), " ") && r.Justification == h
 			}
-			if withRule && !found {
+			if !found {
 				t.Errorf("deny rules = %+v", a.Permissions.Deny)
+			}
+		})
+	}
+}
+
+func TestValidateRefusesTextThatCannotBeWrittenBack(t *testing.T) {
+	for _, tt := range []struct{ name, source string }{
+		{"invalid UTF-8", "a\xffb/c"},
+		{"U+FFFE", "a\ufffeb/c"},
+		{"U+FFFF", "a\uffffb/c"},
+		{"noncharacter U+FDD0", "a\ufdd0b/c"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Op{Kind: AddMarketplace, Name: "mk", Source: tt.source}.Validate()
+			if err == nil || !strings.Contains(err.Error(), "one line of printable text") {
+				t.Errorf("err = %v", err)
+			}
+			err = Op{Kind: AddMCP, Name: "mk", Server: &Server{Command: "x", Args: []string{tt.source}}}.Validate()
+			if err == nil || !strings.Contains(err.Error(), "one line of printable text") {
+				t.Errorf("mcp arg: err = %v", err)
 			}
 		})
 	}

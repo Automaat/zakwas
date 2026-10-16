@@ -2,7 +2,7 @@
 
 `zakwas.yaml` describes one Mac. zakwas finds it by searching up from the current directory, then `$ZAKWAS_CONFIG`; `-c path` overrides both. The directory holding it is the **config root**: every `src`, `brew.file` and `mise.config` path is relative to it (absolute paths work too).
 
-Every section is optional. Unknown keys are errors, and zakwas reports every problem in the file at once before touching anything. An error about an unknown key or anchor gives the line, never the key or anchor text, so a secret pasted there stays out of the output.
+Every section is optional. Unknown keys are errors, and zakwas reports every problem in the file at once before touching anything. An error about an unknown or duplicate key gives its line, and one about an unknown anchor has none; neither repeats the key or anchor text, so a secret pasted there stays out of the output.
 
 - [Editor setup](#editor-setup)
 - [Conventions](#conventions)

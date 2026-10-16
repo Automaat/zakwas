@@ -248,7 +248,7 @@ func (c *Config) Validate(home string) error {
 		case time.Time:
 			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: YAML reads %s as a date; quote it to write a string", i, d.Domain, d.Key, yamlDate(v)))
 		default:
-			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value %#v", i, d.Domain, d.Key, d.Value))
+			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value of type %T", i, d.Domain, d.Key, d.Value))
 		}
 	}
 	for i, d := range c.System.Dirs {
