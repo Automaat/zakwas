@@ -44,7 +44,7 @@ The `agents` entry under [Rules](CLAUDE.md#rules) lists what every provider must
 - a `backend` in `internal/modules/agents` (`plan` and `refresh`), registered in `backends()`. Gemini CLI is the one provider without a `backend`: it is rendered as one extension (`gemini.go`), which suits a tool that rewrites its own settings files;
 - support for each feature in the other `agents` files: instructions, MCP servers, skills, hooks, permissions, profiles, guard, capture;
 - a unit test file next to it that runs every CLI call through `runnertest.Fake`, and an end-to-end script like the existing `cmd/zakwas/testdata/script/agents-*.txtar` ones, with a fake binary on `PATH`;
-- the support matrix in `docs/agents.md`, the keys in `docs/config.md` and a recipe in `docs/examples.md`.
+- the support matrix in `docs/agents.md`, the keys in `docs/config.md` and a recipe in `docs/recipes.md`.
 
 A test must never touch a provider's real state: set its home variable (`CODEX_HOME`, `COPILOT_HOME` and `HOME`, `GEMINI_CLI_HOME`, `CLAUDE_CONFIG_DIR`) to a temp dir.
 
@@ -58,6 +58,13 @@ Config fields carry `jsonschema_description` tags (plus required and enum). Afte
 ### Add a command
 
 Add it to `commandList` in `internal/cli/cli.go`, which feeds usage and shell completion, and document it in `docs/commands.md`.
+
+### Docs
+
+- `docs/recipes.md` holds snippets, one feature each. The sample config repo is `examples/`; don't mix the two.
+- `internal/docs` checks every fenced `yaml` block in `README.md` and `docs/*.md`: it must load through `config.Parse` and `Validate`, and a block that declares only `agents` (with optional `templates`) must also plan, with the files it references created in a temp config repo as stubs, so the bodies of instruction, prompt, skill and template files are not checked. The failure names the file and line.
+- Write a block as a complete `zakwas.yaml` or as a fragment that starts with a top-level key. A `yaml` block that is not a config (a CI workflow, an editor modeline) gets `<!-- recipe: skip -->` on the line before its fence. A marker on a block that uses a `zakwas.yaml` top-level key fails the test. Open the fence as ```` ```yaml ```` at the start of the line; other spellings (`yml`, `~~~`, indented) fail the test. Use another fence language for templates, JSON, shell and Brewfiles, which needs no marker.
+- Modes in docs use `0o` octal (see Change config keys); anchors come from heading text, so renaming a heading means updating its links.
 
 ### Tests
 

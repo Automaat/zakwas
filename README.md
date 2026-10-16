@@ -110,7 +110,7 @@ zakwas runs as your user, and your config repo is code that runs as you: apply o
 - [docs/getting-started.md](docs/getting-started.md): the normal loop, from `init` to a second Mac
 - [docs/commands.md](docs/commands.md): commands, flags, output, JSON, exit codes, environment
 - [docs/config.md](docs/config.md): every key in `zakwas.yaml`, editor setup
-- [docs/examples.md](docs/examples.md): snippets for common setups
+- [docs/recipes.md](docs/recipes.md): snippets for common setups
 - [examples/](examples): a complete sample config repo ([examples/zakwas.yaml](examples/zakwas.yaml))
 - [docs/agents.md](docs/agents.md): coding agents: what each supports and the capture, propose, approve flow
 - [docs/security.md](docs/security.md): what zakwas verifies, the agent guard, when it uses sudo

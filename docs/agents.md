@@ -64,7 +64,7 @@ agents:
     - dotfiles/agents/skills/review
 ```
 
-`zakwas plan` lists what each agent gets. `zakwas apply` writes it and records what it wrote, so later removing an entry removes only what zakwas added, never what you set yourself. An MCP server that already exists and differs from the declaration fails the plan instead of being replaced, and a file zakwas did not write is backed up to `<file>.zakwas-bak` first. [examples.md](examples.md) has a tested recipe for each key.
+`zakwas plan` lists what each agent gets. `zakwas apply` writes it and records what it wrote, so later removing an entry removes only what zakwas added, never what you set yourself. An MCP server that already exists and differs from the declaration fails the plan instead of being replaced, and a file zakwas did not write is backed up to `<file>.zakwas-bak` first. [recipes.md](recipes.md) has a tested recipe for each key.
 
 ## Day to day
 
@@ -128,7 +128,7 @@ zakwas apply
 
 Run `apply` in a terminal outside the agent: with the guard on, zakwas refuses to apply from an agent session.
 
-To learn about drift without waiting for the next `apply`, run `zakwas check` from launchd (see the [daily drift check](examples.md#daily-drift-notification)), and add a session-start hook so each agent session tells the agent when the setup is stale:
+To learn about drift without waiting for the next `apply`, run `zakwas check` from launchd (see the [daily drift check](recipes.md#daily-drift-notification)), and add a session-start hook so each agent session tells the agent when the setup is stale:
 
 ```bash
 zakwas check --offline -c ~/dotfiles/zakwas.yaml
@@ -138,7 +138,7 @@ zakwas check --offline -c ~/dotfiles/zakwas.yaml
 
 ## Where to go next
 
-- [examples.md](examples.md): tested recipes for MCP servers, instructions, skills, profiles, the guard, adopting an existing setup and opting in to Gemini and Copilot.
+- [recipes.md](recipes.md): tested recipes for MCP servers, instructions, skills, profiles, the guard, adopting an existing setup and opting in to Gemini and Copilot.
 - [config.md](config.md#agents): every key, per-provider paths and ownership rules.
 - [commands.md](commands.md#propose-proposals-approve): `propose`, `approve`, `capture` and `mcp` in full.
 - [security.md](security.md#coding-agents): what the guard stops, and what it does not.
