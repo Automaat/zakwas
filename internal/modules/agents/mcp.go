@@ -295,7 +295,7 @@ func (m *Module) planMCP() (map[string][]engine.Change, map[string]error, error)
 		provider := store.provider()
 		want := map[string]config.MCPServer{}
 		for _, s := range m.Agents.MCPFor(provider) {
-			want[s.Name] = s.MCPServer
+			want[s.Name] = s.ExpandHome(m.Paths.Home)
 		}
 		var recorded []string
 		for key := range st.files(provider) {

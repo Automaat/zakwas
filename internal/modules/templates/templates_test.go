@@ -271,7 +271,7 @@ func TestAgentMCP(t *testing.T) {
 		"oauth": {URL: "https://o.com/mcp", OAuth: config.MCPOAuth{Enabled: true}},
 		"other": {Command: "other", Providers: []string{config.ProviderClaude}},
 	}}
-	got, err := agentMCP(agents, config.ProviderOpencode)
+	got, err := agentMCP(agents, config.ProviderOpencode, "/home/me")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestAgentMCPOAuthClient(t *testing.T) {
 		"hint":    {URL: "https://mcp.example.com/hint", OAuth: config.MCPOAuth{Enabled: true}},
 		"off":     {URL: "https://mcp.example.com/off", Headers: map[string]string{"X-Org": "acme"}},
 	}}
-	got, err := agentMCP(agents, config.ProviderOpencode)
+	got, err := agentMCP(agents, config.ProviderOpencode, "/home/me")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,17 +306,17 @@ func TestAgentMCPOAuthClient(t *testing.T) {
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
-	again, err := agentMCP(agents, config.ProviderOpencode)
+	again, err := agentMCP(agents, config.ProviderOpencode, "/home/me")
 	if err != nil || again != got {
 		t.Errorf("not deterministic: %s, %v", again, err)
 	}
 }
 
 func TestAgentMCPEdgeCases(t *testing.T) {
-	if got, err := agentMCP(nil, config.ProviderOpencode); err != nil || got != "{}" {
+	if got, err := agentMCP(nil, config.ProviderOpencode, "/home/me"); err != nil || got != "{}" {
 		t.Errorf("no agents = %q, %v", got, err)
 	}
-	if _, err := agentMCP(nil, config.ProviderClaude); err == nil || !strings.Contains(err.Error(), `agentMCP: provider "claude" is not supported, only opencode`) {
+	if _, err := agentMCP(nil, config.ProviderClaude, "/home/me"); err == nil || !strings.Contains(err.Error(), `agentMCP: provider "claude" is not supported, only opencode`) {
 		t.Errorf("claude: %v", err)
 	}
 }
@@ -341,5 +341,29 @@ func TestAgentMCPInTemplate(t *testing.T) {
 	}
 	if want := `{"mcp": {"docs": {"type":"local","command":["npx"],"enabled":true}}}` + "\n"; string(data) != want {
 		t.Errorf("rendered = %q, want %q", data, want)
+	}
+}
+
+func TestAgentMCPExpandsHome(t *testing.T) {
+	agents := &config.Agents{MCP: map[string]config.MCPServer{
+		"tool": {
+			Command: "~/.local/bin/tool",
+			Args:    []string{"~/cfg", "--dir=~/keep", "~other/x", "~"},
+			Env:     map[string]string{"DATA": "~/data", "LITERAL": "a~/b"},
+		},
+		"web": {URL: "https://example.com/~/mcp", Headers: map[string]string{"X-Path": "~/h"}},
+	}}
+	got, err := agentMCP(agents, config.ProviderOpencode, "/Users/zażółć me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"tool": {"type":"local","command":["/Users/zażółć me/.local/bin/tool","/Users/zażółć me/cfg","--dir=~/keep","~other/x","/Users/zażółć me"],` +
+		`"environment":{"DATA":"/Users/zażółć me/data","LITERAL":"a~/b"},"enabled":true}, ` +
+		`"web": {"type":"remote","url":"https://example.com/~/mcp","headers":{"X-Path":"~/h"},"oauth":false,"enabled":true}}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	if agents.MCP["tool"].Command != "~/.local/bin/tool" {
+		t.Error("agentMCP changed the declared server")
 	}
 }

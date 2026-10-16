@@ -176,11 +176,12 @@ func geminiServerEntry(s config.MCPServer) geminiServer {
 func (m *Module) geminiServers() (servers map[string]geminiServer, skipped map[string][]string) {
 	servers, skipped = map[string]geminiServer{}, map[string][]string{}
 	for _, s := range m.Agents.MCPFor(config.ProviderGemini) {
-		if gaps := geminiServerGaps(s.Name, s.MCPServer); len(gaps) > 0 {
+		server := s.ExpandHome(m.Paths.Home)
+		if gaps := geminiServerGaps(s.Name, server); len(gaps) > 0 {
 			skipped[s.Name] = gaps
 			continue
 		}
-		servers[s.Name] = geminiServerEntry(s.MCPServer)
+		servers[s.Name] = geminiServerEntry(server)
 	}
 	return servers, skipped
 }

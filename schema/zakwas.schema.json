@@ -872,7 +872,7 @@
             "properties": {
               "command": {
                 "minLength": 1,
-                "description": "Command that starts a stdio server. Set either 'command' or 'url'.",
+                "description": "Command that starts a stdio server. A leading ~ (alone or before /) is expanded to your home directory, so ~/.local/bin/x works on any machine; ~user and $HOME are not expanded. Set either 'command' or 'url'.",
                 "type": [
                   "string",
                   "null"
@@ -882,7 +882,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Arguments of the command. Written to the agents' config as is, so keep secrets out of them.",
+                "description": "Arguments of the command. An argument that is ~ or starts with ~/ is expanded to your home directory; a ~ elsewhere in it (--dir=~/x), ~user and $HOME are not. Otherwise written to the agents' config as is, so keep secrets out of them.",
                 "type": [
                   "array",
                   "null"
@@ -897,7 +897,7 @@
                     "null"
                   ]
                 },
-                "description": "Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead.",
+                "description": "Environment variables set when the command starts, with their values. A value that starts with ~/ is expanded to your home directory (a bare ~, ~user and $HOME are not). Otherwise written to the agents' config as is, so list secrets under 'envVars' instead.",
                 "type": [
                   "object",
                   "null"

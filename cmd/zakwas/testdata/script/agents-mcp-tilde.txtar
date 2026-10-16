@@ -1,0 +1,68 @@
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+mkdir claude codex
+
+exec sh -c 'printf "{\"mcpServers\": {\"adopted\": {\"type\": \"stdio\", \"command\": \"%s/.local/bin/adopted\", \"args\": [\"%s/cfg\"]}}}\n" "$HOME" "$HOME" > "$WORK/claude/.claude.json"'
+
+zakwas plan --only templates,agents
+cmpenv stdout plan.golden
+! grep tool claude/.claude.json
+! exists codex/config.toml
+
+zakwas apply -y --only templates,agents
+stdout 'Applied 4 of 4 steps'
+cmpenv codex/config.toml codex.golden
+cmpenv home/.config/opencode/opencode.json opencode.golden
+grep -count=1 '"command": "'$HOME'/.local/bin/tool"' claude/.claude.json
+grep -count=1 '"DATA": "'$HOME'/data"' claude/.claude.json
+grep -count=1 '"--dir=~/keep"' claude/.claude.json
+grep -count=1 '"~other/x"' claude/.claude.json
+grep -count=1 '"LITERAL": "a~/b"' claude/.claude.json
+! grep '"command": "~' claude/.claude.json
+
+zakwas check --only templates,agents
+stdout 'up to date: templates, agents'
+zakwas plan --only templates,agents
+stdout 'No changes'
+
+-- zakwas.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+  mcp:
+    tool:
+      command: ~/.local/bin/tool
+      args: [--config, ~/cfg/tool.json, "--dir=~/keep", "~other/x"]
+      env: {DATA: ~/data, LITERAL: a~/b}
+    adopted:
+      command: ~/.local/bin/adopted
+      args: ["~/cfg"]
+      providers: [claude]
+-- opencode.json.tmpl --
+{
+  "mcp": {{ agentMCP "opencode" }}
+}
+-- codex.golden --
+[mcp_servers.tool]
+command = "$HOME/.local/bin/tool"
+args = ["--config", "$HOME/cfg/tool.json", "--dir=~/keep", "~other/x"]
+
+[mcp_servers.tool.env]
+DATA = "$HOME/data"
+LITERAL = "a~/b"
+-- opencode.golden --
+{
+  "mcp": {"tool": {"type":"local","command":["$HOME/.local/bin/tool","--config","$HOME/cfg/tool.json","--dir=~/keep","~other/x"],"environment":{"DATA":"$HOME/data","LITERAL":"a~/b"},"enabled":true}}
+}
+-- plan.golden --
+templates
+  + ~/.config/opencode/opencode.json
+agents
+  ~ claude mcp adopted  adopt the server already there
+  + claude mcp tool     stdio $HOME/.local/bin/tool
+  + codex mcp tool      stdio $HOME/.local/bin/tool
+
+Plan: 3 to add, 1 to change, 0 to remove, 0 to run.
