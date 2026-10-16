@@ -85,7 +85,7 @@ try {
     $want = ($line -split '\s+')[0].ToLowerInvariant()
     $got = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $tmp $asset)).Hash.ToLowerInvariant()
     if ($got -ne $want) {
-        throw "$asset: sha256 $got, want $want"
+        throw "${asset}: sha256 $got, want $want"
     }
 
     Expand-Archive -Path (Join-Path $tmp $asset) -DestinationPath (Join-Path $tmp 'out')
