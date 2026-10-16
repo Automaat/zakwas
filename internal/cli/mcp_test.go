@@ -293,6 +293,16 @@ func TestMCPProposeListsAndDiscards(t *testing.T) {
 			t.Errorf("%v: error %v, text %s", bad, r.isErr, r.text)
 		}
 	}
+	for _, bad := range []map[string]any{
+		{"kind": "add-brew", "name": "jq", "ghp_LEAKKEY": true},
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "ghp_LEAKKEY": "x"}},
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "ghp_LEAKKEY": "x"}}},
+	} {
+		r := c.tool("zakwas_propose", bad, nil)
+		if !r.isErr || strings.Contains(r.text, "LEAKKEY") || !strings.Contains(r.text, "unknown field") {
+			t.Errorf("%v: error %v, text %s", bad, r.isErr, r.text)
+		}
+	}
 	if readFile(t, filepath.Join(env.Cwd, "zakwas.yaml")) != before || gitIn(t, env.Cwd, "status", "--porcelain") != "" {
 		t.Error("proposing edited the repo")
 	}

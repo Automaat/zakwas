@@ -19,7 +19,7 @@ import (
 // place here: a secret never reaches the config repo.
 type MCPOAuth struct {
 	Enabled      bool   `yaml:"-"`
-	ClientID     string `yaml:"clientId" jsonschema:"required,minLength=1,pattern=^[\\p{L}\\p{N}\\p{P}\\p{S}]+$" jsonschema_description:"OAuth client ID registered for this server with its authorization server or gateway, as a string (quote a number). A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are. Only letters, digits, punctuation and symbols are accepted: spaces, control and invisible characters, combining marks, and the blank letters U+115F, U+1160, U+3164, U+FFA0 and U+2800 are rejected."`
+	ClientID     string `yaml:"clientId" jsonschema:"required,minLength=1,pattern=^[\\p{L}\\p{N}\\p{P}\\p{S}]+$" jsonschema_description:"OAuth client ID registered for this server with its authorization server or gateway, as a string: quote a value YAML reads as another type, such as '12345', 'true', '2024-01-01' or 'null'. A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are. Only letters, digits, punctuation and symbols are accepted: spaces, control and invisible characters, combining marks, and the blank letters U+115F, U+1160, U+3164, U+FFA0 and U+2800 are rejected."`
 	CallbackPort int    `yaml:"callbackPort" jsonschema:"minimum=1,maximum=65535" jsonschema_description:"Fixed port of the local OAuth callback, for a client whose redirect URIs are registered with a port. Claude Code and opencode take it as callbackPort, Codex as oauth.callback_port, Copilot CLI as auth.redirectPort and Gemini CLI inside redirectUri. Each provider uses its own callback path, so register every redirect URI you sign in with. Default: the provider's own."`
 	Scope        string `yaml:"scope" jsonschema:"minLength=1,pattern=^[!#-\\[\\]-~]+( [!#-\\[\\]-~]+)*$" jsonschema_description:"OAuth scopes to request, as a string of visible ASCII scope names separated by single spaces; double quotes and backslashes are rejected. Default: the scopes the server announces."`
 }
@@ -83,7 +83,7 @@ func (o *MCPOAuth) decodeMapping(n *yaml.Node) error {
 			return fmt.Errorf("line %d: oauth doesn't take a merge key (<<); write clientId, callbackPort and scope out", k.Line)
 		}
 		if !slices.Contains([]string{"clientId", "callbackPort", "scope"}, k.Value) {
-			return fmt.Errorf("line %d: field %s not found, want one of clientId, callbackPort, scope", k.Line, k.Value)
+			return fmt.Errorf("line %d: unknown field in oauth; allowed: clientId, callbackPort, scope", k.Line)
 		}
 		if seen[k.Value] {
 			return fmt.Errorf("line %d: oauth.%s is set twice", k.Line, k.Value)
@@ -95,7 +95,7 @@ func (o *MCPOAuth) decodeMapping(n *yaml.Node) error {
 		switch k.Value {
 		case "clientId", "scope":
 			if v.Kind != yaml.ScalarNode || v.ShortTag() != "!!str" {
-				return fmt.Errorf("line %d: oauth.%s must be a string; quote a number or a word such as yes", v.Line, k.Value)
+				return fmt.Errorf("line %d: oauth.%s must be a string; quote a value that YAML reads as another type: true, false, a number, a date or null", v.Line, k.Value)
 			}
 			if k.Value == "scope" {
 				if v.Value == "" {
