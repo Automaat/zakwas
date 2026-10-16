@@ -426,6 +426,7 @@ zakwas schema
 
 Prints the JSON Schema of `zakwas.yaml` (see [config.md](config.md)). Editors with the YAML language server use it through the first line `zakwas init` writes:
 
+<!-- recipe: skip -->
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json
 ```
