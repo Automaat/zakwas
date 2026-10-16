@@ -32,6 +32,7 @@ It gives completion, hover docs and validation (unknown keys, missing required f
 
 Put this on the first line of `zakwas.yaml`:
 
+<!-- recipe: skip -->
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json
 ```
@@ -42,6 +43,7 @@ To pin the schema to your zakwas version instead of `main`, save it next to the 
 zakwas schema > zakwas.schema.json
 ```
 
+<!-- recipe: skip -->
 ```yaml
 # yaml-language-server: $schema=./zakwas.schema.json
 ```
@@ -586,6 +588,7 @@ Only declared leaves are updated. Removing a value or the settings block leaves 
 
 ```yaml
 agents:
+  providers: [claude, codex]
   mcp:
     datadog: {url: https://mcp.example.com/mcp}
     devtools: {command: devtools-mcp}
@@ -803,7 +806,7 @@ launchd:
     log: ~/Library/Logs/zakwas-check.log
 ```
 
-The [daily drift notification](examples.md#daily-drift-notification) recipe builds on this.
+The [daily drift notification](recipes.md#daily-drift-notification) recipe builds on this.
 
 ## defaults
 
