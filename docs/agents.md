@@ -1,6 +1,6 @@
 # Coding agents
 
-Claude Code, Codex, opencode, Gemini CLI and Copilot CLI each keep their setup in their own files and formats. zakwas lets you declare the setup once in `zakwas.yaml` and renders each agent's native format, so a new Mac, or a second agent, starts with the same MCP servers, instructions, skills and permissions as the first.
+Claude Code, Codex, opencode, Gemini CLI and Copilot CLI each keep their setup in their own files and formats. You declare the setup once in `zakwas.yaml` and zakwas renders each agent's native format, so a new Mac, or a second agent, starts with the same MCP servers, instructions, skills and permissions as the first.
 
 What you can declare under `agents`:
 
@@ -69,10 +69,10 @@ agents:
 
 Agents change their own setup all the time: you approve a command, install a plugin, add an MCP server. With `prune` the next `apply` removes an undeclared plugin, and without it the next Mac still never gets it. The loop that keeps the config repo the source of truth:
 
-1. **Capture** what changed by hand.
-2. **Propose** a change, from the CLI or from an agent.
-3. **Approve** it in a terminal.
-4. **Apply** and let the drift check watch.
+1. Capture what changed by hand.
+2. Propose a change, from the CLI or from an agent.
+3. Approve it in a terminal.
+4. Apply and let the drift check watch.
 
 ### Capture what you changed by hand
 
