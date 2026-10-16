@@ -216,11 +216,14 @@ func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string) (proposal.Op,
 		op.Server = &proposal.Server{
 			Command: o.command, Args: o.args, URL: o.url, EnvVars: o.envVars, BearerTokenEnv: o.bearerTokenEnv,
 		}
-		portSet := false
-		fs.Visit(func(f *flag.Flag) { portSet = portSet || f.Name == "oauth-callback-port" })
-		if o.oauthClientID != "" || portSet || o.oauthScope != "" {
+		set := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+		if set["oauth-scope"] && o.oauthScope == "" {
+			return op, errors.New("--oauth-scope is empty; leave it out to request the server's default scopes")
+		}
+		if set["oauth-client-id"] || set["oauth-callback-port"] || set["oauth-scope"] {
 			op.Server.OAuth = &proposal.OAuth{ClientID: o.oauthClientID, Scope: o.oauthScope}
-			if portSet {
+			if set["oauth-callback-port"] {
 				op.Server.OAuth.CallbackPort = &o.oauthPort
 			}
 		}

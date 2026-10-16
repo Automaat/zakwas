@@ -44,7 +44,19 @@ stdout 'claude: mcp: server "slack" is already in .*/claude/.claude.json and dif
 
 cp zakwas-bad.yaml zakwas.yaml
 ! zakwas plan --only agents
-stderr 'oauth.callbackPort 65536 must be between 1 and 65535'
+stderr 'oauth.callbackPort must be a whole number between 1 and 65535'
+
+cp zakwas-yes.yaml zakwas.yaml
+rm home/.local/state/zakwas/agent-mcp.json
+cp claude-none.json claude/.claude.json
+zakwas plan --only agents
+stdout 'claude mcp hint  http https://mcp.example.com/hint, then sign in with /mcp in Claude Code'
+stdout 'claude mcp ok    http https://mcp.example.com/ok, then sign in with /mcp in Claude Code'
+stdout 'claude mcp off   http https://mcp.example.com/off$'
+cp zakwas-bad-type.yaml zakwas.yaml
+! zakwas plan --only agents
+stderr 'oauth.callbackPort must be a whole number'
+! stderr SECRETPORT
 
 -- zakwas.yaml --
 templates:
@@ -94,6 +106,24 @@ agents:
     slack:
       url: https://mcp.example.com/slack
       oauth: {clientId: 0oa1abcdEXAMPLE}
+-- zakwas-yes.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    hint: {url: "https://mcp.example.com/hint", oauth: yes}
+    ok: {url: "https://mcp.example.com/ok", oauth: On}
+    off: {url: "https://mcp.example.com/off", oauth: no}
+-- zakwas-bad-type.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: SECRETPORT}
+-- claude-none.json --
+{}
 -- zakwas-bad.yaml --
 agents:
   guard: false

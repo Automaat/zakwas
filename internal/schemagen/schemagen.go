@@ -140,6 +140,11 @@ func mcpOAuthForms(root *jsonschema.Schema) error {
 	oauth.Extras["type"] = []string{"boolean", "object", "null"}
 	oauth.Type = ""
 	oauth.Default = false
+	clientID := property(oauth, "clientId")
+	if clientID == nil {
+		return errors.New("schemagen: agents.mcp.*.oauth.clientId not found")
+	}
+	clientID.Not = &jsonschema.Schema{Pattern: "[" + config.BlankGlyphs + "]"}
 	return nil
 }
 

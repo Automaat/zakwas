@@ -963,10 +963,13 @@
               "oauth": {
                 "properties": {
                   "clientId": {
+                    "not": {
+                      "pattern": "[ᅟᅠ⠀ㅤﾠ]"
+                    },
                     "type": "string",
                     "minLength": 1,
-                    "pattern": "^\\S+$",
-                    "description": "OAuth client ID registered for this server with its authorization server or gateway. A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are."
+                    "pattern": "^[\\p{L}\\p{N}\\p{P}\\p{S}]+$",
+                    "description": "OAuth client ID registered for this server with its authorization server or gateway, as a string (quote a number). A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are. Only letters, digits, punctuation and symbols are accepted: spaces, control and invisible characters, combining marks, and the blank letters U+115F, U+1160, U+3164, U+FFA0 and U+2800 are rejected."
                   },
                   "callbackPort": {
                     "maximum": 65535,
@@ -980,7 +983,7 @@
                   "scope": {
                     "minLength": 1,
                     "pattern": "^[!#-\\[\\]-~]+( [!#-\\[\\]-~]+)*$",
-                    "description": "OAuth scopes to request, separated by single spaces. Default: the scopes the server announces.",
+                    "description": "OAuth scopes to request, as a string of visible ASCII scope names separated by single spaces; double quotes and backslashes are rejected. Default: the scopes the server announces.",
                     "type": [
                       "string",
                       "null"

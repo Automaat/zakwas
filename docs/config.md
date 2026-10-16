@@ -459,44 +459,6 @@ agents:
       providers: [claude, codex]
 ```
 
-#### OAuth clients
-
-A gateway that has no dynamic client registration needs the pre-registered client every agent signs in with. `oauth` takes it as a mapping:
-
-| Key | Required | Description |
-|---|---|---|
-| `clientId` | yes | The OAuth client ID. It is public, so it is written as is. |
-| `callbackPort` | no | Fixed port (1 to 65535) of the local callback, for a client whose redirect URIs are registered with a port. Default: the agent's own. |
-| `scope` | no | Scopes to request, separated by single spaces. Default: the scopes the server announces. |
-
-```yaml
-agents:
-  providers: [claude, codex, opencode]
-  mcp:
-    slack:
-      url: https://mcp.example.com/slack
-      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: "read write"}
-```
-
-`oauth: true` keeps its meaning: only the login command in the plan, nothing extra in the agent's config. The mapping form applies to an HTTP server only and is not combined with `bearerTokenEnv` or an `Authorization` header, like `true`. Unknown keys fail the load, and so does a `clientSecret`: there is no client secret, so only public (PKCE) clients are supported, and a secret never reaches the config repo. A client that needs one stays outside zakwas.
-
-What each agent gets:
-
-| Provider | `clientId` | `callbackPort` | `scope` |
-|---|---|---|---|
-| Claude Code | `oauth.clientId` | `oauth.callbackPort` | `oauth.scopes`, one space-separated string |
-| Codex | `oauth.client_id` | `oauth.callback_port` | `scopes`, a list |
-| opencode | `oauth.clientId` | `oauth.callbackPort` | `oauth.scope` |
-| Gemini CLI | `oauth.clientId`, with `oauth.enabled: true` | `oauth.redirectUri` `http://localhost:<port>/oauth/callback` | `oauth.scopes`, a list |
-| Copilot CLI | `oauthClientId`, with `oauthPublicClient: true` | `auth.redirectPort` | `oauthScopes`, a list |
-
-All five can express all three keys, so a plan has no warning for them. Two things stay with you:
-
-- Each agent builds its own redirect URI from the port, with its own path, and the authorization server only accepts the URIs registered for the client. Register one for every agent you sign in with: Claude Code `http://localhost:<port>/callback`, Gemini CLI `http://localhost:<port>/oauth/callback`; check the others in their docs. The agents don't share a path.
-- The mapping registers the client; signing in is still yours, with the command in the plan (`/mcp` in Claude Code, `codex mcp login <name>`, `/mcp auth <name>` in Copilot and Gemini CLI, `opencode mcp auth <name>`).
-
-An existing server of the same name is adopted when its client settings are identical and fails the provider's plan when they differ, as for every other key.
-
 | Provider | Where | A secret variable `X` becomes |
 |---|---|---|
 | Claude Code | `mcpServers` in `.claude.json`: `${CLAUDE_CONFIG_DIR}/.claude.json`, or `~/.claude.json` | `${X}` in `env` or `headers` |
@@ -532,6 +494,44 @@ A server targets opencode through its `providers` or, without them, `agents.prov
 - When the config dir moves (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the servers zakwas registered in the old file are removed there.
 
 `plan` and `check` only read the config files: they start no MCP server and open no browser. A server with `oauth` (`true` or a mapping) shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
+
+#### OAuth clients
+
+A gateway that has no dynamic client registration needs the pre-registered client every agent signs in with. `oauth` takes it as a mapping:
+
+| Key | Required | Description |
+|---|---|---|
+| `clientId` | yes | The OAuth client ID, as a string (quote a number: `'12345'`). It is public, so it is written as is. It may hold letters, digits, punctuation and symbols; spaces, control and invisible characters, combining marks and blank letters such as the Hangul fillers are rejected. |
+| `callbackPort` | no | Fixed port (1 to 65535) of the local callback, for a client whose redirect URIs are registered with a port. Default: the agent's own. |
+| `scope` | no | Scopes to request, as a string of visible ASCII names separated by single spaces; double quotes and backslashes are rejected. Default: the scopes the server announces. |
+
+```yaml
+agents:
+  providers: [claude, codex, opencode]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: "read write"}
+```
+
+`oauth: true` keeps its meaning: only the login command in the plan, nothing extra in the agent's config. The mapping form applies to an HTTP server only and is not combined with `bearerTokenEnv` or an `Authorization` header, like `true`. Unknown keys fail the load, merge keys (`<<`) inside the mapping too, and so does a `clientSecret`: there is no client secret, so only public (PKCE) clients are supported, and a secret never reaches the config repo. A client that needs one stays outside zakwas.
+
+What each agent gets:
+
+| Provider | `clientId` | `callbackPort` | `scope` |
+|---|---|---|---|
+| Claude Code | `oauth.clientId` | `oauth.callbackPort` | `oauth.scopes`, one space-separated string |
+| Codex | `oauth.client_id` | `oauth.callback_port` | `scopes`, a list |
+| opencode | `oauth.clientId` | `oauth.callbackPort` | `oauth.scope` |
+| Gemini CLI | `oauth.clientId`, with `oauth.enabled: true` | `oauth.redirectUri` `http://localhost:<port>/oauth/callback` | `oauth.scopes`, a list |
+| Copilot CLI | `oauthClientId`, with `oauthPublicClient: true` | `auth.redirectPort` | `oauthScopes`, a list |
+
+All five can express all three keys, so a plan has no warning for them. Two things stay with you:
+
+- Each agent builds its own redirect URI from the port, with its own path, and the authorization server only accepts the URIs registered for the client. Register one for every agent you sign in with: Claude Code `http://localhost:<port>/callback`, Gemini CLI `http://localhost:<port>/oauth/callback`; check the others in their docs. The agents don't share a path.
+- The mapping registers the client; signing in is still yours, with the command in the plan (`/mcp` in Claude Code, `codex mcp login <name>`, `/mcp auth <name>` in Copilot and Gemini CLI, `opencode mcp auth <name>`).
+
+An existing server of the same name is adopted when its client settings are identical and fails the provider's plan when they differ, as for every other key.
 
 ### Global Codex settings
 

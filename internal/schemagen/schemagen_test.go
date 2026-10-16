@@ -334,3 +334,46 @@ func TestMCPOAuthSchemaHasBothForms(t *testing.T) {
 		t.Errorf("oauth properties = %v, want clientId, callbackPort and scope only", props)
 	}
 }
+
+func TestMCPOAuthSchemaAndLoaderAgree(t *testing.T) {
+	s := compile(t)
+	doc := func(oauth string) string {
+		return "agents: {mcp: {a: {url: 'https://e.com/mcp', oauth: " + oauth + "}}}\n"
+	}
+	blank := []string{`"\u3164"`, `"\u115f"`, `"\u1160"`, `"\uffa0"`, `"\u2800"`}
+	invisible := []string{`"\u200b"`, `"\u200d"`, `"\u202e"`, `"\u00ad"`, `"\u034f"`, `"\ufe0f"`, `"\U000e0100"`, `"\u17b4"`, `"\u00a0"`, `"\u2062"`, `"\u180e"`, `"\ue000"`, `"\u0007"`, `"\t"`, `"a b"`, `" a"`, `""`}
+	accepted := []string{
+		"true", "false", "null", "~", "{clientId: 0oa1abcdEXAMPLE}", "{clientId: '12345'}", "{clientId: 'true'}",
+		`{clientId: "a'b"}`, `{clientId: 'a"b'}`, `{clientId: 'a\b'}`, `{clientId: "żółć"}`, `{clientId: "中文-id"}`, `{clientId: "a$b"}`, "{clientId: yes}",
+		"{clientId: c, callbackPort: 1}", "{clientId: c, callbackPort: 65535}", "{clientId: c, callbackPort: 0x1F90}", "{clientId: c, callbackPort: 8080.0}", "{clientId: c, callbackPort: 1e3}",
+		"{clientId: c, callbackPort: }", "{clientId: c, scope: }", "{clientId: c, scope: 'read write'}", "{clientId: c, scope: 'api:read api:write'}", `{clientId: c, scope: "a'b"}`, `{clientId: c, scope: 'https://x/y?z=1'}`,
+	}
+	rejected := []string{
+		"maybe", "1", "[c]", "{}", "{callbackPort: 1}", "{clientId: }", "{clientId: 12345}", "{clientId: 1.5}", "{clientId: true}", "{clientId: [a]}", "{clientId: {k: v}}",
+		"{clientId: c, clientSecret: s}", "{clientId: c, callbackPort: 0}", "{clientId: c, callbackPort: 65536}", "{clientId: c, callbackPort: -1}", "{clientId: c, callbackPort: 8080.5}",
+		"{clientId: c, callbackPort: '8080'}", "{clientId: c, callbackPort: [1]}", "{clientId: c, scope: ''}", "{clientId: c, scope: 5}", "{clientId: c, scope: true}", "{clientId: c, scope: [a]}",
+		"{clientId: c, scope: 'a  b'}", "{clientId: c, scope: ' a'}", "{clientId: c, scope: 'a '}", `{clientId: c, scope: 'a"b'}`, `{clientId: c, scope: 'a\b'}`, `{clientId: c, scope: "é"}`, `{clientId: c, scope: "a\tb"}`,
+	}
+	for _, v := range append(blank, invisible...) {
+		rejected = append(rejected, "{clientId: "+v+"}")
+	}
+	for _, v := range accepted {
+		check(t, s, doc(v), true)
+	}
+	for _, v := range rejected {
+		check(t, s, doc(v), false)
+	}
+}
+
+func check(t *testing.T, s *jsonschema.Schema, yamlDoc string, want bool) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), config.FileName)
+	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, loadErr := config.Load(path, t.TempDir())
+	schemaErr := validate(t, s, []byte(yamlDoc))
+	if (loadErr == nil) != want || (schemaErr == nil) != want {
+		t.Errorf("%s: loader accepts %v (%v), schema accepts %v (%v), want %v", strings.TrimSpace(yamlDoc), loadErr == nil, loadErr, schemaErr == nil, schemaErr, want)
+	}
+}

@@ -110,6 +110,7 @@ func TestApplyMCPServerWithOAuthClient(t *testing.T) {
 		{"scope with a colon", &OAuth{ClientID: "c", Scope: "api:read api:write"}, "      oauth: {clientId: c, scope: api:read api:write}\n"},
 		{"client id with a flow character", &OAuth{ClientID: "a,b"}, "      oauth: {clientId: \"a,b\"}\n"},
 		{"client id with a question mark", &OAuth{ClientID: "a?b"}, "      oauth: {clientId: \"a?b\"}\n"},
+		{"quotes in client id and scope", &OAuth{ClientID: `a'b"c\d`, Scope: "it's:ok a'b"}, `      oauth: {clientId: a'b"c\d, scope: it's:ok a'b}` + "\n"},
 		{"scope with a question mark", &OAuth{ClientID: "c", Scope: "https://x/y?z"}, "      oauth: {clientId: c, scope: \"https://x/y?z\"}\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -148,11 +149,11 @@ func TestValidateMCPOAuthClient(t *testing.T) {
 		{"bearer token", Op{Kind: AddMCP, Name: "a", Server: &Server{URL: "https://e.com", BearerTokenEnv: "T", OAuth: &OAuth{ClientID: "c"}}}, "can't be combined with a bearer token"},
 		{"negative port", url(&OAuth{ClientID: "c", CallbackPort: intp(-1)}), "between 1 and 65535"},
 		{"port too high", url(&OAuth{ClientID: "c", CallbackPort: intp(65536)}), "between 1 and 65535"},
-		{"control character", url(&OAuth{ClientID: "c\x1b[2J"}), "spaces, control characters or invisible characters"},
+		{"control character", url(&OAuth{ClientID: "c\x1b[2J"}), "may only hold visible"},
 		{"port zero", url(&OAuth{ClientID: "c", CallbackPort: intp(0)}), "between 1 and 65535"},
 		{"scope", url(&OAuth{ClientID: "c", Scope: "a  b"}), "oauth.scope"},
-		{"right-to-left override", url(&OAuth{ClientID: "ab\u202ecd"}), "invisible characters"},
-		{"zero-width space", url(&OAuth{ClientID: "ab\u200bcd"}), "invisible characters"},
+		{"right-to-left override", url(&OAuth{ClientID: "ab\u202ecd"}), "may only hold visible"},
+		{"zero-width space", url(&OAuth{ClientID: "ab\u200bcd"}), "may only hold visible"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.op.Validate()

@@ -420,8 +420,8 @@ callback_url = "http://localhost:54661/cb"
 		"metadata": "has settings capture can't declare (oauth)",
 		"curl":     "has settings capture can't declare (oauth)",
 		"tokscope": "its oauth scopes may hold a credential",
-		"badscope": "its oauth settings can't be declared: oauth.scope must be scope names",
-		"spaced":   "its oauth settings can't be declared: oauth.clientId may not hold spaces, control characters or invisible characters",
+		"badscope": "its oauth settings can't be declared: oauth.scope must be visible ASCII scope names",
+		"spaced":   "its oauth settings can't be declared: oauth.clientId may only hold visible",
 		"portonly": "has settings capture can't declare (oauth)",
 		"stdio":    "has settings capture can't declare (oauth)",
 	} {
@@ -453,4 +453,39 @@ callback_url = "http://localhost:54661/cb"
 	}
 	apply(t, changes)
 	assertConverged(t, m)
+}
+
+func TestMCPOAuthQuotesInClientAndScope(t *testing.T) {
+	const client = `a'b"c\d`
+	const scope = `it's:ok a'b`
+	oauth := config.MCPOAuth{ClientID: client, CallbackPort: 1234, Scope: scope}
+	m := mcpModule(t, []string{config.ProviderClaude, config.ProviderCodex, config.ProviderCopilot}, map[string]config.MCPServer{"slack": oauthServer(oauth)})
+	m.CopilotHome = filepath.Join(m.Paths.Home, "copilot")
+	apply(t, plan(t, m))
+	assertConverged(t, m)
+	for _, store := range []mcpStore{m.claudeMCP(), m.codexMCP(), m.copilotMCP()} {
+		have, err := store.load(store.path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := store.render("slack", oauthServer(oauth))
+		if err != nil || have["slack"].canon != want.canon {
+			t.Errorf("%s: read back %s, want %s (%v)", store.provider(), have["slack"].canon, want.canon, err)
+		}
+		if !strings.Contains(have["slack"].canon, `a'b`) {
+			t.Errorf("%s lost the quote: %s", store.provider(), have["slack"].canon)
+		}
+	}
+
+	g, _ := newGemini(t, config.Agents{MCP: map[string]config.MCPServer{"slack": oauthServer(oauth)}})
+	apply(t, plan(t, g))
+	var manifest geminiManifest
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(g.geminiExtDir(), "gemini-extension.json"))), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	got := manifest.MCPServers["slack"].OAuth
+	if got == nil || got.ClientID != client || !slices.Equal(got.Scopes, []string{"it's:ok", "a'b"}) {
+		t.Errorf("gemini oauth = %+v", got)
+	}
+	assertConverged(t, g)
 }
