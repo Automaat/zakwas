@@ -35,7 +35,7 @@ mise run lint
 go run ./cmd/zakwas -c examples/zakwas.yaml plan
 ```
 
-Exit codes: 0 ok, 1 error, 2 drift (`check`), 64 usage, 130 interrupted.
+Exit codes: 0 ok, 1 error, 2 drift (`check`), 64 usage, 129/130/143 stopped by SIGHUP/SIGINT/SIGTERM (the commands in flight are interrupted first).
 
 ## Module order
 

@@ -448,7 +448,9 @@ Prints `zakwas <version>` (`dev` for builds outside a release).
 | 1 | error; also when a module failed to plan (the others still apply) |
 | 2 | `check` found drift |
 | 64 | usage error (usage goes to stderr): no or unknown command, unknown flag, conflicting flags, invalid `init`/`self-update` arguments, package-managed binary |
-| 130 | interrupted (Ctrl-C) |
+| 129 | stopped by SIGHUP (closed terminal) |
+| 130 | interrupted (Ctrl-C, SIGINT) |
+| 143 | stopped by SIGTERM (`timeout`, a supervisor) |
 
 ## Environment
 

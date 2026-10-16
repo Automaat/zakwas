@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -24,26 +23,19 @@ var version = "dev"
 // empty means the real one.
 var goosOverride string
 
-// exitInterrupted follows the shell convention of 128 + SIGINT.
-const exitInterrupted = 130
-
 func main() {
 	os.Exit(run())
 }
 
-// run restores default SIGINT handling after the first one, so a second
-// Ctrl-C kills zakwas instead of being swallowed.
+// run stops on the first of SIGINT, SIGTERM and SIGHUP and exits 128 plus its
+// number; a second signal kills zakwas.
 func run() int {
 	if len(os.Args) == 2 && (os.Args[1] == "version" || os.Args[1] == "--version") {
 		fmt.Println("zakwas", version)
 		return cli.ExitOK
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop, caught := watchSignals(context.Background(), stopSignals(os.Args[1:])...)
 	defer stop()
-	go func() {
-		<-ctx.Done()
-		stop()
-	}()
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -81,8 +73,8 @@ func run() int {
 		Host:          hostname(),
 		GOOS:          goosOverride,
 	})
-	if ctx.Err() != nil {
-		return exitInterrupted
+	if sig := caught(); sig != nil {
+		return exitCodeFor(sig)
 	}
 	return code
 }
