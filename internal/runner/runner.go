@@ -95,7 +95,12 @@ func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	if c.Group && !c.Stream {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGINT) }
+		cmd.Cancel = func() error {
+			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return err
+			}
+			return nil
+		}
 	}
 	cmd.WaitDelay = WaitDelay
 	cmd.Dir = c.Dir

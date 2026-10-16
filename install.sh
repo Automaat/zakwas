@@ -8,6 +8,7 @@ bin_dir="$HOME/.local/bin"
 release_url="${ZAKWAS_RELEASE_URL:-https://github.com/Automaat/zakwas/releases}"
 os=""
 arch=""
+curl_opts=(-fsSL)
 tmp=""
 apply=1
 attested_since=0.4.0
@@ -103,7 +104,9 @@ detect_platform() {
 
 check_release_url() {
     case "$release_url" in
-        https://*|http://localhost[:/]*|http://127.0.0.1[:/]*) ;;
+        *@*) die "ZAKWAS_RELEASE_URL must not contain credentials: $release_url" ;;
+        https://*) curl_opts+=(--proto-redir "=https") ;;
+        http://localhost[:/]*|http://127.0.0.1[:/]*) ;;
         *) die "ZAKWAS_RELEASE_URL must be https, or http on localhost: $release_url" ;;
     esac
     release_url="${release_url%/}"
@@ -122,7 +125,7 @@ install_zakwas() {
     if [ "$version" = latest ]; then
         # The releases/latest redirect names the tag; the API would count
         # against the unauthenticated rate limit shared by the whole network.
-        version=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$release_url/latest")
+        version=$(curl "${curl_opts[@]}" -I -o /dev/null -w '%{url_effective}' "$release_url/latest")
         version=${version##*/v}
         [[ "$version" =~ ^[0-9] ]] || die "can't find the latest zakwas release"
     fi
@@ -134,8 +137,8 @@ install_zakwas() {
     trap 'rm -rf "$tmp"' EXIT
 
     info "Installing zakwas $version to $bin_dir"
-    curl -fsSL -o "$tmp/$archive" "$base/$archive"
-    curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
+    curl "${curl_opts[@]}" -o "$tmp/$archive" "$base/$archive"
+    curl "${curl_opts[@]}" -o "$tmp/checksums.txt" "$base/checksums.txt"
     (cd "$tmp" && verify_checksum "$archive") ||
         die "checksum mismatch for $archive"
     verify_attestation "$tmp/$archive"

@@ -81,7 +81,7 @@ It installs the Command Line Tools and zakwas, clones your config to `~/dotfiles
 
 ## Linux
 
-The agent features work on Linux: the `agents` module, `capture`, `propose` / `proposals` / `approve`, `zakwas mcp` and the guard. So do `files`, `links`, `templates`, `commands` and `system` (`dirs` and `sshKey`). Release binaries and `install.sh` cover Linux amd64 and arm64; the installer skips the Xcode step and ends with a hint when `~/.local/bin` is not on `PATH`.
+The agent features work on Linux: the `agents` module, `capture`, `propose` / `proposals` / `approve`, `zakwas mcp` and the guard. So do `files`, `links`, `templates`, `commands` and `system` (`dirs` and `sshKey`). Release binaries and `install.sh` cover Linux amd64 and arm64 (the installer needs `bash`, `curl` and `tar`); the installer skips the Xcode step and ends with a hint when `~/.local/bin` is not on `PATH`.
 
 macOS only: `brew`, `mise`, `defaults`, `launchd` and `system.sudoTouchID`. A config that uses one on Linux is rejected with a one-line message that names it, so nothing is skipped silently. `protect.immutable` has no `uchg` flag on Linux: files stay read-only (`0444`) copies tracked by hash, and the plan says so. [`examples/linux/zakwas.yaml`](examples/linux/zakwas.yaml) is a config that plans there, and [Platform support](docs/config.md#platform-support) lists every module and option.
 

@@ -83,7 +83,7 @@ zakwas: zakwas.yaml: brew: not supported on Linux (it bootstraps Homebrew for ma
 
 Other Linux notes:
 
-- `protect.immutable: true` is accepted. There is no `uchg` flag, so installed files stay read-only (`0444`) and hash-tracked; `check` stays clean and the plan prints `protect.immutable is macOS-only; files are read-only copies` once. A read-only file is still removable by its owner (`rm -f`), and `apply` restores it.
+- `protect.immutable: true` is accepted. There is no `uchg` flag, so installed files stay read-only (`0444`) and hash-tracked; `check` stays clean and the plan prints `protect.immutable is macOS-only; files are read-only copies` once (from the `files` module, so `--only agents` does not show it). A read-only file is still removable by its owner (`rm -f`), and `apply` restores it.
 - zakwas does not install your agent CLIs. A missing one is reported per provider, as in the next section; install it first (Claude Code's installer puts `claude` in `~/.local/bin`, which zakwas adds to `PATH`).
 - The installer needs `curl`, `tar`, `sha256sum` (or `shasum`) and, to clone your repo, `git`. It prints a `PATH` hint when `~/.local/bin` is not on `PATH`.
 - A hung `check` in `commands` is stopped with its whole process group, so a shell that forks (dash) does not outlive the 30-second timeout.

@@ -14,7 +14,7 @@ Releases are built by GoReleaser in GitHub Actions (`.github/workflows/release.y
 2. If a `gh` recent enough to support `--source-ref` is installed and logged in (`gh auth status` succeeds), runs `gh attestation verify` on the archive and stops if that fails. It requires the attestation to come from `Automaat/zakwas`, signed by `.github/workflows/release.yml`, for the tag `v<version>`.
 3. Without a new enough, authenticated `gh`, it skips step 2 and prints the command to verify by hand.
 4. For `--version` older than 0.4.0 it skips step 2: those releases carry no attestation.
-5. `ZAKWAS_RELEASE_URL` points the installer at a release mirror. It must be `https`, or `http` on `localhost` or `127.0.0.1`. The mirror supplies the archive and its checksums, so it is trusted like GitHub; use it only for a mirror you run.
+5. `ZAKWAS_RELEASE_URL` points the installer at a release mirror. It must be `https`, or `http` on `localhost` or `127.0.0.1`, and may not contain credentials (`@`). With an `https` URL, redirects to plain `http` are refused. The mirror supplies the archive and its checksums, so it is trusted like GitHub; use it only for a mirror you run.
 
 The checksum alone catches a corrupted or truncated download. It can't catch a tampered release, because `checksums.txt` comes from the same place as the archive. The attestation can: it is signed through GitHub's OIDC identity for the release workflow, which a modified asset can't reproduce.
 

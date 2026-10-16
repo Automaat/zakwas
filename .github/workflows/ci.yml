@@ -177,10 +177,16 @@ jobs:
           ~/.local/bin/zakwas version
           (cd examples/linux && ~/.local/bin/zakwas plan --only system,files,templates)
           printf '%064d  %s\n' 0 "$archive" > "$release/checksums.txt"
-          if ./install.sh --version 0.0.0-ci --dir "$GITHUB_WORKSPACE/examples/linux" --no-apply < /dev/null; then
+          if ./install.sh --version 0.0.0-ci --dir "$GITHUB_WORKSPACE/examples/linux" --no-apply < /dev/null 2> "$RUNNER_TEMP/tamper.log"; then
             echo "install.sh accepted a bad checksum"
             exit 1
           fi
+          grep -q 'checksum mismatch' "$RUNNER_TEMP/tamper.log"
+          if ZAKWAS_RELEASE_URL='http://localhost:x@evil.example.com/releases' ./install.sh --version 0.0.0-ci --no-apply < /dev/null 2> "$RUNNER_TEMP/creds.log"; then
+            echo "install.sh accepted a release URL with credentials"
+            exit 1
+          fi
+          grep -q 'must not contain credentials' "$RUNNER_TEMP/creds.log"
 
   e2e:
     name: e2e on a fresh Mac
