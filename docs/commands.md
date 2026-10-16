@@ -113,6 +113,37 @@ agents:
 
 The script names the config with `-c` (change the path to where your config repo lives) because an agent starts in the project directory, where zakwas can't find `zakwas.yaml` by searching upward, and `$ZAKWAS_CONFIG` is only a fallback when that search fails. Nothing is printed when the machine matches the config or when zakwas isn't on `PATH` (exit 127), so a healthy session starts with no extra context. Any other failure, such as an unreadable config, prints `zakwas: could not check drift:` and zakwas's error, so a broken hook doesn't look like a clean machine. The hook runs `check`, never `apply`: [`agents.guard`](config.md#guard) keeps agents from applying the config. Install `zakwas` where the agent's shell finds it (`~/.local/bin` by default).
 
+### Reading the output
+
+```
+$ zakwas plan
+files
+  ~ ~/.zshenv                         content
+  - ~/.local/bin/old-tool             no longer managed
+mise
+  ~ ruff          0.16.2 → 0.16.9
+  ▶ mise install
+✓ up to date: system, links, templates, brew, commands, defaults
+
+⚠ destructive: ~/.local/bin/old-tool
+
+Plan: 0 to add, 2 to change, 1 to remove, 1 to run.
+```
+
+`+` add, `~` change, `-` remove, `▶` run a step. Destructive changes (deletions, brew cleanup, mise prune) are bold red and repeated before the summary. `--diff` adds file diffs and command scripts. `apply` shows `[n/total]` progress per step, frames tool output (folded into groups on GitHub Actions), and ends with a recap. Colors follow [NO_COLOR](https://no-color.org) and turn off when stdout isn't a terminal or with `--no-color`. Without a terminal, `apply` refuses to prompt: review with `plan`, then `apply -y`. A module that fails to plan is reported and skipped; the others still apply, and the run exits 1.
+
+### JSON output
+
+```bash
+zakwas plan --json              # one JSON document: modules, changes, summary
+zakwas check --json             # same document; exit code still 0 / 2
+zakwas apply --json -y          # JSON lines: plan, step_start, step_done, summary
+zakwas plan -out plan.json      # save the reviewed plan
+zakwas apply -plan plan.json    # apply it, no prompt; refuses if anything changed since or on another host
+```
+
+Every document carries `format_version` (currently `1`): new fields may appear, renamed or removed ones bump it. Actions are `create`, `update`, `delete`, `run`; each change has `target`, optional `from`/`to`/`detail`, `destructive`, and `step` (false for entries a later step of the module carries out). `--diff` adds `diff`. With `--json`, tool output streamed by apply goes to stderr, so stdout is always valid JSON. Apply history (`~/.local/state/zakwas/history.jsonl`) uses the same change objects plus the result.
+
 ## propose, proposals, approve
 
 To change the setup without finding the right YAML section by hand, and without letting an agent edit `zakwas.yaml` freely, use `propose`, which takes a typed operation and saves the edit, and `approve`, which applies it from a terminal.

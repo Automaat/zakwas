@@ -2,6 +2,8 @@
 
 How zakwas limits what it downloads and runs on your Mac.
 
+zakwas runs as your user and changes what your config declares. Your config repo is code that runs as you: `commands` and agent hooks run what it says, and files and templates write what it says. Apply only a config you trust, and read `zakwas plan` first. `plan` and `check` never change the system.
+
 ## Release artifacts
 
 Releases are built by GoReleaser in GitHub Actions (`.github/workflows/release.yml`). From 0.4.0 on, a follow-up `attest` job signs [build provenance attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) for every `zakwas_*_darwin_*.tar.gz` archive and for `checksums.txt`. An attestation ties the file to the repo, workflow, and tag that built it. The release is public a minute or two before that job finishes, and stays unattested until it's re-run if it fails; in either window `install.sh` refuses it when a logged-in `gh` new enough to verify is present (older or logged-out `gh` skips the check). Re-run only the `attest` job; it re-attests the uploaded `dist` artifact, which GitHub keeps for 90 days.
