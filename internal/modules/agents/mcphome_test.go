@@ -10,6 +10,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func tildeServers() map[string]config.MCPServer {
@@ -48,7 +49,7 @@ func TestMCPExpandsTildeClaude(t *testing.T) {
 	for _, c := range changes {
 		diff.WriteString(c.Diff)
 	}
-	if !strings.Contains(diff.String(), home+"/.local/bin/tool") || strings.Contains(diff.String(), `"~/.local`) {
+	if !strings.Contains(diff.String(), testutil.Esc(home)+"/.local/bin/tool") || strings.Contains(diff.String(), `"~/.local`) {
 		t.Errorf("plan diff does not show the expanded command:\n%s", diff.String())
 	}
 	apply(t, changes)
@@ -90,12 +91,12 @@ func TestMCPExpandsTildeCodex(t *testing.T) {
 	home := m.Paths.Home
 	apply(t, plan(t, m))
 	want := "[mcp_servers.tool]\n" +
-		`command = "` + home + `/.local/bin/tool"` + "\n" +
-		`args = ["--config", "` + home + `/cfg/tool.json", "--dir=~/keep", "` + home + `", "~other/x", "plain"]` + "\n" +
+		`command = "` + testutil.Esc(home) + `/.local/bin/tool"` + "\n" +
+		`args = ["--config", "` + testutil.Esc(home) + `/cfg/tool.json", "--dir=~/keep", "` + testutil.Esc(home) + `", "~other/x", "plain"]` + "\n" +
 		`env_vars = ["TOKEN"]` + "\n" +
 		"[mcp_servers.tool.env]\n" +
 		`BARE = "~"` + "\n" +
-		`DATA = "` + home + `/data"` + "\n" +
+		`DATA = "` + testutil.Esc(home) + `/data"` + "\n" +
 		`LITERAL = "a~/b"` + "\n"
 	got := readFile(t, filepath.Join(m.CodexHome, "config.toml"))
 	if normalizeSpace(got) != normalizeSpace(want) {
@@ -179,8 +180,8 @@ func TestMCPAdoptsAbsoluteEntryForTildeDeclaration(t *testing.T) {
 	claude := filepath.Join(m.ClaudeConfigDir, ".claude.json")
 	copilot := filepath.Join(m.CopilotHome, "mcp-config.json")
 	codex := filepath.Join(m.CodexHome, "config.toml")
-	writeFile(t, claude, `{"mcpServers": {"tool": {"command": "`+home+`/.local/bin/tool", "args": ["`+home+`/cfg"]}}}`)
-	writeFile(t, copilot, `{"mcpServers": {"tool": {"tools": ["*"], "type": "local", "command": "`+home+`/.local/bin/tool", "args": ["`+home+`/cfg"]}}}`)
+	writeFile(t, claude, `{"mcpServers": {"tool": {"command": "`+testutil.Esc(home)+`/.local/bin/tool", "args": ["`+testutil.Esc(home)+`/cfg"]}}}`)
+	writeFile(t, copilot, `{"mcpServers": {"tool": {"tools": ["*"], "type": "local", "command": "`+testutil.Esc(home)+`/.local/bin/tool", "args": ["`+testutil.Esc(home)+`/cfg"]}}}`)
 	writeFile(t, codex, "[mcp_servers.tool]\ncommand = '"+home+"/.local/bin/tool'\nargs = ['"+home+"/cfg']\n")
 	before := []string{readFile(t, claude), readFile(t, copilot), readFile(t, codex)}
 
@@ -206,7 +207,7 @@ func TestMCPAbsoluteDeclarationAdoptsSameEntry(t *testing.T) {
 	home := m.Paths.Home
 	m.Agents.MCP = map[string]config.MCPServer{"tool": {Command: home + "/.local/bin/tool"}}
 	cfg := filepath.Join(m.ClaudeConfigDir, ".claude.json")
-	writeFile(t, cfg, `{"mcpServers": {"tool": {"command": "`+home+`/.local/bin/tool"}}}`)
+	writeFile(t, cfg, `{"mcpServers": {"tool": {"command": "`+testutil.Esc(home)+`/.local/bin/tool"}}}`)
 	if got, want := targets(plan(t, m)), []string{"~ claude mcp tool (adopt the server already there)"}; !slices.Equal(got, want) {
 		t.Fatalf("plan = %q, want %q", got, want)
 	}
@@ -357,7 +358,7 @@ func TestMCPBareTildeAdoptsAServerRegisteredWithATrailingSlashHome(t *testing.T)
 	home := m.Paths.Home
 	m.Paths.Home = home + "/"
 	m.Agents.MCP = map[string]config.MCPServer{"tool": {Command: "x", Args: []string{"~", "~/", "~/a"}}}
-	writeFile(t, filepath.Join(m.ClaudeConfigDir, ".claude.json"), `{"mcpServers": {"tool": {"command": "x", "args": ["`+home+`", "`+home+`/", "`+home+`/a"]}}}`)
+	writeFile(t, filepath.Join(m.ClaudeConfigDir, ".claude.json"), `{"mcpServers": {"tool": {"command": "x", "args": ["`+testutil.Esc(home)+`", "`+testutil.Esc(home)+`/", "`+testutil.Esc(home)+`/a"]}}}`)
 	if got, want := targets(plan(t, m)), []string{"~ claude mcp tool (adopt the server already there)"}; !slices.Equal(got, want) {
 		t.Fatalf("plan = %q, want %q", got, want)
 	}

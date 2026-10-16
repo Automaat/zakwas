@@ -9,6 +9,14 @@ import (
 	"strings"
 )
 
+// homeTrim is what ExpandHome strips from the end of a home directory.
+var homeTrim = func() string {
+	if filepath.Separator == '/' {
+		return "/"
+	}
+	return `/\`
+}()
+
 // ExpandHome replaces a leading "~" in v with home: "~" alone, or "~"
 // followed by "/", whose rest is kept as written. "~user/x", "~x" and a
 // tilde anywhere else stay. Without a home, v is returned as is.
@@ -16,12 +24,12 @@ func ExpandHome(home, v string) string {
 	if home == "" {
 		return v
 	}
-	base := strings.TrimRight(home, "/"+string(filepath.Separator))
+	base := strings.TrimRight(home, homeTrim)
 	if v == "~" {
 		return cmp.Or(base, "/")
 	}
 	if rest, ok := CutHome(v); ok {
-		return base + string(filepath.Separator) + filepath.FromSlash(rest)
+		return base + "/" + rest
 	}
 	return v
 }

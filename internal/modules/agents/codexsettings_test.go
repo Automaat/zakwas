@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestCodexSettingsLifecycle(t *testing.T) {
@@ -26,7 +27,7 @@ func TestCodexSettingsLifecycle(t *testing.T) {
 		t.Fatalf("plan wrote config: %v", err)
 	}
 	apply(t, changes)
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(path); err != nil || !testutil.SamePerm(info.Mode(), 0o600) {
 		t.Fatalf("mode = %v, %v", info, err)
 	}
 	if got := plan(t, m); len(got) != 0 {

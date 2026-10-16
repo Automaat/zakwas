@@ -109,6 +109,16 @@ type Env struct {
 	// AgentSession names the coding agent this run was started from, from
 	// DetectAgentSession; empty for a person's terminal.
 	AgentSession string
+	// GOOS is the platform the run plans for; empty means this one. Tests
+	// set it to run the macOS modules on any host.
+	GOOS string
+}
+
+func (e Env) goos() string {
+	if e.GOOS != "" {
+		return e.GOOS
+	}
+	return runtime.GOOS
 }
 
 func (e Env) now() time.Time {
@@ -623,7 +633,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		mods = append(mods, &launchd.Module{Jobs: cfg.Launchd, Paths: paths, Runner: env.Runner, UID: env.UID})
 	}
 	mods = append(mods, &defaults.Module{Defaults: cfg.Defaults, Runner: env.Runner})
-	return forPlatform(runtime.GOOS, cfg, env, mods)
+	return forPlatform(env.goos(), cfg, env, mods)
 }
 
 // absFromCwd makes an agent's config dir ($CLAUDE_CONFIG_DIR, $CODEX_HOME,

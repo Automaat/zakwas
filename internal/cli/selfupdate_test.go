@@ -12,9 +12,11 @@ import (
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 	"github.com/Automaat/zakwas/internal/selfupdate/selfupdatetest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestSelfUpdate(t *testing.T) {
+	selfUpdateAs(t, "darwin")
 	base := selfupdatetest.Serve(t, "1.2.3", runtime.GOARCH, "new binary")
 	tests := []struct {
 		name    string
@@ -55,6 +57,7 @@ func TestSelfUpdate(t *testing.T) {
 }
 
 func TestSelfUpdateRefusesManagedInstalls(t *testing.T) {
+	testutil.SkipOnWindows(t, "the install paths are POSIX (Homebrew and mise layouts)")
 	home := t.TempDir()
 	caskroom := t.TempDir()
 	t.Setenv("MISE_DATA_DIR", "")
@@ -118,6 +121,7 @@ func (g *ghFake) Run(_ context.Context, c runner.Cmd) (runner.Result, error) {
 }
 
 func TestSelfUpdateAttestation(t *testing.T) {
+	selfUpdateAs(t, "darwin")
 	tests := []struct {
 		name     string
 		version  string
@@ -154,5 +158,30 @@ func TestSelfUpdateAttestation(t *testing.T) {
 				t.Errorf("verify calls = %q, want one with %q: %v", gh.verified, wantArgs, tt.verified)
 			}
 		})
+	}
+}
+
+func selfUpdateAs(t *testing.T, goos string) {
+	t.Helper()
+	saved := selfUpdateGOOS
+	selfUpdateGOOS = goos
+	t.Cleanup(func() { selfUpdateGOOS = saved })
+}
+
+func TestSelfUpdateIsNotSupportedOnWindowsYet(t *testing.T) {
+	selfUpdateAs(t, "windows")
+	exe := filepath.Join(t.TempDir(), "zakwas.exe")
+	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := Env{Home: t.TempDir(), Runner: runnertest.New(), Version: "1.0.0", Executable: exe}
+
+	r := invoke(env, "", "self-update")
+
+	if r.code != ExitUsage || !strings.Contains(r.stderr, "not supported on Windows yet") || !strings.Contains(r.stderr, "releases") {
+		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
+	}
+	if got := read(t, exe); got != "old binary" {
+		t.Errorf("binary = %q", got)
 	}
 }

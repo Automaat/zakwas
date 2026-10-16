@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/selfupdate/selfupdatetest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 type release struct {
@@ -123,7 +124,7 @@ func TestReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(exe)
-	if err != nil || info.Mode().Perm() != 0o755 {
+	if err != nil || !testutil.SamePerm(info.Mode(), 0o755) {
 		t.Fatalf("stat = %v, %v", info, err)
 	}
 	if data, _ := os.ReadFile(exe); string(data) != "new" {
@@ -145,6 +146,7 @@ func TestNormalizeVersion(t *testing.T) {
 }
 
 func TestManagedBy(t *testing.T) {
+	testutil.SkipOnWindows(t, "the install paths are POSIX (Homebrew and mise layouts)")
 	home := "/Users/me"
 	tests := []struct {
 		name string

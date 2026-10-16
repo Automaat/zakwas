@@ -9,8 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"reflect"
+	"runtime"
 	"slices"
 
 	"github.com/Automaat/zakwas/internal/config"

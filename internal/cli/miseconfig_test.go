@@ -9,6 +9,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const reviewConfig = `[settings]
@@ -130,15 +131,16 @@ func TestGlobalConfigPath(t *testing.T) {
 		m.Source.Path = path
 		return m
 	}
-	tools := map[string][]miseTool{"a": {src("/x.toml")}, "b": {src("/y.toml"), src("/y.toml")}, "c": {src("/z.tool-versions")}}
-	if got := globalConfigPath(tools, "/home"); got != "/y.toml" {
-		t.Errorf("got %q, want /y.toml", got)
+	a := testutil.Abs
+	tools := map[string][]miseTool{"a": {src(a("/x.toml"))}, "b": {src(a("/y.toml")), src(a("/y.toml"))}, "c": {src(a("/z.tool-versions"))}}
+	if got := globalConfigPath(tools, a("/home")); got != a("/y.toml") {
+		t.Errorf("got %q, want %s", got, a("/y.toml"))
 	}
-	if got := globalConfigPath(nil, "/home"); got != "/home/.config/mise/config.toml" {
-		t.Errorf("got %q", got)
+	if got, want := globalConfigPath(nil, a("/home")), filepath.Join(a("/home"), ".config", "mise", "config.toml"); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
-	t.Setenv("MISE_GLOBAL_CONFIG_FILE", "/custom.toml")
-	if got := globalConfigPath(nil, "/home"); got != "/custom.toml" {
+	t.Setenv("MISE_GLOBAL_CONFIG_FILE", a("/custom.toml"))
+	if got := globalConfigPath(nil, a("/home")); got != a("/custom.toml") {
 		t.Errorf("got %q", got)
 	}
 }

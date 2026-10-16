@@ -127,6 +127,11 @@ type MCPServer struct {
 }
 
 // IsHTTP reports whether the server is reached by URL rather than started.
+func isZakwasCommand(command string) bool {
+	base := command[strings.LastIndexAny(command, `/\\`)+1:]
+	return base == "zakwas" || strings.EqualFold(base, "zakwas.exe")
+}
+
 func (s MCPServer) IsHTTP() bool { return s.URL != "" }
 
 // MCPApplyTool is the zakwas MCP tool that applies a proposal.
@@ -136,7 +141,7 @@ const MCPApplyTool = "zakwas_apply"
 // user about on each call, in the providers that can ask per tool. The
 // only one is MCPApplyTool of a `zakwas mcp --enable-apply` server.
 func (s MCPServer) PromptTools() []string {
-	if s.IsHTTP() || filepath.Base(s.Command) != "zakwas" || len(s.Args) == 0 || s.Args[0] != "mcp" {
+	if s.IsHTTP() || !isZakwasCommand(s.Command) || len(s.Args) == 0 || s.Args[0] != "mcp" {
 		return nil
 	}
 	for _, arg := range s.Args[1:] {
@@ -1127,7 +1132,7 @@ func (a *Agents) validateSkills(checkProviders func(what string, list, allowed [
 			}
 			return true
 		}
-		clean := filepath.Clean(s.Path)
+		clean := filepath.ToSlash(filepath.Clean(s.Path))
 		switch {
 		case strings.TrimSpace(s.Path) == "":
 			fail("path is required")
@@ -1150,7 +1155,7 @@ func (a *Agents) validateSkills(checkProviders func(what string, list, allowed [
 				fail("git %q must be a repository, without a leading '-' or a '#ref'; set ref instead", s.Git)
 			}
 			switch {
-			case filepath.IsAbs(s.Path) || strings.HasPrefix(s.Path, "~") || clean == ".." || strings.HasPrefix(clean, "../"):
+			case filepath.IsAbs(s.Path) || strings.HasPrefix(s.Path, "/") || strings.HasPrefix(s.Path, "~") || clean == ".." || strings.HasPrefix(clean, "../"):
 				fail("path %q must be relative to the root of the git repository", s.Path)
 			case slices.ContainsFunc(strings.Split(clean, "/"), func(e string) bool { return strings.EqualFold(e, ".git") }):
 				fail("path %q goes into .git", s.Path)

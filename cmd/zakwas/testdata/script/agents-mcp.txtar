@@ -38,7 +38,7 @@ stdout 'No changes'
 cp zakwas-conflict.yaml zakwas.yaml
 cp claude-conflict.json claude/.claude.json
 ! zakwas plan --only agents
-stdout 'claude: mcp: server "docs" is already in .*/claude/.claude.json and differs from zakwas.yaml in command, env'
+stdout 'claude: mcp: server "docs" is already in .*[/\\]claude[/\\]\.claude\.json and differs from zakwas.yaml in command, env'
 ! stdout hunter2
 ! stderr hunter2
 

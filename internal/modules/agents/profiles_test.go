@@ -291,7 +291,7 @@ func TestProfilesBackUpEditedFileOnRemoval(t *testing.T) {
 func TestProfilesFailAnOpencodeTemplateName(t *testing.T) {
 	m := profileModule(t, profileAgents())
 	writeFile(t, filepath.Join(m.Paths.Root, "review.md"), "x")
-	writeFile(t, filepath.Join(m.Paths.Root, "opencode.json.tmpl"), `{"agent": {"review": {"description": "mine"}}, "x": "{{ .Home }}"}`)
+	writeFile(t, filepath.Join(m.Paths.Root, "opencode.json.tmpl"), `{"agent": {"review": {"description": "mine"}}, "x": {{ .Home | printf "%q" }}}`)
 	m.TemplateFiles = []config.TemplateFile{{Src: "opencode.json.tmpl", Dst: "~/.config/opencode/opencode.json"}}
 	changes, err := m.Plan(context.Background())
 	if err == nil || !strings.Contains(err.Error(), `profile "review" is also defined by the opencode template`) {

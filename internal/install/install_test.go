@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func newInstaller(t *testing.T, immutable bool) (*Installer, string) {
@@ -79,7 +81,7 @@ func assertProtected(t *testing.T, path, body string, perm os.FileMode, immutabl
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != perm {
+	if !testutil.SamePerm(info.Mode(), perm) {
 		t.Errorf("mode = %o, want %o", info.Mode().Perm(), perm)
 	}
 	if locked, _ := isImmutable(path); immutableSupported && locked != immutable {
@@ -196,7 +198,7 @@ func TestUpdates(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantDetail: "mode 644 → 444",
+			wantDetail: "mode " + writableMode() + " → 444",
 		},
 	}
 	for _, tt := range tests {
@@ -344,7 +346,7 @@ func TestBackupRefusesSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o444 {
+	if !testutil.SamePerm(info.Mode(), 0o444) {
 		t.Errorf("target mode = %o, want 444", info.Mode().Perm())
 	}
 	if _, err := os.Lstat(backupName(dst, 0)); !errors.Is(err, fs.ErrNotExist) {
@@ -407,7 +409,7 @@ func TestSymlinkedParentRefused(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "is a symlink; remove it") {
 				t.Fatalf("err = %v", err)
 			}
-			if info, err := os.Stat(filepath.Join(repo, "d/f")); err == nil && info.Mode().Perm() != 0o644 {
+			if info, err := os.Stat(filepath.Join(repo, "d/f")); err == nil && !testutil.SamePerm(info.Mode(), 0o644) {
 				t.Errorf("repo source mode changed to %o", info.Mode().Perm())
 			}
 		})
@@ -612,4 +614,11 @@ func TestPlanSharesStateAcrossConcurrentModules(t *testing.T) {
 	if in.State == nil {
 		t.Error("state not loaded")
 	}
+}
+
+func writableMode() string {
+	if runtime.GOOS == "windows" {
+		return "666"
+	}
+	return "644"
 }

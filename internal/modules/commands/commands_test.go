@@ -11,6 +11,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 var (
@@ -98,6 +99,7 @@ func TestRunFailure(t *testing.T) {
 }
 
 func TestHungCheckTimesOut(t *testing.T) {
+	testutil.SkipOnWindows(t, "the test hangs a check with sh and sleep")
 	defer func(d time.Duration) { CheckTimeout = d }(CheckTimeout)
 	CheckTimeout = 100 * time.Millisecond
 

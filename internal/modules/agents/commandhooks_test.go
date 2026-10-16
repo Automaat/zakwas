@@ -12,9 +12,11 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestCommandHooksConvergeAndRemove(t *testing.T) {
+	testutil.SkipOnWindows(t, "the opencode hook plugin runs hooks through /bin/sh, not supported on Windows yet")
 	home := t.TempDir()
 	claudePath := filepath.Join(home, ".claude", "settings.json")
 	writeHookTestFile(t, claudePath, `{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"personal-hook"}]}]}}`)
@@ -151,7 +153,7 @@ func TestCommandHooksFollowSettingsSymlink(t *testing.T) {
 func TestOpencodeCommandHooksXDGPath(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
-	m := &Module{Paths: config.Paths{Home: os.Getenv("HOME")}}
+	m := &Module{Paths: config.Paths{Home: envHome()}}
 	want := filepath.Join(xdg, "opencode", "plugins", "zakwas-hooks.js")
 	if got := m.opencodeCommandHooksPath(); got != want {
 		t.Fatalf("OpenCode plugin path = %s, want %s", got, want)
@@ -164,6 +166,7 @@ func TestOpencodeCommandHooksXDGPath(t *testing.T) {
 }
 
 func TestOpencodeCommandHooksRecoverPendingWrite(t *testing.T) {
+	testutil.SkipOnWindows(t, "the opencode hook plugin runs hooks through /bin/sh, not supported on Windows yet")
 	home := t.TempDir()
 	m := &Module{Paths: config.Paths{Home: home}, Runner: runnertest.New()}
 	want := []commandHookRegistration{{Event: "beforeTool", Command: "/bin/check"}}

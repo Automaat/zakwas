@@ -12,6 +12,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func skillMD(name string) string {
@@ -49,6 +50,7 @@ func skillRepo(t *testing.T, skills map[string]string) func(string) {
 }
 
 func TestSkillsLinkEveryProvider(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{
 		Providers: []string{config.ProviderClaude, config.ProviderCodex, config.ProviderOpencode},
 		Skills:    []config.Skill{{Path: "skills/mine"}, {Path: "~/extra/other"}},
@@ -85,6 +87,7 @@ func TestSkillsLinkEveryProvider(t *testing.T) {
 }
 
 func TestSkillsClaudeOnlyLeavesSharedDir(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{Skills: []config.Skill{{Path: "skills/mine"}}})
 	dir := localSkill(t, m, "skills/mine", "mine")
 	apply(t, plan(t, m))
@@ -96,6 +99,7 @@ func TestSkillsClaudeOnlyLeavesSharedDir(t *testing.T) {
 }
 
 func TestSkillsProvidersOfASkill(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{
 		Providers: []string{config.ProviderClaude, config.ProviderCodex},
 		Skills:    []config.Skill{{Path: "skills/a", Providers: []string{config.ProviderCodex}}, {Path: "skills/b", Providers: []string{config.ProviderClaude}}},
@@ -114,6 +118,7 @@ func TestSkillsProvidersOfASkill(t *testing.T) {
 }
 
 func TestSkillsOpencodeByDefaultIsBestEffort(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Path: "skills/mine"}}})
 	m.Agents.Providers = nil
 	localSkill(t, m, "skills/mine", "mine")
@@ -129,6 +134,7 @@ func TestSkillsOpencodeByDefaultIsBestEffort(t *testing.T) {
 }
 
 func TestSkillsFailTheirProvider(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	tests := []struct {
 		name  string
 		setup func(t *testing.T, m *Module)
@@ -216,6 +222,7 @@ func TestSkillsFailTheirProvider(t *testing.T) {
 }
 
 func TestSkillsFailureLeavesOtherProviders(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{
 		Providers: []string{config.ProviderClaude, config.ProviderCodex},
 		Skills:    []config.Skill{{Path: "skills/mine"}},
@@ -232,6 +239,7 @@ func TestSkillsFailureLeavesOtherProviders(t *testing.T) {
 }
 
 func TestSkillsLeaveAnEquivalentUserLinkAlone(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{Skills: []config.Skill{{Path: "skills/mine"}}})
 	dir := localSkill(t, m, "skills/mine", "mine")
 	link := filepath.Join(m.Paths.Home, ".claude", "skills", "mine")
@@ -250,6 +258,7 @@ func TestSkillsLeaveAnEquivalentUserLinkAlone(t *testing.T) {
 }
 
 func TestSkillsFollowAMovedSource(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{Skills: []config.Skill{{Path: "old/mine"}}})
 	oldDir := localSkill(t, m, "old/mine", "mine")
 	apply(t, plan(t, m))
@@ -268,6 +277,7 @@ func TestSkillsFollowAMovedSource(t *testing.T) {
 }
 
 func TestSkillsRemoveOnlyTheirOwnLinks(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{
 		Providers: []string{config.ProviderClaude, config.ProviderCodex},
 		Skills:    []config.Skill{{Path: "skills/a"}, {Path: "skills/b"}, {Path: "skills/c"}},
@@ -329,6 +339,7 @@ func TestSkillsRemoveOnlyTheirOwnLinks(t *testing.T) {
 }
 
 func TestSkillsGitSource(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{
 		Providers: []string{config.ProviderClaude, config.ProviderCodex},
 		Skills: []config.Skill{
@@ -388,6 +399,7 @@ func TestSkillsRefreshSkipsUnclonedSources(t *testing.T) {
 }
 
 func TestSkillsRefreshReportsAFailedPull(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "pdf"}}})
 	r.repos["https://github.com/o/skills.git"] = skillRepo(t, map[string]string{"pdf": "pdf"})
 	apply(t, plan(t, m))
@@ -398,6 +410,7 @@ func TestSkillsRefreshReportsAFailedPull(t *testing.T) {
 }
 
 func TestSkillsGitNameMismatchLinksNothing(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "good"}, {Git: "o/skills", Path: "bad"}}})
 	r.repos["https://github.com/o/skills.git"] = skillRepo(t, map[string]string{"good": "good", "bad": "worse"})
 	err := runApply(plan(t, m))
@@ -413,6 +426,7 @@ func TestSkillsGitNameMismatchLinksNothing(t *testing.T) {
 }
 
 func TestSkillsGitSkillOutsideItsRepoFails(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "evil"}}})
 	outside := t.TempDir()
 	writeFile(t, filepath.Join(outside, "SKILL.md"), skillMD("evil"))
@@ -435,6 +449,7 @@ func TestSkillsGitNeedsGit(t *testing.T) {
 }
 
 func TestSkillsFailedCloneKeepsNothing(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/gone", Path: "pdf"}}})
 	if err := runApply(plan(t, m)); err == nil {
 		t.Fatal("apply of an unknown repository succeeded")
@@ -448,6 +463,7 @@ func TestSkillsFailedCloneKeepsNothing(t *testing.T) {
 }
 
 func TestSkillsDropClonesNoSkillUses(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "pdf"}}})
 	r.repos["https://github.com/o/skills.git"] = skillRepo(t, map[string]string{"pdf": "pdf"})
 	apply(t, plan(t, m))
@@ -514,6 +530,7 @@ func TestSkillMDName(t *testing.T) {
 }
 
 func TestSkillsMovedToAFailingSourceKeepTheOldClone(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/a", Path: "pdf"}}})
 	r.repos["https://github.com/o/a.git"] = skillRepo(t, map[string]string{"pdf": "pdf"})
 	apply(t, plan(t, m))
@@ -539,6 +556,7 @@ func TestSkillsMovedToAFailingSourceKeepTheOldClone(t *testing.T) {
 }
 
 func TestSkillsSharedCloneSurvivesAFailingProvider(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{
 		Providers: []string{config.ProviderClaude, config.ProviderCodex},
 		Skills:    []config.Skill{{Git: "o/skills", Path: "pdf"}},
@@ -555,6 +573,7 @@ func TestSkillsSharedCloneSurvivesAFailingProvider(t *testing.T) {
 }
 
 func TestSkillsForeignLinkFailsBeforeTheClone(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "pdf"}}})
 	writeFile(t, filepath.Join(m.Paths.Home, ".claude", "skills", "pdf", "SKILL.md"), skillMD("pdf"))
 	changes, err := m.Plan(context.Background())
@@ -567,6 +586,7 @@ func TestSkillsForeignLinkFailsBeforeTheClone(t *testing.T) {
 }
 
 func TestSkillsBestEffortSkipsAForeignDirWhenApplying(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newSkills(t, config.Agents{Skills: []config.Skill{{Git: "o/skills", Path: "pdf"}}})
 	m.Agents.Providers = nil
 	r.Missing("codex")

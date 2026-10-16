@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const (
@@ -153,7 +155,7 @@ mise:
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	if info, err := os.Stat(filepath.Join(repo, "dotfiles/local/bin/tool with space")); err != nil || info.Mode().Perm() != 0o755 {
+	if info, err := os.Stat(filepath.Join(repo, "dotfiles/local/bin/tool with space")); err != nil || !testutil.SamePerm(info.Mode(), 0o755) {
 		t.Errorf("executable bit not kept: %v %v", info, err)
 	}
 	for _, skipped := range []string{"dotfiles/config/git/.git", "dotfiles/config/git/link"} {
@@ -273,9 +275,9 @@ func TestInitRejects(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "not a directory"},
-		{"outside home", func(_, repo string) []string { return []string{repo, "--add", "/etc/hosts"} }, nil, "not inside $HOME"},
+		{"outside home", func(_, repo string) []string { return []string{repo, "--add", testutil.Abs("/etc/hosts")} }, nil, "not inside $HOME"},
 		{"home itself", func(home, repo string) []string { return []string{repo, "--add", home} }, nil, "not inside $HOME"},
-		{"missing", func(_, repo string) []string { return []string{repo, "--add", "~/.nope"} }, nil, "no such file"},
+		{"missing", func(_, repo string) []string { return []string{repo, "--add", "~/.nope"} }, nil, noSuchFile},
 		{"dot twins", func(_, repo string) []string { return []string{repo, "--add", "~/.zshrc", "--add", "~/zshrc"} }, func(t *testing.T, home, _ string) {
 			if err := os.WriteFile(filepath.Join(home, "zshrc"), nil, 0o644); err != nil {
 				t.Fatal(err)
@@ -388,3 +390,10 @@ func TestInitRollsBackInvalidMiseConfig(t *testing.T) {
 		t.Errorf("%s left behind", filepath.Dir(repo))
 	}
 }
+
+var noSuchFile = func() string {
+	if runtime.GOOS == "windows" {
+		return "cannot find the file"
+	}
+	return "no such file"
+}()

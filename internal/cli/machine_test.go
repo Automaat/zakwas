@@ -30,7 +30,7 @@ func TestPlanJSON(t *testing.T) {
 	}
 	var links *struct{ status, action, target string }
 	for _, m := range doc.Modules {
-		if m.Name == "links" && len(m.Changes) == 1 {
+		if m.Name == linkModule && len(m.Changes) == 1 {
 			links = &struct{ status, action, target string }{m.Status, m.Changes[0].Action, m.Changes[0].Target}
 		}
 	}
@@ -66,7 +66,7 @@ func TestApplyJSONEvents(t *testing.T) {
 			t.Fatalf("line %q: %v", sc.Text(), err)
 		}
 		types = append(types, e.Type)
-		if e.Type == "step_done" && (e.Change == nil || e.Change.Module != "links" || e.Step != 1 || e.Total != 1) {
+		if e.Type == "step_done" && (e.Change == nil || e.Change.Module != linkModule || e.Step != 1 || e.Total != 1) {
 			t.Errorf("step_done = %+v", e)
 		}
 		if e.Type == "summary" && (e.Result == nil || e.Result.Applied != 1) {
@@ -83,7 +83,7 @@ func TestFlagConflicts(t *testing.T) {
 		{"apply", "--json"},
 		{"check", "-out", "p.json"},
 		{"plan", "-plan", "p.json"},
-		{"apply", "-plan", "p.json", "--only", "links"},
+		{"apply", "-plan", "p.json", "--only", linkModule},
 	} {
 		env, _ := setup(t, linksOnly)
 		if r := invoke(env, "", args...); r.code != ExitUsage {
@@ -120,7 +120,7 @@ func TestSavedPlan(t *testing.T) {
 func TestSavedPlanKeepsOnly(t *testing.T) {
 	env, _ := setup(t, linksOnly)
 	saved := filepath.Join(t.TempDir(), "plan.json")
-	if r := invoke(env, "", "plan", "--only", "links", "-out", saved); r.code != ExitOK {
+	if r := invoke(env, "", "plan", "--only", linkModule, "-out", saved); r.code != ExitOK {
 		t.Fatalf("%+v", r)
 	}
 	r := invoke(env, "", "apply", "-plan", saved)

@@ -43,6 +43,7 @@ func TestCompletionCoversEverything(t *testing.T) {
 
 func TestCompletionModulesMatchCLI(t *testing.T) {
 	env, _ := setup(t, "brew: {file: Brewfile}\nmise: {config: m.toml}\nagents: {prune: true}\nlaunchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]\n")
+	env.GOOS = "darwin"
 	cfg, err := loadConfig("", env.Cwd, env.Home)
 	if err != nil {
 		t.Fatal(err)

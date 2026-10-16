@@ -13,6 +13,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const fakeBinary = "#!/bin/sh\necho mise\n"
@@ -67,7 +68,7 @@ func TestBootstrapInstallsMiseThenTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o755 {
+	if !testutil.SamePerm(info.Mode(), 0o755) {
 		t.Errorf("mode %v, want 0755", info.Mode().Perm())
 	}
 	if data, _ := os.ReadFile(bin); string(data) != fakeBinary {

@@ -12,6 +12,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const (
@@ -72,7 +73,7 @@ func TestCodexConvergeFromScratch(t *testing.T) {
 	}
 	assertCodexReadOnly(t, fake)
 
-	fake.OnOK("codex plugin marketplace add "+localDir+" --json", `{"marketplaceName":"local","installedRoot":"`+localDir+`","alreadyAdded":false}`)
+	fake.OnOK("codex plugin marketplace add "+localDir+" --json", `{"marketplaceName":"local","installedRoot":"`+testutil.Esc(localDir)+`","alreadyAdded":false}`)
 	fake.OnOK("codex plugin marketplace add o/sai --ref v1 --json", `{"marketplaceName":"sai","installedRoot":"/x","alreadyAdded":false}`)
 	fake.OnOK("codex plugin add humanize@sai --json", `{"pluginId":"humanize@sai","version":"2.5.0"}`)
 	apply(t, changes)
@@ -87,14 +88,14 @@ ref = "v1"
 
 [marketplaces.local]
 source_type = "local"
-source = "`+localDir+`"
+source = "`+testutil.Esc(localDir)+`"
 
 [plugins."humanize@sai"]
 enabled = true
 `)
 	fake = runnertest.New()
 	m.Runner = fake
-	fake.OnOK(codexMarketList, `{"marketplaces": [{"name":"sai","root":"/x","marketplaceSource":{"sourceType":"git","source":"https://github.com/O/sai.git"}},{"name":"local","root":"`+localDir+`","marketplaceSource":{"sourceType":"local","source":"`+localDir+`"}}]}`)
+	fake.OnOK(codexMarketList, `{"marketplaces": [{"name":"sai","root":"/x","marketplaceSource":{"sourceType":"git","source":"https://github.com/O/sai.git"}},{"name":"local","root":"`+testutil.Esc(localDir)+`","marketplaceSource":{"sourceType":"local","source":"`+testutil.Esc(localDir)+`"}}]}`)
 	fake.OnOK(codexPluginList, `{"installed": [{"pluginId":"humanize@sai","version":"2.5.0","installed":true,"enabled":true}], "available": []}`)
 	if again := plan(t, m); len(again) != 0 {
 		t.Errorf("second plan not empty: %v", targets(again))
@@ -119,8 +120,8 @@ func TestCodexEnableAndUpgrade(t *testing.T) {
 			Marketplaces: map[string]config.Marketplace{"sai": {Source: root}},
 			Plugins:      []config.Plugin{{ID: "a@sai"}, {ID: "b@sai"}, {ID: "c@sai"}, {ID: "d@sai"}, {ID: "e@sai"}},
 		})
-		writeFile(t, m.codex().configPath(), "[marketplaces.sai]\nsource_type = \"local\"\nsource = \""+root+"\"\n")
-		fake.OnOK(codexMarketList, `{"marketplaces": [{"name":"sai","root":"`+root+`"}]}`)
+		writeFile(t, m.codex().configPath(), "[marketplaces.sai]\nsource_type = \"local\"\nsource = \""+testutil.Esc(root)+"\"\n")
+		fake.OnOK(codexMarketList, `{"marketplaces": [{"name":"sai","root":"`+testutil.Esc(root)+`"}]}`)
 		fake.OnOK(codexPluginList, `{"installed": [
 			{"pluginId":"a@sai","version":"1.0.0","enabled":false},
 			{"pluginId":"b@sai","version":"2.0.0","enabled":true},
@@ -344,7 +345,7 @@ func TestCodexBrokenLocalMarketplace(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "gone")
 	cursor := t.TempDir()
 	writeFile(t, filepath.Join(cursor, ".cursor-plugin", "marketplace.json"), `{"name":"cur","plugins":[]}`)
-	writeFile(t, m.codex().configPath(), "[marketplaces.gone]\nsource_type = \"local\"\nsource = \""+gone+"\"\n\n[marketplaces.cur]\nsource_type = \"local\"\nsource = \""+cursor+"\"\n")
+	writeFile(t, m.codex().configPath(), "[marketplaces.gone]\nsource_type = \"local\"\nsource = \""+testutil.Esc(gone)+"\"\n\n[marketplaces.cur]\nsource_type = \"local\"\nsource = \""+testutil.Esc(cursor)+"\"\n")
 	fake.On(codexMarketList, runner.Result{ExitCode: 1, Stderr: "Error: failed to load marketplace(s)"})
 	_, err := m.Plan(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "failed to load") || !strings.Contains(err.Error(), "codex plugin marketplace remove gone") {
@@ -357,7 +358,7 @@ func TestCodexBrokenLocalMarketplace(t *testing.T) {
 	m.Agents.Prune = false
 	fake = runnertest.New()
 	m.Runner = fake
-	fake.OnOK(codexMarketList, `{"marketplaces": [{"name":"cur","root":"`+cursor+`"}]}`)
+	fake.OnOK(codexMarketList, `{"marketplaces": [{"name":"cur","root":"`+testutil.Esc(cursor)+`"}]}`)
 	fake.OnOK(codexPluginList, `{"installed": [], "available": []}`)
 	if _, err := m.Plan(context.Background()); err != nil {
 		t.Errorf("codex lists fine, so no pre-check may fail the plan: %v", err)

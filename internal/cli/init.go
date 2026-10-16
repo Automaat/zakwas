@@ -199,8 +199,8 @@ func (p *initPlan) check(adds []string, cwd string) error {
 }
 
 func overlapsPath(a, b string) bool {
-	sep := string(filepath.Separator)
-	return a == b || strings.HasPrefix(a, b+sep) || strings.HasPrefix(b, a+sep)
+	a, b = filepath.ToSlash(a), filepath.ToSlash(b)
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 func (p *initPlan) addition(path string) (addition, error) {

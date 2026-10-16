@@ -110,8 +110,8 @@ prefix_rule(pattern=["git", "push"], decision="allow")
 templates
   + ~/.config/opencode/opencode.json
 agents
-  ~ $WORK/claude/settings.json  permissions +1 allow, +1 deny
-  + $WORK/codex/rules/zakwas.rules  permissions +3 allow, +1 prompt, +1 forbidden
+  ~ $WORK${/}claude${/}settings.json  permissions +1 allow, +1 deny
+  + $WORK${/}codex${/}rules${/}zakwas.rules  permissions +3 allow, +1 prompt, +1 forbidden
 
 Plan: 2 to add, 1 to change, 0 to remove, 0 to run.
 -- settings.golden --
@@ -144,18 +144,18 @@ Plan: 2 to add, 1 to change, 0 to remove, 0 to run.
 }
 -- plan-update.golden --
 agents
-  ~ $WORK/claude/settings.json  permissions -1 allow, +1 allow
-  ~ $WORK/codex/rules/zakwas.rules  permissions -2 allow, +1 allow
+  ~ $WORK${/}claude${/}settings.json  permissions -1 allow, +1 allow
+  ~ $WORK${/}codex${/}rules${/}zakwas.rules  permissions -2 allow, +1 allow
 
 Plan: 0 to add, 2 to change, 0 to remove, 0 to run.
 -- plan-none.golden --
 templates
   ~ ~/.config/opencode/opencode.json  content
 agents
-  ~ $WORK/claude/settings.json  permissions -1 allow, -1 deny
-  - $WORK/codex/rules/zakwas.rules  permissions -2 allow, -1 prompt, -1 forbidden
+  ~ $WORK${/}claude${/}settings.json  permissions -1 allow, -1 deny
+  - $WORK${/}codex${/}rules${/}zakwas.rules  permissions -2 allow, -1 prompt, -1 forbidden
 
-⚠ destructive: $WORK/codex/rules/zakwas.rules
+⚠ destructive: $WORK${/}codex${/}rules${/}zakwas.rules
 
 Plan: 0 to add, 2 to change, 1 to remove, 0 to run.
 -- settings-user.golden --

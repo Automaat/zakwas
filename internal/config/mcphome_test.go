@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestExpandHome(t *testing.T) {
@@ -111,7 +113,7 @@ func TestMCPServerHomeError(t *testing.T) {
 		home string
 		bad  bool
 	}{
-		{"absolute", withRef, "/Users/me", false},
+		{"absolute", withRef, testutil.Abs("/Users/me"), false},
 		{"relative", withRef, "rel2", true},
 		{"dot", withRef, ".", true},
 		{"empty", withRef, "", true},

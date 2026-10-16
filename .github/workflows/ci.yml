@@ -189,3 +189,52 @@ jobs:
 
       - name: test
         run: go test ./...
+
+      - name: install.ps1 passes PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Write-Warning 'PSScriptAnalyzer is not on this runner; only the syntax was checked'
+            exit 0
+          }
+          $findings = Invoke-ScriptAnalyzer -Path install.ps1 -Severity Warning, Error
+          $findings | Format-Table
+          if ($findings) { exit 1 }
+
+      # A local server stands in for GitHub, so the test makes no outside call.
+      - name: install.ps1 installs a release and rejects a bad checksum
+        shell: pwsh
+        run: |
+          $version = '9.9.9'
+          $arch = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'amd64' }
+          $asset = "zakwas_${version}_windows_$arch.zip"
+          $site = Join-Path $env:RUNNER_TEMP 'site'
+          $release = Join-Path $site "download/v$version"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $exe = Join-Path $env:RUNNER_TEMP 'zakwas.exe'
+          go build -ldflags "-X main.version=$version" -o $exe ./cmd/zakwas
+          Compress-Archive -Path $exe -DestinationPath (Join-Path $release $asset)
+          $hash = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $release $asset)).Hash.ToLowerInvariant()
+          $sums = Join-Path $release 'checksums.txt'
+          "$hash  $asset" | Set-Content -Encoding ascii -Path $sums
+          $server = Start-Process -PassThru -WindowStyle Hidden -FilePath python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $site
+          try {
+            Start-Sleep -Seconds 3
+            foreach ($shell in 'pwsh', 'powershell') {
+              $dir = Join-Path $env:RUNNER_TEMP "bin-$shell"
+              & $shell -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $dir
+              if ($LASTEXITCODE -ne 0) { throw "$shell install failed" }
+              $got = & (Join-Path $dir 'zakwas.exe') version
+              if ($got -ne "zakwas $version") { throw "$shell installed '$got'" }
+            }
+            ('0' * 64) + "  $asset" | Set-Content -Encoding ascii -Path $sums
+            $dir = Join-Path $env:RUNNER_TEMP 'bin-bad'
+            & pwsh -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $dir
+            if ($LASTEXITCODE -eq 0) { throw 'install.ps1 accepted a bad checksum' }
+            if (Test-Path (Join-Path $dir 'zakwas.exe')) { throw 'a bad download was installed' }
+          } finally {
+            Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          }

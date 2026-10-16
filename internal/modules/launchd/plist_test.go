@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestRender(t *testing.T) {
+	testutil.SkipOnWindows(t, "the plist fixtures hold POSIX paths; launchd is macOS only")
 	paths := config.Paths{Home: "/Users/me", Root: "/repo"}
 	tests := []struct {
 		name string

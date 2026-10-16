@@ -11,6 +11,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestFilesAndDirectories(t *testing.T) {
@@ -64,7 +65,7 @@ func TestFilesAndDirectories(t *testing.T) {
 	}
 	for rel, mode := range want {
 		info, err := os.Lstat(filepath.Join(home, rel))
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != mode {
+		if err != nil || !info.Mode().IsRegular() || !testutil.SamePerm(info.Mode(), mode) {
 			t.Errorf("%s: %v, %v; want regular file %o", rel, info, err, mode)
 		}
 	}

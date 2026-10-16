@@ -3,9 +3,12 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func writeConfig(t *testing.T, body string) string {
@@ -42,7 +45,7 @@ system:
 commands:
   - {name: n, check: "true", run: "true"}
 `)
-	c, err := Load(p, "/h")
+	c, err := Load(p, testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +78,7 @@ func TestLoadResolvesSymlinkedRoot(t *testing.T) {
 	if err := os.Symlink(real, alias); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Load(filepath.Join(alias, FileName), "/h")
+	c, err := Load(filepath.Join(alias, FileName), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +303,7 @@ commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Load(writeConfig(t, tt.body), "/h")
+			_, err := Load(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h"))
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -394,7 +397,7 @@ agents:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Load(writeConfig(t, tt.body), "/h"); err != nil {
+			if _, err := Load(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h")); err != nil {
 				t.Error(err)
 			}
 		})
@@ -420,7 +423,7 @@ agents:
     - a@sai
     - b@cl
     - {id: c@sai, providers: [opencode]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,21 +468,22 @@ func TestFind(t *testing.T) {
 }
 
 func TestPaths(t *testing.T) {
-	p := Paths{Home: "/h", Root: "/r"}
+	a := testutil.Abs
+	p := Paths{Home: a("/h"), Root: a("/r")}
 	tests := []struct {
 		fn   func(string) string
 		in   string
 		want string
 	}{
-		{p.Dst, "~", "/h"},
-		{p.Dst, "~/.zshrc", "/h/.zshrc"},
-		{p.Dst, "/etc/x", "/etc/x"},
+		{p.Dst, "~", a("/h")},
+		{p.Dst, "~/.zshrc", a("/h/.zshrc")},
+		{p.Dst, a("/etc/x"), a("/etc/x")},
 		{p.Dst, "~user/x", "~user/x"},
-		{p.Src, "dotfiles/a", "/r/dotfiles/a"},
-		{p.Src, "/abs", "/abs"},
-		{p.Pretty, "/h/.zshrc", "~/.zshrc"},
-		{p.Pretty, "/hx/y", "/hx/y"},
-		{p.Pretty, "/r/a", "/r/a"},
+		{p.Src, "dotfiles/a", a("/r/dotfiles/a")},
+		{p.Src, a("/abs"), a("/abs")},
+		{p.Pretty, a("/h/.zshrc"), "~/.zshrc"},
+		{p.Pretty, a("/hx/y"), a("/hx/y")},
+		{p.Pretty, a("/r/a"), a("/r/a")},
 	}
 	for _, tt := range tests {
 		if got := tt.fn(tt.in); got != tt.want {
@@ -491,7 +495,7 @@ func TestPaths(t *testing.T) {
 func TestPermissionsFor(t *testing.T) {
 	load := func(t *testing.T, body string) *Agents {
 		t.Helper()
-		c, err := Load(writeConfig(t, body), "/h")
+		c, err := Load(writeConfig(t, body), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -548,7 +552,7 @@ agents:
 func TestGeminiIsOptIn(t *testing.T) {
 	load := func(yaml string) *Agents {
 		t.Helper()
-		c, err := Load(writeConfig(t, yaml), "/h")
+		c, err := Load(writeConfig(t, yaml), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -601,7 +605,7 @@ agents:
     b: {command: b}
     a: {command: a, providers: [codex, opencode]}
     c: {url: 'https://e.com', providers: [claude]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,7 +637,7 @@ agents:
     - skills/b
     - {path: skills/a, providers: [codex, opencode]}
     - {git: o/r, path: x/c, providers: [claude]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +682,7 @@ func TestAgentsGuard(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := Load(writeConfig(t, tt.yaml), "/home/u")
+			cfg, err := Load(writeConfig(t, tt.yaml), testutil.Abs("/home/u"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -805,4 +809,11 @@ func TestPathsOverlapFollowsSymlinkedDirs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func winAbs(body string) string {
+	if runtime.GOOS != "windows" {
+		return body
+	}
+	return strings.ReplaceAll(body, "dst: /", "dst: C:/")
 }

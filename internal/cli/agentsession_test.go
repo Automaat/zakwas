@@ -33,7 +33,7 @@ func TestDetectAgentSession(t *testing.T) {
 	}
 }
 
-const guardedLinks = "agents:\n  providers: [opencode]\n" + linksOnly
+var guardedLinks = "agents:\n  providers: [opencode]\n" + linksOnly
 
 func TestGuardRefusesApplyAndUpgradeFromAnAgent(t *testing.T) {
 	for _, cmd := range []string{"apply", "upgrade"} {

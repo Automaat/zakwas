@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func capture(t *testing.T, m *Module) []Candidate {
@@ -70,8 +71,8 @@ func TestCaptureClaude(t *testing.T) {
   "literal": {"type": "stdio", "command": "lit", "env": {"API_KEY": "hunter2"}},
   "keyed": {"type": "http", "url": "https://example.com/mcp?key=hunter2"}
 }}`)
-	writeFile(t, m.mcpStatePath(), `{"claude": {"`+m.claudeJSONPath()+`": {"owned": "abc"}}}`)
-	writeFile(t, m.permissionsStatePath(), `{"claude": {"`+c.settingsPath()+`": {"allow": ["Bash(owned:*)"]}}}`)
+	writeFile(t, m.mcpStatePath(), `{"claude": {"`+testutil.Esc(m.claudeJSONPath())+`": {"owned": "abc"}}}`)
+	writeFile(t, m.permissionsStatePath(), `{"claude": {"`+testutil.Esc(c.settingsPath())+`": {"allow": ["Bash(owned:*)"]}}}`)
 	fake.OnOK(marketList, `[
 		{"name":"sai","source":"github","repo":"o/sai"},
 		{"name":"mine","source":"github","repo":"o/mine","ref":"v2"},

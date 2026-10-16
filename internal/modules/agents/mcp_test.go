@@ -12,6 +12,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func mcpModule(t *testing.T, providers []string, servers map[string]config.MCPServer) *Module {
@@ -135,7 +136,7 @@ func TestClaudeMCPCreatesAndDropsConfig(t *testing.T) {
 	if got, want := readFile(t, cfg), "{\n  \"mcpServers\": {\n    \"a\": {\n      \"type\": \"stdio\",\n      \"command\": \"a\",\n      \"args\": []\n    }\n  }\n}\n"; got != want {
 		t.Errorf(".claude.json = %q, want %q", got, want)
 	}
-	if info, err := os.Stat(cfg); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(cfg); err != nil || !testutil.SamePerm(info.Mode(), 0o600) {
 		t.Errorf("mode = %v, %v", info, err)
 	}
 	m.Agents.MCP = nil
@@ -421,7 +422,7 @@ func TestCodexMCPCreatesConfig(t *testing.T) {
 	if got, want := readFile(t, cfg), "[mcp_servers.a]\ncommand = \"a\"\n"; got != want {
 		t.Errorf("config.toml = %q, want %q", got, want)
 	}
-	if info, err := os.Stat(cfg); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(cfg); err != nil || !testutil.SamePerm(info.Mode(), 0o600) {
 		t.Errorf("mode = %v, %v", info, err)
 	}
 }

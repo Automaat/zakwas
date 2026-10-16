@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestExecRun(t *testing.T) {
@@ -29,6 +31,7 @@ func TestExecRun(t *testing.T) {
 }
 
 func TestExecRunDir(t *testing.T) {
+	testutil.SkipOnWindows(t, "pwd prints a POSIX path")
 	dir := t.TempDir()
 	out, err := Output(context.Background(), NewExec(), Cmd{Name: "pwd", Dir: dir})
 	if err != nil {
@@ -71,6 +74,7 @@ func TestResultErr(t *testing.T) {
 }
 
 func TestExecCancelInterruptsChild(t *testing.T) {
+	testutil.SkipOnWindows(t, "Windows has no SIGINT for a child: a cancelled command is killed (see TestExecCancelKillsChildOnWindows)")
 	dir := t.TempDir()
 	ready, cleaned := filepath.Join(dir, "ready"), filepath.Join(dir, "cleaned")
 	script := `trap 'touch "$CLEANED"; exit 130' INT; touch "$READY"; while :; do sleep 0.05; done`

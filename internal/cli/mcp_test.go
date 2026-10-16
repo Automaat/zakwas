@@ -54,6 +54,9 @@ func startMCP(t *testing.T, env Env, caps map[string]any, args ...string) *mcpCl
 	outR, outW := io.Pipe()
 	c := &mcpClient{t: t, in: inW, out: bufio.NewReader(outR), stderr: &lockedBuffer{}, done: make(chan struct{})}
 	env.Args = append([]string{"mcp"}, args...)
+	if env.GOOS == "" {
+		env.GOOS = "darwin"
+	}
 	env.Stdin, env.Stdout, env.Stderr = inR, outW, c.stderr
 	go func() {
 		c.code = Main(context.Background(), env)
