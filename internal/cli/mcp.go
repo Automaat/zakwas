@@ -94,7 +94,11 @@ func runMCP(ctx context.Context, env Env, args []string, out, errOut *console) i
 	}
 	signal.Ignore(syscall.SIGPIPE)
 	defer signal.Reset(syscall.SIGPIPE)
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+	stopOn := []os.Signal{syscall.SIGTERM}
+	if !signal.Ignored(syscall.SIGHUP) {
+		stopOn = append(stopOn, syscall.SIGHUP)
+	}
+	ctx, stop := signal.NotifyContext(ctx, stopOn...)
 	defer stop()
 	t := &mcpTools{env: env, cfgPath: o.cfgPath, enableApply: o.enableApply}
 	srv := &mcp.Server{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -34,7 +35,7 @@ func run() int {
 		fmt.Println("zakwas", version)
 		return cli.ExitOK
 	}
-	ctx, stop, caught := watchSignals(context.Background(), stopSignals(os.Args[1:])...)
+	ctx, stop, caught := watchSignals(context.Background(), dieOf, stopSignals(os.Args[1:], signal.Ignored)...)
 	defer stop()
 
 	home, err := os.UserHomeDir()
