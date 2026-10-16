@@ -908,7 +908,7 @@
                   "type": "string"
                 },
                 "uniqueItems": true,
-                "description": "Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env or headers hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so.",
+                "description": "Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env, headers or oauth settings hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so.",
                 "type": [
                   "array",
                   "null"
@@ -961,10 +961,41 @@
                 ]
               },
               "oauth": {
-                "description": "The server signs in with OAuth. Nothing is registered differently; plan and apply show how to log in, because zakwas never opens a browser. Not combined with bearerTokenEnv or an Authorization header. Default false.",
+                "properties": {
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^\\S+$",
+                    "description": "OAuth client ID registered for this server with its authorization server or gateway. A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are."
+                  },
+                  "callbackPort": {
+                    "maximum": 65535,
+                    "minimum": 1,
+                    "description": "Fixed port of the local OAuth callback, for a client whose redirect URIs are registered with a port. Claude Code and opencode take it as callbackPort, Codex as oauth.callback_port, Copilot CLI as auth.redirectPort and Gemini CLI inside redirectUri. Each provider uses its own callback path, so register every redirect URI you sign in with. Default: the provider's own.",
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "scope": {
+                    "minLength": 1,
+                    "pattern": "^[!#-\\[\\]-~]+( [!#-\\[\\]-~]+)*$",
+                    "description": "OAuth scopes to request, separated by single spaces. Default: the scopes the server announces.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "clientId"
+                ],
+                "description": "The server signs in with OAuth. true only adds the login command to plan and apply, because zakwas never opens a browser; the server registers its own client. A mapping with 'clientId' (and optionally 'callbackPort' and 'scope') also registers that pre-registered public client with every provider that can take it, for a gateway that has no dynamic client registration. Not combined with bearerTokenEnv or an Authorization header. Default false.",
                 "default": false,
                 "type": [
                   "boolean",
+                  "object",
                   "null"
                 ]
               },

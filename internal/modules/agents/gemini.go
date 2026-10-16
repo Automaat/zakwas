@@ -101,6 +101,25 @@ type geminiServer struct {
 	Env     map[string]string `json:"env,omitempty"`
 	HTTPURL string            `json:"httpUrl,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	OAuth   *geminiOAuth      `json:"oauth,omitempty"`
+}
+
+type geminiOAuth struct {
+	Enabled     bool     `json:"enabled"`
+	ClientID    string   `json:"clientId"`
+	Scopes      []string `json:"scopes,omitempty"`
+	RedirectURI string   `json:"redirectUri,omitempty"`
+}
+
+func geminiOAuthEntry(o config.MCPOAuth) *geminiOAuth {
+	if !o.HasClient() {
+		return nil
+	}
+	out := &geminiOAuth{Enabled: true, ClientID: o.ClientID, Scopes: o.Scopes()}
+	if o.CallbackPort != 0 {
+		out.RedirectURI = fmt.Sprintf("http://localhost:%d/oauth/callback", o.CallbackPort)
+	}
+	return out
 }
 
 type geminiManifest struct {
@@ -121,9 +140,9 @@ func geminiServerGaps(name string, s config.MCPServer) []string {
 	if strings.Contains(name, "_") {
 		gaps = append(gaps, "its name has an underscore, which Gemini's policy rules misread")
 	}
-	literal := slices.Concat([]string{s.Command, s.URL}, s.Args, slices.Collect(maps.Values(s.Env)), slices.Collect(maps.Values(s.Headers)))
+	literal := slices.Concat([]string{s.Command, s.URL, s.OAuth.ClientID, s.OAuth.Scope}, s.Args, slices.Collect(maps.Values(s.Env)), slices.Collect(maps.Values(s.Headers)))
 	if slices.ContainsFunc(literal, func(v string) bool { return strings.Contains(v, "$") }) {
-		gaps = append(gaps, "Gemini would expand the $ in its command, args, url, env or headers")
+		gaps = append(gaps, "Gemini would expand the $ in its command, args, url, env, headers or oauth")
 	}
 	return gaps
 }
@@ -149,7 +168,7 @@ func geminiServerEntry(s config.MCPServer) geminiServer {
 	if s.BearerTokenEnv != "" {
 		headers["Authorization"] = "Bearer $" + s.BearerTokenEnv
 	}
-	return geminiServer{HTTPURL: s.URL, Headers: headers}
+	return geminiServer{HTTPURL: s.URL, Headers: headers, OAuth: geminiOAuthEntry(s.OAuth)}
 }
 
 // geminiServers are the servers the extension registers, and per left-out
@@ -601,7 +620,7 @@ func (m *Module) geminiWarnings() []string {
 		out = append(out, fmt.Sprintf("gemini leaves out mcp server %s: %s", name, strings.Join(skipped[name], "; ")))
 	}
 	for _, s := range m.Agents.MCPFor(config.ProviderGemini) {
-		if s.OAuth && skipped[s.Name] == nil {
+		if s.OAuth.On() && skipped[s.Name] == nil {
 			out = append(out, fmt.Sprintf("gemini mcp server %s signs in with OAuth: run /mcp auth %s in Gemini CLI", s.Name, s.Name))
 		}
 	}

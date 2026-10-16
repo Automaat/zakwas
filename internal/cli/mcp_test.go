@@ -277,6 +277,21 @@ func TestMCPProposeListsAndDiscards(t *testing.T) {
 	if p := parseJSON(t, c.tool("zakwas_propose", mcpServer, nil).text); p["tier"] != "high" {
 		t.Errorf("an MCP server proposal is %v", p["tier"])
 	}
+	oauthServer := map[string]any{"kind": "add-mcp", "name": "slack", "server": map[string]any{
+		"url": "https://mcp.example.com/slack", "oauth": map[string]any{"client_id": "0oa1abcdEXAMPLE", "callback_port": 54661, "scope": "read write"},
+	}}
+	if p := parseJSON(t, c.tool("zakwas_propose", oauthServer, nil).text); p["tier"] != "high" || !strings.Contains(p["diff"].(string), "oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: read write}") {
+		t.Errorf("an MCP server proposal with an OAuth client is %v", p)
+	}
+	for _, bad := range []map[string]any{
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"callback_port": 1}}},
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "client_secret": "LEAKP1"}}},
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "callback_port": 0.5}}},
+	} {
+		if r := c.tool("zakwas_propose", bad, nil); !r.isErr || strings.Contains(r.text, "LEAKP1") {
+			t.Errorf("%v: error %v, text %s", bad, r.isErr, r.text)
+		}
+	}
 	if readFile(t, filepath.Join(env.Cwd, "zakwas.yaml")) != before || gitIn(t, env.Cwd, "status", "--porcelain") != "" {
 		t.Error("proposing edited the repo")
 	}
@@ -285,7 +300,7 @@ func TestMCPProposeListsAndDiscards(t *testing.T) {
 	}
 
 	list := parseJSON(t, c.tool("zakwas_proposals", map[string]any{}, nil).text)["proposals"].([]any)
-	if len(list) != 2 {
+	if len(list) != 3 {
 		t.Fatalf("proposals = %v", list)
 	}
 
@@ -310,7 +325,7 @@ func TestMCPProposeListsAndDiscards(t *testing.T) {
 	if r := c.tool("zakwas_discard", map[string]any{"id": id}, nil); !r.isErr {
 		t.Error("discarded a proposal twice")
 	}
-	if list := parseJSON(t, c.tool("zakwas_proposals", map[string]any{}, nil).text)["proposals"].([]any); len(list) != 1 {
+	if list := parseJSON(t, c.tool("zakwas_proposals", map[string]any{}, nil).text)["proposals"].([]any); len(list) != 2 {
 		t.Errorf("proposals after discard = %v", list)
 	}
 }

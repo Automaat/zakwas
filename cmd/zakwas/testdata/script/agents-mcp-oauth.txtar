@@ -1,0 +1,244 @@
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+
+zakwas plan --only templates,agents
+cmpenv stdout plan.golden
+
+zakwas apply -y --only templates,agents
+stdout 'Applied 7 of 7 steps'
+cmp claude/.claude.json claude.golden
+cmp codex/config.toml codex.golden
+cmp home/.config/opencode/opencode.json opencode.golden
+! grep '[Ss]ecret' claude/.claude.json
+! grep '[Ss]ecret' codex/config.toml
+! grep '[Ss]ecret' home/.config/opencode/opencode.json
+
+zakwas check --only templates,agents
+stdout 'up to date: templates, agents'
+
+cp zakwas-update.yaml zakwas.yaml
+zakwas plan --only templates,agents
+cmpenv stdout plan-update.golden
+zakwas apply -y --only templates,agents
+cmp claude/.claude.json claude-update.golden
+cmp codex/config.toml codex-update.golden
+cmp home/.config/opencode/opencode.json opencode-update.golden
+zakwas check --only templates,agents
+
+cp zakwas-adopt.yaml zakwas.yaml
+cp claude-added.json claude/.claude.json
+rm home/.local/state/zakwas/agent-mcp.json
+zakwas plan --only agents
+cmpenv stdout plan-adopt.golden
+zakwas apply -y --only agents
+cmp claude/.claude.json claude-added.json
+zakwas check --only agents
+
+cp zakwas-conflict.yaml zakwas.yaml
+cp claude-other-client.json claude/.claude.json
+rm home/.local/state/zakwas/agent-mcp.json
+! zakwas plan --only agents
+stdout 'claude: mcp: server "slack" is already in .*/claude/.claude.json and differs from zakwas.yaml in oauth'
+! stdout 0oa9otherEXAMPLE
+! stderr 0oa9otherEXAMPLE
+
+cp zakwas-bad.yaml zakwas.yaml
+! zakwas plan --only agents
+stderr 'oauth.callbackPort 65536 must be between 1 and 65535'
+
+-- zakwas.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: read write}
+    wiki:
+      url: https://mcp.example.com/wiki
+      oauth: {clientId: 0oa1abcdEXAMPLE}
+    hint:
+      url: https://mcp.example.com/hint
+      oauth: true
+-- zakwas-update.yaml --
+templates:
+  files:
+    - {src: opencode.json.tmpl, dst: ~/.config/opencode/opencode.json}
+agents:
+  guard: false
+  providers: [claude, codex, opencode]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54662}
+    wiki:
+      url: https://mcp.example.com/wiki
+      headers: {X-Org: acme}
+      oauth: {clientId: 0oa1abcdEXAMPLE}
+-- zakwas-adopt.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661}
+-- zakwas-conflict.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE}
+-- zakwas-bad.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 65536}
+-- opencode.json.tmpl --
+{
+  "mcp": {{ agentMCP "opencode" }}
+}
+-- claude-added.json --
+{"mcpServers":{"slack":{"type":"http","url":"https://mcp.example.com/slack","oauth":{"clientId":"0oa1abcdEXAMPLE","callbackPort":54661}}}}
+-- claude-other-client.json --
+{"mcpServers":{"slack":{"type":"http","url":"https://mcp.example.com/slack","oauth":{"clientId":"0oa9otherEXAMPLE"}}}}
+-- claude/.claude.json --
+{
+  "numStartups": 3
+}
+-- codex/config.toml --
+model = "gpt-5"
+-- plan.golden --
+templates
+  + ~/.config/opencode/opencode.json
+agents
+  + claude mcp hint   http https://mcp.example.com/hint, then sign in with /mcp in Claude Code
+  + claude mcp slack  http https://mcp.example.com/slack, then sign in with /mcp in Claude Code
+  + claude mcp wiki   http https://mcp.example.com/wiki, then sign in with /mcp in Claude Code
+  + codex mcp hint    http https://mcp.example.com/hint, then sign in with `codex mcp login hint`
+  + codex mcp slack   http https://mcp.example.com/slack, then sign in with `codex mcp login slack`
+  + codex mcp wiki    http https://mcp.example.com/wiki, then sign in with `codex mcp login wiki`
+
+Plan: 7 to add, 0 to change, 0 to remove, 0 to run.
+-- claude.golden --
+{
+  "numStartups": 3,
+  "mcpServers": {
+    "hint": {
+      "type": "http",
+      "url": "https://mcp.example.com/hint"
+    },
+    "slack": {
+      "type": "http",
+      "url": "https://mcp.example.com/slack",
+      "oauth": {
+        "clientId": "0oa1abcdEXAMPLE",
+        "callbackPort": 54661,
+        "scopes": "read write"
+      }
+    },
+    "wiki": {
+      "type": "http",
+      "url": "https://mcp.example.com/wiki",
+      "oauth": {
+        "clientId": "0oa1abcdEXAMPLE"
+      }
+    }
+  }
+}
+-- codex.golden --
+model = "gpt-5"
+
+[mcp_servers.hint]
+url = "https://mcp.example.com/hint"
+
+[mcp_servers.slack]
+url = "https://mcp.example.com/slack"
+scopes = ["read", "write"]
+
+[mcp_servers.slack.oauth]
+client_id = "0oa1abcdEXAMPLE"
+callback_port = 54661
+
+[mcp_servers.wiki]
+url = "https://mcp.example.com/wiki"
+
+[mcp_servers.wiki.oauth]
+client_id = "0oa1abcdEXAMPLE"
+-- opencode.golden --
+{
+  "mcp": {"hint": {"type":"remote","url":"https://mcp.example.com/hint","enabled":true}, "slack": {"type":"remote","url":"https://mcp.example.com/slack","oauth":{"clientId":"0oa1abcdEXAMPLE","callbackPort":54661,"scope":"read write"},"enabled":true}, "wiki": {"type":"remote","url":"https://mcp.example.com/wiki","oauth":{"clientId":"0oa1abcdEXAMPLE"},"enabled":true}}
+}
+-- plan-update.golden --
+templates
+  ~ ~/.config/opencode/opencode.json  content
+agents
+  ~ claude mcp slack  http https://mcp.example.com/slack, then sign in with /mcp in Claude Code
+  ~ claude mcp wiki   http https://mcp.example.com/wiki, then sign in with /mcp in Claude Code
+  - claude mcp hint   no longer in zakwas.yaml
+  ~ codex mcp slack   http https://mcp.example.com/slack, then sign in with `codex mcp login slack`
+  ~ codex mcp wiki    http https://mcp.example.com/wiki, then sign in with `codex mcp login wiki`
+  - codex mcp hint    no longer in zakwas.yaml
+
+⚠ destructive: claude mcp hint, codex mcp hint
+
+Plan: 0 to add, 5 to change, 2 to remove, 0 to run.
+-- claude-update.golden --
+{
+  "numStartups": 3,
+  "mcpServers": {
+    "slack": {
+      "type": "http",
+      "url": "https://mcp.example.com/slack",
+      "oauth": {
+        "clientId": "0oa1abcdEXAMPLE",
+        "callbackPort": 54662
+      }
+    },
+    "wiki": {
+      "type": "http",
+      "url": "https://mcp.example.com/wiki",
+      "headers": {
+        "X-Org": "acme"
+      },
+      "oauth": {
+        "clientId": "0oa1abcdEXAMPLE"
+      }
+    }
+  }
+}
+-- codex-update.golden --
+model = "gpt-5"
+
+[mcp_servers.slack]
+url = "https://mcp.example.com/slack"
+
+[mcp_servers.slack.oauth]
+client_id = "0oa1abcdEXAMPLE"
+callback_port = 54662
+
+[mcp_servers.wiki]
+url = "https://mcp.example.com/wiki"
+
+[mcp_servers.wiki.oauth]
+client_id = "0oa1abcdEXAMPLE"
+
+[mcp_servers.wiki.http_headers]
+X-Org = "acme"
+-- opencode-update.golden --
+{
+  "mcp": {"slack": {"type":"remote","url":"https://mcp.example.com/slack","oauth":{"clientId":"0oa1abcdEXAMPLE","callbackPort":54662},"enabled":true}, "wiki": {"type":"remote","url":"https://mcp.example.com/wiki","headers":{"X-Org":"acme"},"oauth":{"clientId":"0oa1abcdEXAMPLE"},"enabled":true}}
+}
+-- plan-adopt.golden --
+agents
+  ~ claude mcp slack  adopt the server already there
+
+Plan: 0 to add, 1 to change, 0 to remove, 0 to run.

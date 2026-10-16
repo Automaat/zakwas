@@ -155,9 +155,13 @@ func opOf(c agents.Candidate) proposal.Op {
 		return proposal.Op{Kind: proposal.AddPlugin, Name: c.Name}
 	case agents.KindMCP:
 		s := c.Server
-		return proposal.Op{Kind: proposal.AddMCP, Name: c.Name, Server: &proposal.Server{
+		server := &proposal.Server{
 			Command: s.Command, Args: s.Args, URL: s.URL, EnvVars: s.EnvVars, BearerTokenEnv: s.BearerTokenEnv,
-		}}
+		}
+		if s.OAuth != nil {
+			server.OAuth = &proposal.OAuth{ClientID: s.OAuth.ClientID, CallbackPort: s.OAuth.CallbackPort, Scope: s.OAuth.Scope}
+		}
+		return proposal.Op{Kind: proposal.AddMCP, Name: c.Name, Server: server}
 	}
 	return proposal.Op{Kind: proposal.AddPermission, Decision: c.Decision, Command: c.Name}
 }
@@ -182,7 +186,14 @@ func conflict(e *entry, c agents.Candidate) string {
 func sameServer(a, b *agents.CapturedServer) bool {
 	return a.Command == b.Command && slices.Equal(a.Args, b.Args) && a.URL == b.URL &&
 		slices.Equal(slices.Sorted(slices.Values(a.EnvVars)), slices.Sorted(slices.Values(b.EnvVars))) &&
-		a.BearerTokenEnv == b.BearerTokenEnv
+		a.BearerTokenEnv == b.BearerTokenEnv && sameOAuth(a.OAuth, b.OAuth)
+}
+
+func sameOAuth(a, b *agents.CapturedOAuth) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 type drop struct {

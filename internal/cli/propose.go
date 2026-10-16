@@ -33,7 +33,7 @@ Operations:
   remove-permission allow|review|deny COMMAND...
   add-brew NAME [--cask]
   pin-mise TOOL VERSION
-  add-mcp NAME (--command CMD [--arg A]... [--env-var NAME]... | --url URL [--bearer-token-env NAME]) [--providers ...]
+  add-mcp NAME (--command CMD [--arg A]... [--env-var NAME]... | --url URL [--bearer-token-env NAME | --oauth-client-id ID [--oauth-callback-port PORT] [--oauth-scope SCOPES]]) [--providers ...]
 
 Flags:
 `
@@ -57,6 +57,9 @@ type proposeOptions struct {
 	url            string
 	bearerTokenEnv string
 	args, envVars  listFlag
+	oauthClientID  string
+	oauthPort      int
+	oauthScope     string
 }
 
 func newProposeFlags(errOut io.Writer) (*flag.FlagSet, *proposeOptions) {
@@ -75,6 +78,9 @@ func newProposeFlags(errOut io.Writer) (*flag.FlagSet, *proposeOptions) {
 	fs.StringVar(&o.command, "command", "", "add-mcp: command that starts a stdio server")
 	fs.StringVar(&o.url, "url", "", "add-mcp: URL of an HTTP server")
 	fs.StringVar(&o.bearerTokenEnv, "bearer-token-env", "", "add-mcp: environment variable holding the bearer token of a url server")
+	fs.StringVar(&o.oauthClientID, "oauth-client-id", "", "add-mcp: pre-registered OAuth client ID of a url server (public; a client secret is not supported)")
+	fs.IntVar(&o.oauthPort, "oauth-callback-port", 0, "add-mcp: fixed port of the OAuth callback, with --oauth-client-id")
+	fs.StringVar(&o.oauthScope, "oauth-scope", "", "add-mcp: OAuth scopes separated by spaces, with --oauth-client-id")
 	fs.Var(&o.args, "arg", "add-mcp: argument of the command (repeatable)")
 	fs.Var(&o.envVars, "env-var", "add-mcp: environment variable passed through to the command (repeatable)")
 	return fs, &o
@@ -151,7 +157,7 @@ var opFlags = map[string][]string{
 	proposal.RemovePermission: {},
 	proposal.AddBrew:          {"cask"},
 	proposal.PinMise:          {},
-	proposal.AddMCP:           {"providers", "command", "url", "bearer-token-env", "arg", "env-var"},
+	proposal.AddMCP:           {"providers", "command", "url", "bearer-token-env", "arg", "env-var", "oauth-client-id", "oauth-callback-port", "oauth-scope"},
 }
 
 func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string) (proposal.Op, error) {
@@ -209,6 +215,9 @@ func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string) (proposal.Op,
 	if kind == proposal.AddMCP {
 		op.Server = &proposal.Server{
 			Command: o.command, Args: o.args, URL: o.url, EnvVars: o.envVars, BearerTokenEnv: o.bearerTokenEnv,
+		}
+		if o.oauthClientID != "" || o.oauthPort != 0 || o.oauthScope != "" {
+			op.Server.OAuth = &proposal.OAuth{ClientID: o.oauthClientID, CallbackPort: o.oauthPort, Scope: o.oauthScope}
 		}
 	}
 	return op, op.Validate()

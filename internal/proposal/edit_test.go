@@ -98,6 +98,69 @@ func TestApplyEditsOnlyTheEntries(t *testing.T) {
 	}
 }
 
+func TestApplyMCPServerWithOAuthClient(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		oauth *OAuth
+		want  string
+	}{
+		{"full", &OAuth{ClientID: "0oa1abcdEXAMPLE", CallbackPort: 54661, Scope: "read write"}, "      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: read write}\n"},
+		{"client only", &OAuth{ClientID: "0oa1abcdEXAMPLE"}, "      oauth: {clientId: 0oa1abcdEXAMPLE}\n"},
+		{"client id that reads as a number", &OAuth{ClientID: "12345"}, "      oauth: {clientId: \"12345\"}\n"},
+		{"scope with a colon", &OAuth{ClientID: "c", Scope: "api:read api:write"}, "      oauth: {clientId: c, scope: api:read api:write}\n"},
+		{"client id with a flow character", &OAuth{ClientID: "a,b"}, "      oauth: {clientId: \"a,b\"}\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, home := newRepo(t, baseConfig)
+			res, err := Apply([]Op{
+				{Kind: AddMCP, Name: "slack", Providers: []string{"claude"}, Server: &Server{URL: "https://mcp.example.com/slack", OAuth: tt.oauth}},
+			}, cfg, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := baseConfig + "  mcp:\n    slack:\n      url: https://mcp.example.com/slack\n" + tt.want + "      providers: [claude]\n"
+			if got := string(res.Edits[0].New); got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+			got := res.Config.Agents.MCP["slack"].OAuth
+			if got.ClientID != tt.oauth.ClientID || got.CallbackPort != tt.oauth.CallbackPort || got.Scope != tt.oauth.Scope || !got.On() {
+				t.Errorf("parsed oauth = %+v, want %+v", got, tt.oauth)
+			}
+		})
+	}
+}
+
+func TestValidateMCPOAuthClient(t *testing.T) {
+	url := func(o *OAuth) Op {
+		return Op{Kind: AddMCP, Name: "a", Server: &Server{URL: "https://e.com", OAuth: o}}
+	}
+	for _, tt := range []struct {
+		name string
+		op   Op
+		want string
+	}{
+		{"valid", url(&OAuth{ClientID: "c", CallbackPort: 1, Scope: "a b"}), ""},
+		{"no client", url(&OAuth{CallbackPort: 1}), "oauth needs a client id"},
+		{"empty", url(&OAuth{}), "oauth needs a client id"},
+		{"command server", Op{Kind: AddMCP, Name: "a", Server: &Server{Command: "x", OAuth: &OAuth{ClientID: "c"}}}, "oauth belongs to a url server"},
+		{"bearer token", Op{Kind: AddMCP, Name: "a", Server: &Server{URL: "https://e.com", BearerTokenEnv: "T", OAuth: &OAuth{ClientID: "c"}}}, "can't be combined with a bearer token"},
+		{"negative port", url(&OAuth{ClientID: "c", CallbackPort: -1}), "between 1 and 65535"},
+		{"port too high", url(&OAuth{ClientID: "c", CallbackPort: 65536}), "between 1 and 65535"},
+		{"control character", url(&OAuth{ClientID: "c\x1b[2J"}), "spaces or control characters"},
+		{"scope", url(&OAuth{ClientID: "c", Scope: "a  b"}), "oauth.scope"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.op.Validate()
+			switch {
+			case tt.want == "" && err != nil:
+				t.Errorf("err = %v", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Errorf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyMarketplaceThenItsPlugin(t *testing.T) {
 	cfg, home := newRepo(t, baseConfig)
 	_, err := Apply([]Op{

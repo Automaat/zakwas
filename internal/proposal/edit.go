@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -233,10 +234,24 @@ func mcpEntry(indent string, op Op) []string {
 	if s.BearerTokenEnv != "" {
 		lines = append(lines, child+"bearerTokenEnv: "+scalar(s.BearerTokenEnv, false))
 	}
+	if s.OAuth != nil {
+		lines = append(lines, child+"oauth: "+oauthFlow(s.OAuth))
+	}
 	if len(op.Providers) > 0 {
 		lines = append(lines, child+"providers: "+flowList(op.Providers))
 	}
 	return lines
+}
+
+func oauthFlow(o *OAuth) string {
+	parts := []string{"clientId: " + scalar(o.ClientID, true)}
+	if o.CallbackPort != 0 {
+		parts = append(parts, "callbackPort: "+strconv.Itoa(o.CallbackPort))
+	}
+	if o.Scope != "" {
+		parts = append(parts, "scope: "+scalar(o.Scope, true))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 func hasKey[V any](m map[string]V, key string) bool {

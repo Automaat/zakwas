@@ -94,6 +94,15 @@ func copilotObject(s config.MCPServer) (object, error) {
 		if len(headers) > 0 {
 			errs = append(errs, set("headers", headers))
 		}
+		if s.OAuth.HasClient() {
+			errs = append(errs, set("oauthClientId", s.OAuth.ClientID), set("oauthPublicClient", true))
+			if scopes := s.OAuth.Scopes(); len(scopes) > 0 {
+				errs = append(errs, set("oauthScopes", scopes))
+			}
+			if s.OAuth.CallbackPort != 0 {
+				errs = append(errs, set("auth", map[string]int{"redirectPort": s.OAuth.CallbackPort}))
+			}
+		}
 		return o, errors.Join(errs...)
 	}
 	env := maps.Clone(s.Env)

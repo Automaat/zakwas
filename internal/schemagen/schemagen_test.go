@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -194,6 +195,13 @@ func TestLoaderAcceptedConfigs(t *testing.T) {
 		"agents: {permissions: }\n",
 		"agents: {permissions: {allow: , review: , deny: }}\n",
 		"agents: {permissions: {allow: [git status, {command: sed -n, providers: , justification: }], deny: [{command: rm -rf, justification: use trash}]}}\n",
+		"agents: {mcp: {a: {url: 'https://e.com', oauth: true}}}\n",
+		"agents: {mcp: {a: {url: 'https://e.com', oauth: false}}}\n",
+		"agents: {mcp: {a: {url: 'https://e.com', oauth: }}}\n",
+		"agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: 0oa1abcdEXAMPLE}}}}\n",
+		"agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: '12345', callbackPort: 1, scope: 'read write'}}}}\n",
+		"agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, callbackPort: 65535, scope: 'a:b c/d'}}}}\n",
+		"agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, callbackPort: , scope: }}}}\n",
 	} {
 		t.Run(doc, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), config.FileName)
@@ -254,6 +262,21 @@ func TestInvalidConfigs(t *testing.T) {
 		{"unknown permission list", "agents: {permissions: {ask: [ls]}}\n", "ask"},
 		{"empty permission command", "agents: {permissions: {allow: ['']}}\n", "allow"},
 		{"unknown permission field", "agents: {permissions: {deny: [{command: rm, decision: deny}]}}\n", "decision"},
+		{"oauth text", "agents: {mcp: {a: {url: 'https://e.com', oauth: yes please}}}\n", "oauth"},
+		{"oauth number", "agents: {mcp: {a: {url: 'https://e.com', oauth: 1}}}\n", "oauth"},
+		{"oauth list", "agents: {mcp: {a: {url: 'https://e.com', oauth: [c]}}}\n", "oauth"},
+		{"oauth without a client id", "agents: {mcp: {a: {url: 'https://e.com', oauth: {callbackPort: 54661}}}}\n", "clientId"},
+		{"oauth empty mapping", "agents: {mcp: {a: {url: 'https://e.com', oauth: {}}}}\n", "clientId"},
+		{"oauth empty client id", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: ''}}}}\n", "clientId"},
+		{"oauth client id with a space", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: 'a b'}}}}\n", "clientId"},
+		{"oauth port zero", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, callbackPort: 0}}}}\n", "callbackPort"},
+		{"oauth port too high", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, callbackPort: 65536}}}}\n", "callbackPort"},
+		{"oauth port text", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, callbackPort: '54661'}}}}\n", "callbackPort"},
+		{"oauth port fraction", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, callbackPort: 54661.5}}}}\n", "callbackPort"},
+		{"oauth empty scope", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, scope: ''}}}}\n", "scope"},
+		{"oauth scope with double spaces", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, scope: 'a  b'}}}}\n", "scope"},
+		{"oauth scope list", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, scope: [a]}}}}\n", "scope"},
+		{"oauth client secret", "agents: {mcp: {a: {url: 'https://e.com', oauth: {clientId: c, clientSecret: s}}}}\n", "clientSecret"},
 		{"permission provider", "agents: {permissions: {allow: [{command: ls, providers: [cursor]}]}}\n", "providers"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,5 +295,42 @@ func TestInvalidConfigs(t *testing.T) {
 				t.Error("loader accepted it")
 			}
 		})
+	}
+}
+
+func TestMCPOAuthSchemaHasBothForms(t *testing.T) {
+	var doc map[string]any
+	if err := json.Unmarshal(schema.JSON, &doc); err != nil {
+		t.Fatal(err)
+	}
+	at := func(s any, keys ...string) map[string]any {
+		t.Helper()
+		m, _ := s.(map[string]any)
+		for _, k := range keys {
+			var ok bool
+			if m, ok = m[k].(map[string]any); !ok {
+				t.Fatalf("schema has no %s", k)
+			}
+		}
+		return m
+	}
+	oauth := at(doc, "properties", "agents", "properties", "mcp", "additionalProperties", "properties", "oauth")
+	if got, _ := oauth["type"].([]any); !slices.Equal(got, []any{"boolean", "object", "null"}) {
+		t.Errorf("oauth type = %v, want boolean, object and null", got)
+	}
+	if got, _ := oauth["required"].([]any); !slices.Equal(got, []any{"clientId"}) {
+		t.Errorf("oauth required = %v, want clientId", got)
+	}
+	if oauth["additionalProperties"] != false || oauth["default"] != false {
+		t.Errorf("oauth additionalProperties %v default %v", oauth["additionalProperties"], oauth["default"])
+	}
+	props := at(oauth, "properties")
+	for _, name := range []string{"clientId", "callbackPort", "scope"} {
+		if d, _ := at(props, name)["description"].(string); d == "" {
+			t.Errorf("oauth.%s has no description", name)
+		}
+	}
+	if _, secret := props["clientSecret"]; secret || len(props) != 3 {
+		t.Errorf("oauth properties = %v, want clientId, callbackPort and scope only", props)
 	}
 }

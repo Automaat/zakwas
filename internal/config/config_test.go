@@ -376,7 +376,8 @@ agents:
   mcp:
     docs: {command: npx, args: [-y, docs-mcp], env: {LANG: C}, envVars: [DOCS_TOKEN]}
     web: {url: 'https://e.com/mcp', bearerTokenEnv: WEB_TOKEN, headers: {X-Org: acme}, headerEnv: {X-Key: KEY}, providers: [claude, codex]}
-    linear: {url: 'https://mcp.linear.app/mcp', oauth: true}`},
+    linear: {url: 'https://mcp.linear.app/mcp', oauth: true}
+    slack: {url: 'https://mcp.example.com/slack', oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: 'read write'}}`},
 		{"empty mcp", "agents: {mcp: {}}"},
 		{"skills", `
 agents:

@@ -117,12 +117,12 @@ type MCPServer struct {
 	Command        string            `yaml:"command" jsonschema:"minLength=1" jsonschema_description:"Command that starts a stdio server. Set either 'command' or 'url'."`
 	Args           []string          `yaml:"args" jsonschema_description:"Arguments of the command. Written to the agents' config as is, so keep secrets out of them."`
 	Env            map[string]string `yaml:"env" jsonschema_description:"Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead."`
-	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env or headers hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so."`
+	EnvVars        []string          `yaml:"envVars" jsonschema:"uniqueItems=true" jsonschema_description:"Names of environment variables passed through from the agent's own environment to the command: Claude Code env NAME=${NAME}, Codex env_vars, Gemini CLI env NAME=$NAME, opencode environment NAME={env:NAME}. Gemini CLI expands $NAME itself, so a server whose command, args, url, env, headers or oauth settings hold a literal '$', or whose name has an underscore, is left out of Gemini CLI and the plan says so."`
 	URL            string            `yaml:"url" jsonschema:"minLength=1" jsonschema_description:"URL of an HTTP (streamable) server, http:// or https://, without a user name or password. Written as is, so keep keys out of the query. Set either 'command' or 'url'."`
 	Headers        map[string]string `yaml:"headers" jsonschema_description:"HTTP headers with their values. Written to the agents' config as is, so use 'headerEnv' or 'bearerTokenEnv' for secrets."`
 	HeaderEnv      map[string]string `yaml:"headerEnv" jsonschema_description:"HTTP headers whose value is read from an environment variable: header name to variable name."`
 	BearerTokenEnv string            `yaml:"bearerTokenEnv" jsonschema:"minLength=1" jsonschema_description:"Name of the environment variable holding a bearer token, sent as 'Authorization: Bearer <token>'."`
-	OAuth          bool              `yaml:"oauth" jsonschema:"default=false" jsonschema_description:"The server signs in with OAuth. Nothing is registered differently; plan and apply show how to log in, because zakwas never opens a browser. Not combined with bearerTokenEnv or an Authorization header. Default false."`
+	OAuth          MCPOAuth          `yaml:"oauth" jsonschema:"default=false" jsonschema_description:"The server signs in with OAuth. true only adds the login command to plan and apply, because zakwas never opens a browser; the server registers its own client. A mapping with 'clientId' (and optionally 'callbackPort' and 'scope') also registers that pre-registered public client with every provider that can take it, for a gateway that has no dynamic client registration. Not combined with bearerTokenEnv or an Authorization header. Default false."`
 	Providers      []string          `yaml:"providers" jsonschema:"minItems=1,uniqueItems=true,enum=claude,enum=codex,enum=opencode,enum=gemini,enum=copilot" jsonschema_description:"Providers to register this server with; must be in agents.providers. Default: agents.providers, with Codex, Gemini and Copilot opt-in as for plugins."`
 }
 
@@ -836,7 +836,7 @@ func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []st
 			set  bool
 		}
 		if s.Command != "" {
-			for _, f := range []field{{"headers", len(s.Headers) > 0}, {"headerEnv", len(s.HeaderEnv) > 0}, {"bearerTokenEnv", s.BearerTokenEnv != ""}, {"oauth", s.OAuth}} {
+			for _, f := range []field{{"headers", len(s.Headers) > 0}, {"headerEnv", len(s.HeaderEnv) > 0}, {"bearerTokenEnv", s.BearerTokenEnv != ""}, {"oauth", s.OAuth.On()}} {
 				if f.set {
 					fail("%s only applies to a server with a url", f.name)
 				}
@@ -895,8 +895,11 @@ func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []st
 		if s.BearerTokenEnv != "" {
 			addHeader("bearerTokenEnv", "Authorization")
 		}
-		if s.OAuth && headers["authorization"] != "" {
+		if s.OAuth.On() && headers["authorization"] != "" {
 			fail("oauth can't be combined with an Authorization header (%s)", headers["authorization"])
+		}
+		for _, problem := range s.OAuth.Problems() {
+			fail("%s", problem)
 		}
 		for _, text := range append(append(slices.Collect(maps.Values(s.Env)), slices.Collect(maps.Values(s.Headers))...), append([]string{s.Command}, s.Args...)...) {
 			if strings.ContainsFunc(text, func(r rune) bool { return unicode.IsControl(r) && r != '\t' }) || !utf8.ValidString(text) {

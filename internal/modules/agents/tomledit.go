@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -363,8 +364,8 @@ func tomlStrings(list []string) string {
 }
 
 // renderCodexMCP renders a declared server as the tables `codex mcp add`
-// writes: the server, then its env and header maps as subtables, then a
-// table per tool that must always prompt.
+// writes: the server, then its oauth client, env and header maps as
+// subtables, then a table per tool that must always prompt.
 func renderCodexMCP(name string, s config.MCPServer) string {
 	var b strings.Builder
 	header := "mcp_servers." + tomlKey(name)
@@ -373,6 +374,9 @@ func renderCodexMCP(name string, s config.MCPServer) string {
 		b.WriteString("url = " + tomlString(s.URL) + "\n")
 		if s.BearerTokenEnv != "" {
 			b.WriteString("bearer_token_env_var = " + tomlString(s.BearerTokenEnv) + "\n")
+		}
+		if scopes := s.OAuth.Scopes(); len(scopes) > 0 && s.OAuth.HasClient() {
+			b.WriteString("scopes = " + tomlStrings(scopes) + "\n")
 		}
 	} else {
 		b.WriteString("command = " + tomlString(s.Command) + "\n")
@@ -390,6 +394,12 @@ func renderCodexMCP(name string, s config.MCPServer) string {
 		b.WriteString("\n[" + header + "." + sub + "]\n")
 		for _, k := range sortedKeys(values) {
 			b.WriteString(tomlKey(k) + " = " + tomlString(values[k]) + "\n")
+		}
+	}
+	if s.IsHTTP() && s.OAuth.HasClient() {
+		b.WriteString("\n[" + header + ".oauth]\nclient_id = " + tomlString(s.OAuth.ClientID) + "\n")
+		if s.OAuth.CallbackPort != 0 {
+			b.WriteString("callback_port = " + strconv.Itoa(s.OAuth.CallbackPort) + "\n")
 		}
 	}
 	table("env", s.Env)

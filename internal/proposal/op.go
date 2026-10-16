@@ -50,6 +50,15 @@ type Server struct {
 	URL            string   `json:"url,omitempty"`
 	EnvVars        []string `json:"env_vars,omitempty"`
 	BearerTokenEnv string   `json:"bearer_token_env,omitempty"`
+	OAuth          *OAuth   `json:"oauth,omitempty"`
+}
+
+// OAuth is the pre-registered OAuth client of a url server: the public
+// parts only, since a client secret has no place in the config repo.
+type OAuth struct {
+	ClientID     string `json:"client_id"`
+	CallbackPort int    `json:"callback_port,omitempty"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 var (
@@ -139,7 +148,31 @@ func (o Op) validateMCP() []error {
 	if s.Command != "" && s.BearerTokenEnv != "" {
 		errs = append(errs, errors.New("a bearer token belongs to a url server"))
 	}
+	if s.OAuth != nil {
+		errs = append(errs, s.validateOAuth()...)
+	}
 	return errs
+}
+
+func (s *Server) validateOAuth() []error {
+	if s.Command != "" {
+		return []error{errors.New("oauth belongs to a url server")}
+	}
+	var errs []error
+	if s.OAuth.ClientID == "" {
+		errs = append(errs, errors.New("oauth needs a client id"))
+	}
+	if s.BearerTokenEnv != "" {
+		errs = append(errs, errors.New("oauth can't be combined with a bearer token"))
+	}
+	for _, problem := range s.OAuth.config().Problems() {
+		errs = append(errs, errors.New(problem))
+	}
+	return errs
+}
+
+func (o *OAuth) config() config.MCPOAuth {
+	return config.MCPOAuth{ClientID: o.ClientID, CallbackPort: o.CallbackPort, Scope: o.Scope}
 }
 
 // Summary is the operation in one line.
