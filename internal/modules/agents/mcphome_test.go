@@ -324,3 +324,41 @@ func TestCaptureTildeReasonOnlyWhenTheTildeIsTheOnlyGap(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPRelativeHomeFailsOnlyWhenATildeNeedsIt(t *testing.T) {
+	for _, provider := range []string{config.ProviderClaude, config.ProviderCodex, config.ProviderCopilot} {
+		t.Run(provider, func(t *testing.T) {
+			m := tildeModule(t, []string{provider})
+			m.Paths.Home = "rel2"
+			_, err := planErr(t, m)
+			if err == nil || !strings.Contains(err.Error(), "agents.mcp.tool") || !strings.Contains(err.Error(), "HOME must be an absolute path") {
+				t.Fatalf("err = %v", err)
+			}
+
+			m.Agents.MCP = map[string]config.MCPServer{"plain": {Command: "npx", Args: []string{"-y", "--a=~/x"}}}
+			if _, err := planErr(t, m); err != nil && strings.Contains(err.Error(), "HOME must be") {
+				t.Errorf("a server without a leading ~ failed on the home: %v", err)
+			}
+		})
+	}
+}
+
+func TestMCPRelativeHomeFailsGemini(t *testing.T) {
+	m, _ := newGemini(t, config.Agents{MCP: tildeServers()})
+	m.Paths.Home = "rel2"
+	_, err := planErr(t, m)
+	if err == nil || !strings.Contains(err.Error(), "agents.mcp.tool") || !strings.Contains(err.Error(), "HOME must be an absolute path") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestMCPBareTildeAdoptsAServerRegisteredWithATrailingSlashHome(t *testing.T) {
+	m := tildeModule(t, []string{config.ProviderClaude})
+	home := m.Paths.Home
+	m.Paths.Home = home + "/"
+	m.Agents.MCP = map[string]config.MCPServer{"tool": {Command: "x", Args: []string{"~", "~/", "~/a"}}}
+	writeFile(t, filepath.Join(m.ClaudeConfigDir, ".claude.json"), `{"mcpServers": {"tool": {"command": "x", "args": ["`+home+`", "`+home+`/", "`+home+`/a"]}}}`)
+	if got, want := targets(plan(t, m)), []string{"~ claude mcp tool (adopt the server already there)"}; !slices.Equal(got, want) {
+		t.Fatalf("plan = %q, want %q", got, want)
+	}
+}

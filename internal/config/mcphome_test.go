@@ -3,6 +3,7 @@ package config
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,10 @@ func TestExpandHome(t *testing.T) {
 		{"home with spaces", "/Users/a b", "~/my tool/x y", "/Users/a b/my tool/x y"},
 		{"home with trailing slash", "/Users/me/", "~/x", "/Users/me/x"},
 		{"root home", "/", "~/x", "/x"},
+		{"root home bare", "/", "~", "/"},
+		{"trailing slash bare", "/Users/me/", "~", "/Users/me"},
+		{"many trailing slashes bare", "/Users/me//", "~", "/Users/me"},
+		{"trailing slash empty rest", "/Users/me/", "~/", "/Users/me/"},
 		{"no home", "", "~/x", "~/x"},
 		{"no home bare", "", "~", "~"},
 	} {
@@ -94,6 +99,33 @@ func TestMCPServerHasHomeRef(t *testing.T) {
 	} {
 		if got := tt.s.HasHomeRef(); got != tt.want {
 			t.Errorf("%s: HasHomeRef = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestMCPServerHomeError(t *testing.T) {
+	withRef := MCPServer{Command: "~/bin/x"}
+	for _, tt := range []struct {
+		name string
+		s    MCPServer
+		home string
+		bad  bool
+	}{
+		{"absolute", withRef, "/Users/me", false},
+		{"relative", withRef, "rel2", true},
+		{"dot", withRef, ".", true},
+		{"empty", withRef, "", true},
+		{"relative without a tilde", MCPServer{Command: "npx", Args: []string{"-y", "--a=~/x"}}, "rel2", false},
+		{"empty without a tilde", MCPServer{URL: "https://example.com/~/mcp"}, "", false},
+		{"relative arg", MCPServer{Command: "x", Args: []string{"~"}}, "rel2", true},
+		{"relative env", MCPServer{Command: "x", Env: map[string]string{"A": "~/a"}}, "rel2", true},
+	} {
+		err := tt.s.HomeError(tt.home)
+		if (err != nil) != tt.bad {
+			t.Errorf("%s: HomeError(%q) = %v", tt.name, tt.home, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "HOME must be an absolute path") {
+			t.Errorf("%s: error = %v", tt.name, err)
 		}
 	}
 }

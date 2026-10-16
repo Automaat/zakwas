@@ -293,6 +293,10 @@ func (m *Module) planMCP() (map[string][]engine.Change, map[string]error, error)
 	failed := map[string]error{}
 	for _, store := range []mcpStore{m.claudeMCP(), m.codexMCP(), m.copilotMCP()} {
 		provider := store.provider()
+		if err := m.mcpHomeError(provider); err != nil {
+			failed[provider] = fmt.Errorf("%s: mcp: %w", provider, err)
+			continue
+		}
 		want := map[string]config.MCPServer{}
 		for _, s := range m.Agents.MCPFor(provider) {
 			want[s.Name] = s.ExpandHome(m.Paths.Home)
@@ -319,6 +323,16 @@ func (m *Module) planMCP() (map[string][]engine.Change, map[string]error, error)
 		}
 	}
 	return changes, failed, nil
+}
+
+func (m *Module) mcpHomeError(provider string) error {
+	var errs []error
+	for _, s := range m.Agents.MCPFor(provider) {
+		if err := s.HomeError(m.Paths.Home); err != nil {
+			errs = append(errs, fmt.Errorf("agents.mcp.%s: %w", s.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (m *Module) planMCPFile(store mcpStore, path string, want map[string]config.MCPServer, st mcpState) ([]engine.Change, error) {

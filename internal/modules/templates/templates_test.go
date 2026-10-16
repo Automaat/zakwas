@@ -344,6 +344,18 @@ func TestAgentMCPInTemplate(t *testing.T) {
 	}
 }
 
+func TestAgentMCPRelativeHome(t *testing.T) {
+	agents := &config.Agents{MCP: map[string]config.MCPServer{"tool": {Command: "~/bin/x"}, "plain": {Command: "npx"}}}
+	_, err := agentMCP(agents, config.ProviderOpencode, "rel2")
+	if err == nil || !strings.Contains(err.Error(), "agents.mcp.tool") || !strings.Contains(err.Error(), "HOME must be an absolute path") {
+		t.Fatalf("err = %v", err)
+	}
+	plain := &config.Agents{MCP: map[string]config.MCPServer{"plain": {Command: "npx"}}}
+	if _, err := agentMCP(plain, config.ProviderOpencode, "rel2"); err != nil {
+		t.Errorf("a server without a ~ failed: %v", err)
+	}
+}
+
 func TestAgentMCPExpandsHome(t *testing.T) {
 	agents := &config.Agents{MCP: map[string]config.MCPServer{
 		"tool": {

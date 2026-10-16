@@ -541,6 +541,9 @@ func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink, kept boo
 // which needs the manifest, is the last change.
 func (m *Module) planGemini() ([]engine.Change, error) {
 	wanted := m.Agents.Wants(config.ProviderGemini)
+	if err := m.mcpHomeError(config.ProviderGemini); err != nil {
+		return nil, fmt.Errorf("gemini: mcp: %w", err)
+	}
 	statePath := m.geminiStatePath()
 	if info, err := os.Lstat(statePath); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 		return nil, fmt.Errorf("gemini: %s is a symlink; remove it", m.Paths.Pretty(statePath))

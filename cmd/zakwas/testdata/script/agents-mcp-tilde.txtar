@@ -25,6 +25,16 @@ stdout 'up to date: templates, agents'
 zakwas plan --only templates,agents
 stdout 'No changes'
 
+env HOME=rel2
+cp zakwas-agents.yaml zakwas.yaml
+! zakwas plan --only agents
+stdout 'agents.mcp.tool: its ~ can''t be expanded: HOME must be an absolute path, got "rel2"'
+stdout 'agents.mcp.adopted: its ~ can''t be expanded'
+
+cp zakwas-plain.yaml zakwas.yaml
+zakwas plan --only agents
+! stdout 'HOME must be an absolute path'
+
 -- zakwas.yaml --
 templates:
   files:
@@ -41,6 +51,19 @@ agents:
       command: ~/.local/bin/adopted
       args: ["~/cfg"]
       providers: [claude]
+-- zakwas-agents.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    tool: {command: "~/.local/bin/tool"}
+    adopted: {args: ["~"], command: x}
+-- zakwas-plain.yaml --
+agents:
+  guard: false
+  providers: [claude]
+  mcp:
+    plain: {command: npx, args: ["--dir=~/x"]}
 -- opencode.json.tmpl --
 {
   "mcp": {{ agentMCP "opencode" }}

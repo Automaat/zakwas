@@ -1,7 +1,10 @@
 package config
 
 import (
+	"cmp"
+	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -13,13 +16,24 @@ func ExpandHome(home, v string) string {
 	if home == "" {
 		return v
 	}
+	base := strings.TrimRight(home, "/")
 	if v == "~" {
-		return home
+		return cmp.Or(base, "/")
 	}
 	if rest, ok := strings.CutPrefix(v, "~/"); ok {
-		return strings.TrimRight(home, "/") + "/" + rest
+		return base + "/" + rest
 	}
 	return v
+}
+
+// HomeError is the reason the server's ~ values can't be expanded against
+// home, or nil: a relative home would put relative paths in the agents'
+// config, so a server that needs the expansion fails instead.
+func (s MCPServer) HomeError(home string) error {
+	if filepath.IsAbs(home) || !s.HasHomeRef() {
+		return nil
+	}
+	return fmt.Errorf("its ~ can't be expanded: HOME must be an absolute path, got %q", home)
 }
 
 // ExpandHome returns the server with "~" expanded to home in its command,

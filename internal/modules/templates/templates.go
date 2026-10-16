@@ -240,6 +240,9 @@ func agentMCP(agents *config.Agents, provider, home string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if err := s.HomeError(home); err != nil {
+			return "", fmt.Errorf("agentMCP: agents.mcp.%s: %w", s.Name, err)
+		}
 		var value bytes.Buffer
 		enc := json.NewEncoder(&value)
 		enc.SetEscapeHTML(false)
