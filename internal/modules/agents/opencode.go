@@ -181,6 +181,8 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 	}
 	if d.prune {
 		changes = append(changes, o.planPrune(d, st, want, waiting)...)
+	} else {
+		changes = append(changes, o.planMoved(st, want, waiting)...)
 	}
 	if len(waiting) == 0 {
 		return append(fetches, changes...), nil
@@ -481,24 +483,7 @@ func (o *opencode) planPrune(d desired, st opencodeState, want map[string]wanted
 		if wanted[strings.ToLower(link)] || waiting[s.Plugin] {
 			continue
 		}
-		forget := func(st *opencodeState) { delete(st.Skills, link) }
-		current, err := os.Readlink(link)
-		if err != nil || current != s.Target || install.CheckParents(o.paths, link) != nil {
-			changes = append(changes, engine.Change{
-				Action: engine.Remove, Target: o.label(link), Detail: "no longer zakwas's link, forget it",
-				Apply: func(context.Context) error { return o.update(forget) },
-			})
-			continue
-		}
-		changes = append(changes, engine.Change{
-			Action: engine.Remove, Target: o.label(link), Detail: s.Plugin, Destructive: true,
-			Apply: func(context.Context) error {
-				if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
-					return err
-				}
-				return o.update(forget)
-			},
-		})
+		changes = append(changes, o.planDropLink(link, s))
 	}
 	for _, name := range slices.Sorted(maps.Keys(st.Marketplaces)) {
 		dir := filepath.Join(o.cacheDir, name)
@@ -514,6 +499,47 @@ func (o *opencode) planPrune(d desired, st opencodeState, want map[string]wanted
 				return o.update(func(st *opencodeState) { delete(st.Marketplaces, name) })
 			},
 		})
+	}
+	return changes
+}
+
+// planDropLink removes one link zakwas made, or only forgets it when it was
+// changed since.
+func (o *opencode) planDropLink(link string, s opencodeSkill) engine.Change {
+	forget := func(st *opencodeState) { delete(st.Skills, link) }
+	current, err := os.Readlink(link)
+	if err != nil || current != s.Target || install.CheckParents(o.paths, link) != nil {
+		return engine.Change{
+			Action: engine.Remove, Target: o.label(link), Detail: "no longer zakwas's link, forget it",
+			Apply: func(context.Context) error { return o.update(forget) },
+		}
+	}
+	return engine.Change{
+		Action: engine.Remove, Target: o.label(link), Detail: s.Plugin, Destructive: true,
+		Apply: func(context.Context) error {
+			if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			return o.update(forget)
+		},
+	}
+}
+
+// planMoved drops the links zakwas made in an earlier skillsDir for skills
+// that are linked in the current one, so changing skillsDir (or
+// XDG_CONFIG_HOME, which moves the default) doesn't leave both. Without
+// prune, links of skills no longer declared stay where they are.
+func (o *opencode) planMoved(st opencodeState, want map[string]wantedSkill, waiting map[string]bool) []engine.Change {
+	var changes []engine.Change
+	for _, link := range slices.Sorted(maps.Keys(st.Skills)) {
+		s := st.Skills[link]
+		if filepath.Dir(link) == o.skillsDir || canonical(filepath.Dir(link)) == canonical(o.skillsDir) || waiting[s.Plugin] {
+			continue
+		}
+		if !slices.ContainsFunc(slices.Collect(maps.Keys(want)), func(name string) bool { return strings.EqualFold(name, filepath.Base(link)) }) {
+			continue
+		}
+		changes = append(changes, o.planDropLink(link, s))
 	}
 	return changes
 }

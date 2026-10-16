@@ -2,6 +2,8 @@ package agents
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -973,5 +975,40 @@ func TestOpencodeFilesFollowXDGConfigHome(t *testing.T) {
 				t.Errorf("hooks = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestOpencodeSkillsMoveWhenSkillsDirChanges(t *testing.T) {
+	m, _ := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
+		Plugins:      []config.Plugin{{ID: "a@mp"}},
+		Opencode:     &config.Opencode{SkillsDir: "~/old/skills"},
+	})
+	root := filepath.Join(m.Paths.Root, "mp")
+	marketplace(t, root, "mp", map[string][]string{"a": {"s"}})
+	apply(t, plan(t, m))
+	oldLink := filepath.Join(m.Paths.Home, "old", "skills", "s")
+	assertLink(t, oldLink, filepath.Join(root, "plugins", "a", "skills", "s"))
+	mine := filepath.Join(m.Paths.Home, "old", "skills", "mine")
+	if err := os.Symlink(root, mine); err != nil {
+		t.Fatal(err)
+	}
+
+	m.Agents.Opencode = &config.Opencode{SkillsDir: "~/new/skills"}
+	changes := plan(t, m)
+	want := []string{"+ opencode skill s (a@mp)", "- opencode skill ~/old/skills/s (a@mp)"}
+	if got := targets(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+	apply(t, changes)
+	assertLink(t, filepath.Join(m.Paths.Home, "new", "skills", "s"), filepath.Join(root, "plugins", "a", "skills", "s"))
+	if _, err := os.Lstat(oldLink); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("old link still there: %v", err)
+	}
+	if _, err := os.Lstat(mine); err != nil {
+		t.Errorf("a link zakwas did not make was touched: %v", err)
+	}
+	if again := plan(t, m); len(again) != 0 {
+		t.Errorf("not converged: %v", targets(again))
 	}
 }
