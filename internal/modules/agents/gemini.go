@@ -267,12 +267,12 @@ var geminiPriorities = map[string]int{
 // the quoted values are nested optional groups and none is repeated.
 const (
 	geminiGuardQuotedValues = 6
-	guardLead               = `[ ]*(?:|\\t[ ]*)`
+	guardLead               = `[ ]*(?:|\\t[ ]*(?:|\\t[ ]*))`
 	guardBlank              = `(?:[ ]|\\t)[ ]*(?:|\\t[ ]*)`
 	guardOneBlank           = `(?:[ ]|\\t)`
 	guardWordEnd            = `(?:[ ;&|)<>"]|\\[tn])`
-	guardFlagLike           = `(?:[-;&|<>$` + "`" + `]|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
-	guardQuotedEnd          = `(?:"|[;&|)<>]|\\n|` + guardBlank + guardFlagLike + `)`
+	guardAfterBlank         = `(?:[-;&|<>$#"` + "`" + `]|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
+	guardQuotedEnd          = `(?:"|[;&|)<>]|\\n|` + guardBlank + guardAfterBlank + `)`
 	guardEscapedQuote       = `\\\\\\"`
 	guardEscapedApostrophe  = `\\\\'`
 	guardDoubleQuoted       = `\\"[^"]*(?:|` + guardEscapedQuote + `[^"]*(?:|` + guardEscapedQuote + `[^"]*))\\"`
@@ -293,7 +293,7 @@ func geminiGuardRegex(words []string) string {
 	name := caselessWord(words[0])
 	word := regexp.QuoteMeta(strings.Join(words[1:], " "))
 	quoted := `(?:\\"` + word + `\\"|'` + word + `')`
-	prefix := `(?:|\S*/|\\"[^"]*/\\"|'[^']*/')`
+	prefix := `(?:|[^ ]*/|\\"[^"]*/\\"|'[^']*/')`
 	binary := `(?:` + prefix + `(?:` + name + `|\\"` + name + `\\"|'` + name + `')|\\"[^"]*/` + name + `\\"|'[^']*/` + name + `')`
 	rest := `[^"']*`
 	for range geminiGuardQuotedValues {
