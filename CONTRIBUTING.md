@@ -84,6 +84,12 @@ Add it to `commandList` in `internal/cli/cli.go`, which feeds usage and shell co
 - Tests that need macOS itself (the `uchg` flag, `defaults`) call `testutil.RequireDarwin(t, "reason")` from `internal/testutil`, or start an e2e script with `[!darwin] skip 'reason'`; the skip says what is not covered. Do not weaken an assertion to make it pass on both systems.
 - Behavior that differs by operating system takes the system as a parameter (`config.LoadFor`, `cli.Env.GOOS`, `platform.Supported(module, goos)`), not a build tag, so both sides are unit tested on any host. Build tags are only for system calls (`internal/install/flags_*.go`, `internal/modules/agents/swap_*.go`).
 - An e2e script that needs a macOS-only module against fake binaries starts with `env ZAKWAS_TEST_GOOS=darwin`; one that checks Linux behavior starts with `env ZAKWAS_TEST_GOOS=linux`. Both run on any host. The real Linux run is the `ubuntu` CI job.
+- A `commands` check runs in its own process group only when zakwas has no controlling terminal (`runner.Exec.Detached`); with one it must stay in the foreground group, or a check that reads `/dev/tty` is stopped. `go test` cannot cover that without a pty, so after touching `internal/runner` run this by hand against a build of `main` and of your branch. It prints the exit status and the seconds the check took: `0 0` is right, `256 30` means the check was stopped and timed out:
+
+  ```bash
+  printf 'commands:\n  - name: needs-tty\n    check: head -c1 </dev/tty >/dev/null\n    run: "true"\n' > /tmp/z.yaml
+  python3 -c 'import os,pty,sys,time; pid,fd=pty.fork(); pid or os.execv(sys.argv[1],[sys.argv[1],"-c","/tmp/z.yaml","check"]); time.sleep(1); os.write(fd,b"x\n"); t=time.time(); print(os.waitpid(pid,0)[1], round(time.time()-t))' ./zakwas
+  ```
 - Docs: the platform tables in `docs/config.md` are checked against `internal/platform`; change them together.
 - Machine-readable output (`--json`, apply history) is versioned by `engine.FormatVersion`: adding a field is fine, renaming or removing one bumps the version.
 - Comments explain a non-obvious why, never what.
