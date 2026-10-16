@@ -405,7 +405,7 @@ func (m *Module) planMCPFile(store mcpStore, path string, want map[string]config
 			if present {
 				action, from = engine.Update, cur.text
 			}
-			if server.OAuth {
+			if server.OAuth.On() {
 				detail += ", then " + store.loginHint(name)
 			}
 			changes = append(changes, engine.Change{

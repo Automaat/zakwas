@@ -88,6 +88,10 @@ func claudeObject(s config.MCPServer) (object, error) {
 		if len(headers) > 0 {
 			errs = append(errs, set("headers", headers))
 		}
+		if s.OAuth.HasClient() {
+			oauth, err := claudeOAuth(s.OAuth)
+			errs = append(errs, err, set("oauth", oauth))
+		}
 		return o, errors.Join(errs...)
 	}
 	env := maps.Clone(s.Env)
@@ -106,6 +110,21 @@ func claudeObject(s config.MCPServer) (object, error) {
 		errs = append(errs, set("env", env))
 	}
 	return o, errors.Join(errs...)
+}
+
+// claudeOAuth is the oauth object `claude mcp add --client-id --callback-port`
+// stores; scopes is the key Claude reads for the scope, which the command
+// has no flag for.
+func claudeOAuth(o config.MCPOAuth) (object, error) {
+	var out object
+	errs := []error{out.set("clientId", o.ClientID)}
+	if o.CallbackPort != 0 {
+		errs = append(errs, out.set("callbackPort", o.CallbackPort))
+	}
+	if o.Scope != "" {
+		errs = append(errs, out.set("scopes", o.Scope))
+	}
+	return out, errors.Join(errs...)
 }
 
 func (c claudeMCP) render(_ string, s config.MCPServer) (mcpEntry, error) {

@@ -200,3 +200,44 @@ func TestPlanReasonsNeverEchoTheValuesOfTheRules(t *testing.T) {
 		t.Errorf("skipped = %v", skips(res))
 	}
 }
+
+func TestPlanCarriesTheOAuthClientAcrossProviders(t *testing.T) {
+	cfg, home := repo(t)
+	oauth := func() *agents.CapturedOAuth {
+		return &agents.CapturedOAuth{ClientID: "0oa1zlwt4wuQdH7xt358", CallbackPort: 54661, Scope: "read write"}
+	}
+	res := Plan([]agents.Candidate{
+		server("claude", agents.CapturedServer{URL: "https://mcp.example.com/slack", OAuth: oauth()}),
+		server("codex", agents.CapturedServer{URL: "https://mcp.example.com/slack", OAuth: oauth()}),
+	}, cfg, home)
+	if got := summary(res); !slices.Equal(got, []string{"add MCP server docs claude,codex"}) {
+		t.Fatalf("ops = %q, skipped %v", got, skips(res))
+	}
+	if got := res.Ops[0].Server.OAuth; got == nil || got.ClientID != "0oa1zlwt4wuQdH7xt358" || got.CallbackPort == nil || *got.CallbackPort != 54661 || got.Scope != "read write" {
+		t.Errorf("op oauth = %+v", got)
+	}
+	applied, err := proposal.Apply(res.Ops, cfg, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applied.Config.Agents.MCP["docs"].OAuth; got.ClientID != "0oa1zlwt4wuQdH7xt358" || got.CallbackPort != 54661 || got.Scope != "read write" {
+		t.Errorf("declared oauth = %+v", got)
+	}
+
+	other := oauth()
+	other.CallbackPort = 54662
+	for name, second := range map[string]*agents.CapturedOAuth{
+		"another port":   other,
+		"no client":      nil,
+		"another scope":  {ClientID: "0oa1zlwt4wuQdH7xt358", CallbackPort: 54661},
+		"another client": {ClientID: "0oa2otherEXAMPLE", CallbackPort: 54661, Scope: "read write"},
+	} {
+		res := Plan([]agents.Candidate{
+			server("claude", agents.CapturedServer{URL: "https://mcp.example.com/slack", OAuth: oauth()}),
+			server("codex", agents.CapturedServer{URL: "https://mcp.example.com/slack", OAuth: second}),
+		}, cfg, home)
+		if got := skips(res)["codex mcp docs"]; !strings.Contains(got, "differs from claude's server") {
+			t.Errorf("%s: skipped = %v", name, skips(res))
+		}
+	}
+}

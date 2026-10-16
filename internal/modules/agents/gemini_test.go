@@ -361,7 +361,7 @@ func TestGeminiLeavesServersItCannotCarry(t *testing.T) {
 		"args":       {Command: "x", Args: []string{"--root", "${HOME}/data"}},
 		"cmd":        {Command: "$BIN/x"},
 		"url":        {URL: "https://example.com/$X"},
-		"oauth":      {URL: "https://example.com/oauth", OAuth: true},
+		"oauth":      {URL: "https://example.com/oauth", OAuth: config.MCPOAuth{Enabled: true}},
 	}})
 	apply(t, plan(t, m))
 	var manifest geminiManifest

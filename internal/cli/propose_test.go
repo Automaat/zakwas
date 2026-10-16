@@ -143,6 +143,54 @@ func TestProposeSavesWithoutEditing(t *testing.T) {
 	}
 }
 
+func TestProposeMCPServerWithOAuthClient(t *testing.T) {
+	env, _ := proposeSetup(t)
+	before := readFile(t, filepath.Join(env.Cwd, "zakwas.yaml"))
+	p := propose(t, env, "add-mcp", "slack", "-url", "https://mcp.example.com/slack",
+		"-oauth-client-id", "0oa1abcdEXAMPLE", "-oauth-callback-port", "54661", "-oauth-scope", "read write", "-providers", "opencode")
+	if !strings.Contains(p.Diff, "+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: read write}") || !strings.Contains(p.Diff, "+      url: https://mcp.example.com/slack") {
+		t.Errorf("diff = %q", p.Diff)
+	}
+	if p.Tier != proposal.TierHigh {
+		t.Errorf("tier = %s", p.Tier)
+	}
+	if got := p.Ops[0].Server.OAuth; got == nil || got.ClientID != "0oa1abcdEXAMPLE" || got.CallbackPort == nil || *got.CallbackPort != 54661 || got.Scope != "read write" {
+		t.Errorf("saved oauth = %+v", got)
+	}
+	if after := readFile(t, filepath.Join(env.Cwd, "zakwas.yaml")); after != before {
+		t.Errorf("propose edited zakwas.yaml:\n%s", after)
+	}
+
+	for _, tt := range []struct {
+		name string
+		args []string
+		msg  string
+	}{
+		{"port without a client", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-callback-port", "1"}, "oauth needs a client id"},
+		{"scope without a client", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-scope", "read"}, "oauth needs a client id"},
+		{"client on a command server", []string{"propose", "add-mcp", "a", "-command", "x", "-oauth-client-id", "c"}, "oauth belongs to a url server"},
+		{"client with a bearer token", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-bearer-token-env", "T"}, "oauth can't be combined with a bearer token"},
+		{"port zero", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-oauth-callback-port", "0"}, "between 1 and 65535"},
+		{"port zero without a client", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-callback-port", "0"}, "oauth needs a client id"},
+		{"empty client id", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", ""}, "oauth needs a client id"},
+		{"empty client id with a port", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "", "-oauth-callback-port", "1"}, "oauth needs a client id"},
+		{"empty scope", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-oauth-scope", ""}, "--oauth-scope is empty"},
+		{"empty scope without a client", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-scope", ""}, "--oauth-scope is empty"},
+		{"empty client id on a command server", []string{"propose", "add-mcp", "a", "-command", "x", "-oauth-client-id", ""}, "oauth belongs to a url server"},
+		{"port out of range", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-oauth-callback-port", "65536"}, "must be between 1 and 65535"},
+		{"client with a space", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c d"}, "oauth.clientId may only hold visible"},
+		{"scope with a quote", []string{"propose", "add-mcp", "a", "-url", "https://e.com", "-oauth-client-id", "c", "-oauth-scope", `a"b`}, "oauth.scope"},
+		{"flag on another operation", []string{"propose", "add-brew", "jq", "-oauth-client-id", "c"}, "add-brew doesn't take -oauth-client-id"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := invoke(env, "", tt.args...)
+			if r.code == ExitOK || !strings.Contains(r.stdout+r.stderr, tt.msg) {
+				t.Errorf("exit %d, want a failure mentioning %q\nstdout: %s\nstderr: %s", r.code, tt.msg, r.stdout, r.stderr)
+			}
+		})
+	}
+}
+
 func TestProposalsEmptyAndOtherConfig(t *testing.T) {
 	env, _ := proposeSetup(t)
 	if r := invoke(env, "", "proposals"); r.code != ExitOK || !strings.Contains(r.stdout, "No pending proposals") {

@@ -269,7 +269,7 @@ The `claude` (Claude Code), `codex` (Codex), `opencode`, `gemini` (Gemini CLI) a
 | `hooks.commands` | list | no | | Shared command hooks, each with `event`, `command`, and optional `providers`. See below. |
 | `hooks.klaudiush` | bool | no | `false` | Register klaudiush's enabled providers. See below. |
 | `permissions.allow`, `permissions.review`, `permissions.deny` | list | no | | Shell command prefixes the agents may run without asking, must have reviewed, or must never run. Each is a command string, or `{command, providers, justification}`. See [permissions](#permissions). |
-| `mcp` | map | no | | MCP server name → `{command, args, env, envVars}` for a stdio server or `{url, headers, headerEnv, bearerTokenEnv, oauth}` for an HTTP one, each with optional `providers`. See [mcp](#mcp). |
+| `mcp` | map | no | | MCP server name → `{command, args, env, envVars}` for a stdio server or `{url, headers, headerEnv, bearerTokenEnv, oauth}` for an HTTP one (`oauth` is `true` or `{clientId, callbackPort, scope}`), each with optional `providers`. See [mcp](#mcp). |
 | `codex.settings` | map | no | | Selected global Codex config.toml values, edited in place independently of profiles. See [global Codex settings](#global-codex-settings). |
 | `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex, opencode, Gemini CLI and Copilot CLI: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode`, `gemini`, `copilot` blocks. See [profiles](#profiles). |
 | `skills` | list | no | | Standalone skills linked into every managed agent: a path, or `{path, git, ref, providers}`. See [skills](#skills). |
@@ -437,7 +437,7 @@ opencode applies the last pattern that matches. The function therefore writes th
 | `headers` | HTTP | Header names with their values. Written to the agents' config as is. |
 | `headerEnv` | HTTP | Header name → name of the environment variable holding its value. |
 | `bearerTokenEnv` | HTTP | Name of the environment variable holding a bearer token, sent as `Authorization: Bearer <token>`. |
-| `oauth` | HTTP | The server signs in with OAuth; `plan` and `apply` show the login command. Not combined with `bearerTokenEnv` or an `Authorization` header. |
+| `oauth` | HTTP | `true`: the server signs in with OAuth and registers its own client; `plan` and `apply` show the login command. A mapping `{clientId, callbackPort, scope}`: a pre-registered OAuth client, written to every provider that can take it (see [OAuth clients](#oauth-clients)). Not combined with `bearerTokenEnv` or an `Authorization` header. |
 | `providers` | both | Providers to register the server with; must be in `agents.providers`. |
 
 Secrets never go into the config zakwas writes: `envVars`, `headerEnv` and `bearerTokenEnv` name the environment variable and each agent reads it in its own way. `env`, `headers`, `args` and the `url` are written as they are, so keep tokens out of them (a `url` can't hold a user name or password, and `plan` diffs hide query values).
@@ -473,7 +473,7 @@ agents:
 
 **Copilot CLI.** zakwas edits the user-level `mcpServers` of `mcp-config.json` in place, the way `copilot mcp add` does (a stdio server is `type: local`, an HTTP one `type: http`, each with `tools: ["*"]`), and keeps the file's other servers and keys, so servers added with `copilot mcp add` stay. A server entry that is `null`, which Copilot ignores, doesn't fail the plan and stays in the file, unless `agents.mcp` declares a server of that name: apply then replaces it. Servers from a workspace `.mcp.json` or a plugin live elsewhere and are never touched. An OAuth server needs `/mcp auth <name>` in Copilot CLI.
 
-**Gemini CLI.** The servers are part of the extension's manifest, a file zakwas owns, so there is no per-server ownership: removing a server removes it from the manifest. Gemini expands `$X` and `${X}` anywhere in `gemini-extension.json` when it loads the extension, from its own environment, so `envVars`, `headerEnv` and `bearerTokenEnv` work as they do for the other agents. A literal `$` in a server's `command`, `args`, `url`, `env` or `headers` would be replaced the same way, so zakwas leaves such a server out of Gemini and the plan says so; so it does for a server whose name has an underscore, which Gemini's policy rules misread. Scope those servers to the other providers. A server with `oauth: true` is registered as is; sign in with `/mcp auth <name>` in Gemini CLI.
+**Gemini CLI.** The servers are part of the extension's manifest, a file zakwas owns, so there is no per-server ownership: removing a server removes it from the manifest. Gemini expands `$X` and `${X}` anywhere in `gemini-extension.json` when it loads the extension, from its own environment, so `envVars`, `headerEnv` and `bearerTokenEnv` work as they do for the other agents. A literal `$` in a server's `command`, `args`, `url`, `env`, `headers` or `oauth` settings would be replaced the same way, so zakwas leaves such a server out of Gemini and the plan says so; so it does for a server whose name has an underscore, which Gemini's policy rules misread. Scope those servers to the other providers. A server with `oauth: true` is registered as is; with an `oauth` mapping its client goes into the server's `oauth` object. Sign in with `/mcp auth <name>` in Gemini CLI.
 
 **opencode.** zakwas doesn't edit `opencode.json`, which is usually a [template](#templates). Render the servers into its `mcp` key with `agentMCP`:
 
@@ -483,7 +483,7 @@ agents:
 }
 ```
 
-A server targets opencode through its `providers` or, without them, `agents.providers`. A stdio server renders as `{"type": "local", "command": [command, args…], "environment": {…}, "enabled": true}` and an HTTP one as `{"type": "remote", "url": …, "headers": {…}, "enabled": true}`; a server with headers also gets `"oauth": false`, so opencode doesn't start a login for it.
+A server targets opencode through its `providers` or, without them, `agents.providers`. A stdio server renders as `{"type": "local", "command": [command, args…], "environment": {…}, "enabled": true}` and an HTTP one as `{"type": "remote", "url": …, "headers": {…}, "enabled": true}`; a server with headers also gets `"oauth": false`, so opencode doesn't start a login for it, unless it has an `oauth` mapping, which renders as `"oauth": {"clientId": …, "callbackPort": …, "scope": …}` instead. This is the flat `mcp` layout that opencode 2.0 still reads; its newer `mcp.servers` layout spells the keys in snake case.
 
 **Prompting before a tool.** A server started as `zakwas mcp --enable-apply` (the command's base name is `zakwas`, its first argument `mcp`; a launcher such as `mise exec --` isn't recognized) has an always-prompt tool, `zakwas_apply` ([`zakwas mcp`](commands.md#mcp)). Claude Code asks before it from the tool's own metadata. For Codex zakwas adds `[mcp_servers.<name>.tools.zakwas_apply]` with `approval_mode = "prompt"` to the server's tables. opencode's `permission` object is part of `opencode.json`, which zakwas only renders pieces of, so the plan lists a warning (not a change) naming the entry to add, `"<name>_zakwas_apply": "ask"`, until a template for `opencode.json` contains it.
 
@@ -493,7 +493,45 @@ A server targets opencode through its `providers` or, without them, `agents.prov
 - Changing a declared server changes only that server. Removing it, removing `mcp`, or removing the whole `agents` section removes only servers zakwas registered, shown as destructive in the plan. A server edited since zakwas wrote it is left in place and only forgotten when it goes; when it is still declared and differs from `zakwas.yaml`, the plan fails instead of resetting your edit, naming the differing keys.
 - When the config dir moves (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the servers zakwas registered in the old file are removed there.
 
-`plan` and `check` only read the config files: they start no MCP server and open no browser. A server with `oauth: true` shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
+`plan` and `check` only read the config files: they start no MCP server and open no browser. A server with `oauth` (`true` or a mapping) shows how to sign in, because zakwas never does: `/mcp` in Claude Code, `codex mcp login <name>` for Codex. The plan fails when a config file zakwas has to change is read-only or not a regular file, such as one installed with `files`.
+
+#### OAuth clients
+
+A gateway that has no dynamic client registration needs the pre-registered client every agent signs in with. `oauth` takes it as a mapping:
+
+| Key | Required | Description |
+|---|---|---|
+| `clientId` | yes | The OAuth client ID, as a string (quote a number: `'12345'`). It is public, so it is written as is. It may hold letters, digits, punctuation and symbols; spaces, control and invisible characters, combining marks and blank letters such as the Hangul fillers are rejected. |
+| `callbackPort` | no | Fixed port (1 to 65535) of the local callback, for a client whose redirect URIs are registered with a port. Default: the agent's own. |
+| `scope` | no | Scopes to request, as a string of visible ASCII names separated by single spaces; double quotes and backslashes are rejected. Default: the scopes the server announces. |
+
+```yaml
+agents:
+  providers: [claude, codex, opencode]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: "read write"}
+```
+
+`oauth: true` keeps its meaning: only the login command in the plan, nothing extra in the agent's config. The mapping form applies to an HTTP server only and is not combined with `bearerTokenEnv` or an `Authorization` header, like `true`. Unknown keys fail the load, merge keys (`<<`) inside the mapping too, and so does a `clientSecret`: there is no client secret, so only public (PKCE) clients are supported, and a secret never reaches the config repo. A client that needs one stays outside zakwas.
+
+What each agent gets:
+
+| Provider | `clientId` | `callbackPort` | `scope` |
+|---|---|---|---|
+| Claude Code | `oauth.clientId` | `oauth.callbackPort` | `oauth.scopes`, one space-separated string |
+| Codex | `oauth.client_id` | `oauth.callback_port` | `scopes`, a list |
+| opencode | `oauth.clientId` | `oauth.callbackPort` | `oauth.scope` |
+| Gemini CLI | `oauth.clientId`, with `oauth.enabled: true` | `oauth.redirectUri` `http://localhost:<port>/oauth/callback` | `oauth.scopes`, a list |
+| Copilot CLI | `oauthClientId`, with `oauthPublicClient: true` | `auth.redirectPort` | `oauthScopes`, a list |
+
+All five can express all three keys, so a plan has no warning for them. Two things stay with you:
+
+- Each agent builds its own redirect URI from the port, with its own path, and the authorization server only accepts the URIs registered for the client. Register one for every agent you sign in with: Claude Code `http://localhost:<port>/callback`, Gemini CLI `http://localhost:<port>/oauth/callback`; check the others in their docs. The agents don't share a path.
+- The mapping registers the client; signing in is still yours, with the command in the plan (`/mcp` in Claude Code, `codex mcp login <name>`, `/mcp auth <name>` in Copilot and Gemini CLI, `opencode mcp auth <name>`).
+
+An existing server of the same name is adopted when its client settings are identical and fails the provider's plan when they differ, as for every other key.
 
 ### Global Codex settings
 

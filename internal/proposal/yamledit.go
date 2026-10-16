@@ -297,7 +297,7 @@ func plainSafe(s string, flow bool) bool {
 	if strings.Contains(s, ": ") || strings.Contains(s, " #") || strings.HasSuffix(s, ":") {
 		return false
 	}
-	if flow && strings.ContainsAny(s, ",[]{}") {
+	if flow && strings.ContainsAny(s, ",[]{}?") {
 		return false
 	}
 	for _, r := range s {

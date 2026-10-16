@@ -192,6 +192,11 @@ func proposeSchema() map[string]any {
 		"url":              stringProp("URL of an HTTP server."),
 		"env_vars":         stringsProp("Environment variables passed through to the command."),
 		"bearer_token_env": stringProp("Environment variable holding the bearer token of a url server."),
+		"oauth": objectSchema(map[string]any{
+			"client_id":     stringProp("Pre-registered OAuth client ID of a url server. Public; a client secret is not supported."),
+			"callback_port": map[string]any{"type": "integer", "minimum": 1, "maximum": 65535, "description": "Fixed port of the local OAuth callback."},
+			"scope":         stringProp("OAuth scopes separated by single spaces."),
+		}, "client_id"),
 	})
 	return objectSchema(map[string]any{
 		"kind":          map[string]any{"type": "string", "enum": proposal.Kinds, "description": "The operation."},

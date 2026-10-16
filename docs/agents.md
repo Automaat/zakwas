@@ -7,7 +7,7 @@ What you can declare under `agents`:
 | Key | What it declares |
 |---|---|
 | `marketplaces`, `plugins` | plugins and the marketplaces they come from |
-| `mcp` | MCP servers, as a stdio `command` or an HTTP `url`, with secrets as environment references |
+| `mcp` | MCP servers, as a stdio `command` or an HTTP `url`, with secrets as environment references and, for an HTTP server, an optional pre-registered OAuth client |
 | `instructions` | global instructions, from one or more files, rendered per agent |
 | `skills` | standalone skills from a path or a git repository |
 | `profiles` | named permission profiles such as "read-only review" |
@@ -47,6 +47,7 @@ Notes on the cells:
 - "Best effort" means that opencode is written only once its CLI is on `PATH`, and a blocked write is skipped instead of failing the plan. Name `opencode` in `providers` to make it strict.
 - opencode has no user-level file zakwas can edit for MCP servers, permissions and the guard, because `opencode.json` is usually a template. Render them into it with the `agentMCP` and `agentPermissions` template functions; the plan warns when the guard has nothing to write into.
 - Gemini CLI and Copilot CLI rewrite their own `settings.json` or `config.json`, so zakwas never writes them. For Gemini it renders one extension, `~/.gemini/zakwas`, links it, and writes one policy file. Copilot only gets files it reads from a directory of its own.
+- An HTTP server can name a pre-registered OAuth client (`oauth: {clientId, callbackPort, scope}`); every provider takes all three keys, each in its own spelling. See [OAuth clients](config.md#oauth-clients).
 - A profile field a provider cannot express is listed in the plan as a warning, and `check` stays clean. See the [field mapping](config.md#profiles).
 
 ## Start small

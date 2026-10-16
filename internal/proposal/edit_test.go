@@ -98,6 +98,75 @@ func TestApplyEditsOnlyTheEntries(t *testing.T) {
 	}
 }
 
+func TestApplyMCPServerWithOAuthClient(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		oauth *OAuth
+		want  string
+	}{
+		{"full", &OAuth{ClientID: "0oa1abcdEXAMPLE", CallbackPort: intp(54661), Scope: "read write"}, "      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: read write}\n"},
+		{"client only", &OAuth{ClientID: "0oa1abcdEXAMPLE"}, "      oauth: {clientId: 0oa1abcdEXAMPLE}\n"},
+		{"client id that reads as a number", &OAuth{ClientID: "12345"}, "      oauth: {clientId: \"12345\"}\n"},
+		{"scope with a colon", &OAuth{ClientID: "c", Scope: "api:read api:write"}, "      oauth: {clientId: c, scope: api:read api:write}\n"},
+		{"client id with a flow character", &OAuth{ClientID: "a,b"}, "      oauth: {clientId: \"a,b\"}\n"},
+		{"client id with a question mark", &OAuth{ClientID: "a?b"}, "      oauth: {clientId: \"a?b\"}\n"},
+		{"quotes in client id and scope", &OAuth{ClientID: `a'b"c\d`, Scope: "it's:ok a'b"}, `      oauth: {clientId: a'b"c\d, scope: it's:ok a'b}` + "\n"},
+		{"scope with a question mark", &OAuth{ClientID: "c", Scope: "https://x/y?z"}, "      oauth: {clientId: c, scope: \"https://x/y?z\"}\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, home := newRepo(t, baseConfig)
+			res, err := Apply([]Op{
+				{Kind: AddMCP, Name: "slack", Providers: []string{"claude"}, Server: &Server{URL: "https://mcp.example.com/slack", OAuth: tt.oauth}},
+			}, cfg, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := baseConfig + "  mcp:\n    slack:\n      url: https://mcp.example.com/slack\n" + tt.want + "      providers: [claude]\n"
+			if got := string(res.Edits[0].New); got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+			got := res.Config.Agents.MCP["slack"].OAuth
+			if got.ClientID != tt.oauth.ClientID || got.CallbackPort != derefPort(tt.oauth.CallbackPort) || got.Scope != tt.oauth.Scope || !got.On() {
+				t.Errorf("parsed oauth = %+v, want %+v", got, tt.oauth)
+			}
+		})
+	}
+}
+
+func TestValidateMCPOAuthClient(t *testing.T) {
+	url := func(o *OAuth) Op {
+		return Op{Kind: AddMCP, Name: "a", Server: &Server{URL: "https://e.com", OAuth: o}}
+	}
+	for _, tt := range []struct {
+		name string
+		op   Op
+		want string
+	}{
+		{"valid", url(&OAuth{ClientID: "c", CallbackPort: intp(1), Scope: "a b"}), ""},
+		{"no client", url(&OAuth{CallbackPort: intp(1)}), "oauth needs a client id"},
+		{"empty", url(&OAuth{}), "oauth needs a client id"},
+		{"command server", Op{Kind: AddMCP, Name: "a", Server: &Server{Command: "x", OAuth: &OAuth{ClientID: "c"}}}, "oauth belongs to a url server"},
+		{"bearer token", Op{Kind: AddMCP, Name: "a", Server: &Server{URL: "https://e.com", BearerTokenEnv: "T", OAuth: &OAuth{ClientID: "c"}}}, "can't be combined with a bearer token"},
+		{"negative port", url(&OAuth{ClientID: "c", CallbackPort: intp(-1)}), "between 1 and 65535"},
+		{"port too high", url(&OAuth{ClientID: "c", CallbackPort: intp(65536)}), "between 1 and 65535"},
+		{"control character", url(&OAuth{ClientID: "c\x1b[2J"}), "may only hold visible"},
+		{"port zero", url(&OAuth{ClientID: "c", CallbackPort: intp(0)}), "between 1 and 65535"},
+		{"scope", url(&OAuth{ClientID: "c", Scope: "a  b"}), "oauth.scope"},
+		{"right-to-left override", url(&OAuth{ClientID: "ab\u202ecd"}), "may only hold visible"},
+		{"zero-width space", url(&OAuth{ClientID: "ab\u200bcd"}), "may only hold visible"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.op.Validate()
+			switch {
+			case tt.want == "" && err != nil:
+				t.Errorf("err = %v", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Errorf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyMarketplaceThenItsPlugin(t *testing.T) {
 	cfg, home := newRepo(t, baseConfig)
 	_, err := Apply([]Op{
@@ -314,4 +383,13 @@ func TestAddBrewRefusesFilesAnInsertCouldLandInside(t *testing.T) {
 	if err != nil || !strings.HasSuffix(string(got), "brew \"jq\"\n") {
 		t.Errorf("one-line entries: %q, %v", got, err)
 	}
+}
+
+func intp(n int) *int { return &n }
+
+func derefPort(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

@@ -268,7 +268,7 @@ func TestAgentMCP(t *testing.T) {
 	agents := &config.Agents{MCP: map[string]config.MCPServer{
 		"zeta":  {Command: "npx", Args: []string{"-y", "pkg"}, Env: map[string]string{"LANG": "C"}, EnvVars: []string{"TOKEN"}},
 		"alpha": {URL: "https://e.com/mcp?a=1&b=2", BearerTokenEnv: "API_TOKEN", Headers: map[string]string{"X-Org": "acme"}, HeaderEnv: map[string]string{"X-Key": "KEY"}},
-		"oauth": {URL: "https://o.com/mcp", OAuth: true},
+		"oauth": {URL: "https://o.com/mcp", OAuth: config.MCPOAuth{Enabled: true}},
 		"other": {Command: "other", Providers: []string{config.ProviderClaude}},
 	}}
 	got, err := agentMCP(agents, config.ProviderOpencode)
@@ -283,6 +283,32 @@ func TestAgentMCP(t *testing.T) {
 	}
 	if !json.Valid([]byte(got)) {
 		t.Errorf("not JSON: %s", got)
+	}
+}
+
+func TestAgentMCPOAuthClient(t *testing.T) {
+	agents := &config.Agents{MCP: map[string]config.MCPServer{
+		"full":    {URL: "https://mcp.example.com/slack", OAuth: config.MCPOAuth{ClientID: "0oa1abcdEXAMPLE", CallbackPort: 54661, Scope: "read write"}},
+		"bare":    {URL: "https://mcp.example.com/bare", OAuth: config.MCPOAuth{ClientID: "0oa1abcdEXAMPLE"}},
+		"headers": {URL: "https://mcp.example.com/headers", Headers: map[string]string{"X-Org": "acme"}, OAuth: config.MCPOAuth{ClientID: "0oa1abcdEXAMPLE", CallbackPort: 19876}},
+		"hint":    {URL: "https://mcp.example.com/hint", OAuth: config.MCPOAuth{Enabled: true}},
+		"off":     {URL: "https://mcp.example.com/off", Headers: map[string]string{"X-Org": "acme"}},
+	}}
+	got, err := agentMCP(agents, config.ProviderOpencode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"bare": {"type":"remote","url":"https://mcp.example.com/bare","oauth":{"clientId":"0oa1abcdEXAMPLE"},"enabled":true}, ` +
+		`"full": {"type":"remote","url":"https://mcp.example.com/slack","oauth":{"clientId":"0oa1abcdEXAMPLE","callbackPort":54661,"scope":"read write"},"enabled":true}, ` +
+		`"headers": {"type":"remote","url":"https://mcp.example.com/headers","headers":{"X-Org":"acme"},"oauth":{"clientId":"0oa1abcdEXAMPLE","callbackPort":19876},"enabled":true}, ` +
+		`"hint": {"type":"remote","url":"https://mcp.example.com/hint","enabled":true}, ` +
+		`"off": {"type":"remote","url":"https://mcp.example.com/off","headers":{"X-Org":"acme"},"oauth":false,"enabled":true}}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	again, err := agentMCP(agents, config.ProviderOpencode)
+	if err != nil || again != got {
+		t.Errorf("not deterministic: %s, %v", again, err)
 	}
 }
 

@@ -267,7 +267,7 @@ func TestMCPForgetsServersChangedByHand(t *testing.T) {
 
 func TestMCPOAuthLoginHint(t *testing.T) {
 	m := mcpModule(t, []string{config.ProviderClaude, config.ProviderCodex}, map[string]config.MCPServer{
-		"linear": {URL: "https://mcp.example.com/mcp", OAuth: true},
+		"linear": {URL: "https://mcp.example.com/mcp", OAuth: config.MCPOAuth{Enabled: true}},
 	})
 	changes := plan(t, m)
 	want := []string{

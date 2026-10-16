@@ -30,6 +30,9 @@ func Generate() ([]byte, error) {
 	if err := scalarShorthands(root); err != nil {
 		return nil, err
 	}
+	if err := mcpOAuthForms(root); err != nil {
+		return nil, err
+	}
 	root.ID = schema.ID
 	root.Title = "zakwas.yaml"
 	root.Description = "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands, launchd."
@@ -115,6 +118,33 @@ func scalarShorthands(root *jsonschema.Schema) error {
 		s.Extras["type"] = []string{"string", s.Type}
 		s.Type = ""
 	}
+	return nil
+}
+
+// mcpOAuthForms lets agents.mcp.<name>.oauth be a boolean as well as the
+// mapping naming a client, matching MCPOAuth.UnmarshalYAML. Like the other
+// shorthands it widens "type", which keeps the mapping's properties for
+// editors; its "required" only constrains a mapping.
+func mcpOAuthForms(root *jsonschema.Schema) error {
+	mcp := property(property(root, "agents"), "mcp")
+	if mcp == nil || mcp.AdditionalProperties == nil {
+		return errors.New("schemagen: agents.mcp not found")
+	}
+	oauth := property(mcp.AdditionalProperties, "oauth")
+	if oauth == nil {
+		return errors.New("schemagen: agents.mcp.*.oauth not found")
+	}
+	if oauth.Extras == nil {
+		oauth.Extras = map[string]any{}
+	}
+	oauth.Extras["type"] = []string{"boolean", "object", "null"}
+	oauth.Type = ""
+	oauth.Default = false
+	clientID := property(oauth, "clientId")
+	if clientID == nil {
+		return errors.New("schemagen: agents.mcp.*.oauth.clientId not found")
+	}
+	clientID.Not = &jsonschema.Schema{Pattern: "[" + config.BlankGlyphs + "]"}
 	return nil
 }
 

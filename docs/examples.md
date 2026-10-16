@@ -103,6 +103,23 @@ agents:
 
 opencode takes its servers from its config template: add `"mcp": {{ agentMCP "opencode" }}` to the `opencode.json` template, as in [Agent permissions](#agent-permissions). A server with `oauth: true` shows the login command in the plan; zakwas never signs in.
 
+## An MCP server behind an OAuth gateway
+
+A gateway without dynamic client registration gives you a client ID registered for a fixed local callback. Declare it once, and zakwas writes the client into each agent's own format. `oauth: true` would only add the login hint to the plan.
+
+```yaml
+agents:
+  providers: [claude, codex, opencode]
+  mcp:
+    slack:
+      url: https://mcp.example.com/slack
+      oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: "read write"}
+```
+
+`zakwas plan --only agents` shows a `+ claude mcp slack` and a `+ codex mcp slack` line, each ending in the command that signs in; opencode gets its entry through the `agentMCP` template function, so it has no `agents` line; the rendered `opencode.json` shows up under `templates` (run `zakwas plan --only templates,agents`). Claude Code gets what `claude mcp add --transport http slack https://mcp.example.com/slack --client-id 0oa1abcdEXAMPLE --callback-port 54661` writes, plus `scopes`, so a server you already added that way is adopted when it matches. Codex gets `scopes` and an `[mcp_servers.slack.oauth]` table with `client_id` and `callback_port`; opencode gets `"oauth": {"clientId": …, "callbackPort": …, "scope": …}` from `agentMCP "opencode"`. Gemini CLI and Copilot CLI take the same mapping, as listed in [OAuth clients](config.md#oauth-clients).
+
+Register the redirect URIs of the agents you use with the gateway's client: `http://localhost:54661/callback` for Claude Code and `http://localhost:54661/oauth/callback` for Gemini CLI, for example. There is no `clientSecret`: only public clients work, and the secret of a confidential one would have to stay out of the config repo. Sign in once per agent (`/mcp` in Claude Code, `codex mcp login slack`).
+
 ## Instructions from several files
 
 `instructions` is one file or a list, joined in order with a blank line between them. Every file is a template, so one list serves agents that differ: branch on `{{ .Provider }}` (`claude`, `codex`, `opencode`, `gemini`, `copilot`).

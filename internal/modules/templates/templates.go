@@ -181,8 +181,16 @@ type opencodeMCP struct {
 	Environment map[string]string `json:"environment,omitempty"`
 	URL         string            `json:"url,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
-	OAuth       *bool             `json:"oauth,omitempty"`
+	OAuth       any               `json:"oauth,omitempty"`
 	Enabled     bool              `json:"enabled"`
+}
+
+// opencodeOAuth is the oauth object of a remote entry. It has no
+// client secret: the config holds none.
+type opencodeOAuth struct {
+	ClientID     string `json:"clientId"`
+	CallbackPort int    `json:"callbackPort,omitempty"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 func opencodeServer(s config.MCPServer) opencodeMCP {
@@ -207,9 +215,11 @@ func opencodeServer(s config.MCPServer) opencodeMCP {
 		headers["Authorization"] = "Bearer {env:" + s.BearerTokenEnv + "}"
 	}
 	out := opencodeMCP{Type: "remote", URL: s.URL, Headers: headers, Enabled: true}
-	if len(headers) > 0 {
-		off := false
-		out.OAuth = &off
+	switch {
+	case s.OAuth.HasClient():
+		out.OAuth = opencodeOAuth{ClientID: s.OAuth.ClientID, CallbackPort: s.OAuth.CallbackPort, Scope: s.OAuth.Scope}
+	case len(headers) > 0:
+		out.OAuth = false
 	}
 	return out
 }

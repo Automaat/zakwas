@@ -29,20 +29,36 @@ var kindOrder = []string{KindMarketplace, KindPlugin, KindMCP, KindPermission}
 
 // CapturedServer is the part of an MCP server that a proposal can declare.
 type CapturedServer struct {
-	Command        string   `json:"command,omitempty"`
-	Args           []string `json:"args,omitempty"`
-	URL            string   `json:"url,omitempty"`
-	EnvVars        []string `json:"env_vars,omitempty"`
-	BearerTokenEnv string   `json:"bearer_token_env,omitempty"`
+	Command        string         `json:"command,omitempty"`
+	Args           []string       `json:"args,omitempty"`
+	URL            string         `json:"url,omitempty"`
+	EnvVars        []string       `json:"env_vars,omitempty"`
+	BearerTokenEnv string         `json:"bearer_token_env,omitempty"`
+	OAuth          *CapturedOAuth `json:"oauth,omitempty"`
+}
+
+// CapturedOAuth is the public part of a server's OAuth client: its ID, the
+// fixed callback port and the scopes. Never a secret.
+type CapturedOAuth struct {
+	ClientID     string `json:"client_id"`
+	CallbackPort int    `json:"callback_port,omitempty"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 func (s CapturedServer) mcp() config.MCPServer {
-	return config.MCPServer{Command: s.Command, Args: s.Args, URL: s.URL, EnvVars: s.EnvVars, BearerTokenEnv: s.BearerTokenEnv}
+	out := config.MCPServer{Command: s.Command, Args: s.Args, URL: s.URL, EnvVars: s.EnvVars, BearerTokenEnv: s.BearerTokenEnv}
+	if s.OAuth != nil {
+		out.OAuth = config.MCPOAuth{ClientID: s.OAuth.ClientID, CallbackPort: s.OAuth.CallbackPort, Scope: s.OAuth.Scope}
+	}
+	return out
 }
 
 // Summary is the server in one line, without anything that could be a
 // secret.
 func (s CapturedServer) Summary() string {
+	if s.URL != "" && s.OAuth != nil {
+		return "http " + s.URL + " (oauth client " + s.OAuth.ClientID + ")"
+	}
 	if s.URL != "" {
 		return "http " + s.URL
 	}
@@ -355,6 +371,11 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 			return CapturedServer{}, "the environment variable it names for a token " + credentialReason
 		}
 		s.BearerTokenEnv = name
+		oauth, reason := capturedOAuth(provider, v)
+		if reason != "" {
+			return CapturedServer{}, reason
+		}
+		s.OAuth = oauth
 		return s, ""
 	}
 	s.Command, _ = v["command"].(string)
@@ -378,6 +399,56 @@ func capturedServer(provider string, v map[string]any) (CapturedServer, string) 
 		}
 	}
 	return s, ""
+}
+
+var oauthSecretKey = regexp.MustCompile(`(?i)(secret|passw|token|credential|private|bearer|assertion|api[-_]?key)`)
+
+// capturedOAuth reads the pre-registered client out of a server's entry:
+// Claude keeps it in oauth.{clientId,callbackPort,scopes}, Codex in
+// oauth.{client_id,callback_port} and the top-level scopes list. A client
+// ID is public and is not screened like a token. An oauth mapping with a
+// key that names a secret withholds the whole server, without reading the
+// value.
+func capturedOAuth(provider string, v map[string]any) (*CapturedOAuth, string) {
+	raw, ok := v["oauth"].(map[string]any)
+	if !ok {
+		return nil, ""
+	}
+	for key := range raw {
+		if oauthSecretKey.MatchString(key) {
+			return nil, "its oauth settings " + credentialReason
+		}
+	}
+	idKey, portKey := "clientId", "callbackPort"
+	if provider == config.ProviderCodex {
+		idKey, portKey = "client_id", "callback_port"
+	}
+	id, _ := raw[idKey].(string)
+	if id == "" {
+		return nil, ""
+	}
+	out := &CapturedOAuth{ClientID: id}
+	if port, ok := raw[portKey]; ok {
+		switch n := port.(type) {
+		case float64:
+			out.CallbackPort = int(n)
+		case int64:
+			out.CallbackPort = int(n)
+		}
+	}
+	if provider == config.ProviderCodex {
+		out.Scope = strings.Join(mcpStrings(v["scopes"]), " ")
+	} else {
+		out.Scope, _ = raw["scopes"].(string)
+	}
+	if looksSecret(strings.Fields(out.Scope)) {
+		return nil, "its oauth scopes " + credentialReason
+	}
+	problems := config.MCPOAuth{ClientID: out.ClientID, CallbackPort: out.CallbackPort, Scope: out.Scope}.Problems()
+	if len(problems) > 0 {
+		return nil, "its oauth settings can't be declared: " + problems[0]
+	}
+	return out, ""
 }
 
 func mcpStrings(v any) []string {

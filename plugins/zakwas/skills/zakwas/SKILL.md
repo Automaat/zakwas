@@ -31,7 +31,9 @@ zakwas converges this Mac to a `zakwas.yaml` in a config repo. It owns agent set
 | remove a permission rule | `remove-permission`, `decision`, `command` | `zakwas propose remove-permission allow\|review\|deny COMMAND...` |
 | add a Homebrew package | `add-brew`, `name`, `cask` | `zakwas propose add-brew NAME [--cask]` |
 | pin a mise tool | `pin-mise`, `name`, `version` | `zakwas propose pin-mise TOOL VERSION` |
-| add an MCP server | `add-mcp`, `name`, `server` | `zakwas propose add-mcp NAME --command CMD [--arg A] \| --url URL` |
+| add an MCP server | `add-mcp`, `name`, `server` | `zakwas propose add-mcp NAME --command CMD [--arg A] \| --url URL [--oauth-client-id ID [--oauth-callback-port PORT] [--oauth-scope SCOPES]]` |
+
+An `add-mcp` server with a pre-registered OAuth client takes `server.oauth` with `client_id` and optionally `callback_port` and `scope`. Never pass a client secret; there is no field for one.
 
 `providers` limits an entry to some of `claude`, `codex`, `opencode`, `gemini` and `copilot`; leave it out unless the user names one. In the shell form, put every flag of zakwas (`-json`, `-c PATH`, `--providers`) before `--`, and every dash-prefixed word of a command after it: `zakwas propose -json add-permission review -- git log --oneline`.
 
