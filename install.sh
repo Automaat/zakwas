@@ -5,6 +5,9 @@ repo=""
 dir="${ZAKWAS_DIR:-$HOME/dotfiles}"
 version="${ZAKWAS_VERSION:-latest}"
 bin_dir="$HOME/.local/bin"
+release_url="${ZAKWAS_RELEASE_URL:-https://github.com/Automaat/zakwas/releases}"
+os=""
+arch=""
 tmp=""
 apply=1
 attested_since=0.4.0
@@ -15,7 +18,9 @@ die() { printf '\033[1;31mzakwas: %s\033[0m\n' "$1" >&2; exit 1; }
 usage() {
     cat <<'USAGE'
 Installs zakwas to ~/.local/bin, clones your config repo and applies it.
-zakwas installs Homebrew and mise itself when the config uses them.
+Works on macOS and Linux (x86_64, arm64). On macOS, zakwas installs Homebrew
+and mise itself when the config uses them; on Linux those modules are not
+supported (see docs/config.md#platform-support).
 
 Usage: install.sh [--repo URL] [--dir DIR] [--version X.Y.Z] [--no-apply]
 
@@ -23,6 +28,11 @@ Usage: install.sh [--repo URL] [--dir DIR] [--version X.Y.Z] [--no-apply]
   --dir DIR         where the config lives (default: ~/dotfiles, $ZAKWAS_DIR)
   --version X.Y.Z   zakwas release to install (default: latest, $ZAKWAS_VERSION)
   --no-apply        install zakwas and clone, but don't run `zakwas apply`
+
+Environment:
+  ZAKWAS_RELEASE_URL  releases base URL, for a mirror you trust or a test
+                      (default: https://github.com/Automaat/zakwas/releases);
+                      must be https, or http on localhost
 USAGE
 }
 
@@ -78,27 +88,55 @@ verify_attestation() {
     fi
 }
 
+detect_platform() {
+    case "$(uname -s)" in
+        Darwin) os=darwin ;;
+        Linux) os=linux ;;
+        *) die "zakwas supports macOS and Linux, not $(uname -s)" ;;
+    esac
+    case "$(uname -m)" in
+        x86_64|amd64) arch=amd64 ;;
+        arm64|aarch64) arch=arm64 ;;
+        *) die "unsupported architecture: $(uname -m) (zakwas ships amd64 and arm64)" ;;
+    esac
+}
+
+check_release_url() {
+    case "$release_url" in
+        https://*|http://localhost[:/]*|http://127.0.0.1[:/]*) ;;
+        *) die "ZAKWAS_RELEASE_URL must be https, or http on localhost: $release_url" ;;
+    esac
+    release_url="${release_url%/}"
+}
+
+verify_checksum() {
+    local archive="$1"
+    if command -v sha256sum &>/dev/null; then
+        grep "  $archive\$" checksums.txt | sha256sum -c --status
+    else
+        grep "  $archive\$" checksums.txt | shasum -a 256 -c -s
+    fi
+}
+
 install_zakwas() {
     if [ "$version" = latest ]; then
         # The releases/latest redirect names the tag; the API would count
         # against the unauthenticated rate limit shared by the whole network.
-        version=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/Automaat/zakwas/releases/latest)
+        version=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$release_url/latest")
         version=${version##*/v}
         [[ "$version" =~ ^[0-9] ]] || die "can't find the latest zakwas release"
     fi
     [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]] || die "invalid version: $version"
-    local arch archive base
-    arch=$(uname -m)
-    [ "$arch" = x86_64 ] && arch=amd64
-    archive="zakwas_${version}_darwin_${arch}.tar.gz"
-    base="https://github.com/Automaat/zakwas/releases/download/v$version"
+    local archive base
+    archive="zakwas_${version}_${os}_${arch}.tar.gz"
+    base="$release_url/download/v$version"
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
 
     info "Installing zakwas $version to $bin_dir"
     curl -fsSL -o "$tmp/$archive" "$base/$archive"
     curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
-    (cd "$tmp" && grep "  $archive\$" checksums.txt | shasum -a 256 -c -s) ||
+    (cd "$tmp" && verify_checksum "$archive") ||
         die "checksum mismatch for $archive"
     verify_attestation "$tmp/$archive"
     tar -xzf "$tmp/$archive" -C "$tmp" zakwas
@@ -106,9 +144,18 @@ install_zakwas() {
     mv "$tmp/zakwas" "$bin_dir/zakwas"
 }
 
+path_hint() {
+    [ "$os" = linux ] || return 0
+    case ":$PATH:" in
+        *":$bin_dir:"*) ;;
+        *) info "Add $bin_dir to PATH, e.g. echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.profile" ;;
+    esac
+}
+
 main() {
     parse_args "$@"
-    [ "$(uname -s)" = Darwin ] || die "zakwas only supports macOS"
+    detect_platform
+    check_release_url
 
     # Piped as `curl … | bash`, stdin is the script itself: prompts would
     # swallow script text. The script lives in main, called on the last
@@ -119,7 +166,7 @@ main() {
     fi
 
     # git ships with the Command Line Tools, and Homebrew needs them too.
-    if ! xcode-select -p &>/dev/null; then
+    if [ "$os" = darwin ] && ! xcode-select -p &>/dev/null; then
         info "Installing Xcode Command Line Tools (finish the dialog, then press any key)"
         xcode-select --install
         read -r -n 1 -s
@@ -129,6 +176,7 @@ main() {
 
     if [ ! -d "$dir" ]; then
         [ -n "$repo" ] || die "$dir doesn't exist; pass --repo to clone your config"
+        command -v git &>/dev/null || die "git is required to clone $repo; install it with your package manager"
         info "Cloning $repo to $dir"
         mkdir -p "$(dirname "$dir")"
         git clone "$repo" "$dir"
@@ -143,6 +191,7 @@ main() {
     else
         info "Ready. Run: cd $dir && $bin_dir/zakwas apply"
     fi
+    path_hint
 }
 
 main "$@"; exit

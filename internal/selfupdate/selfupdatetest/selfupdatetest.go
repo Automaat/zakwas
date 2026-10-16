@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -45,12 +46,18 @@ func SHA256(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Serve publishes one release of a zakwas binary for arch and returns the
-// base URL to use in place of the GitHub releases page. releases/latest
-// redirects to it, as on GitHub.
+// Serve publishes one release of a zakwas binary for the running OS and
+// arch, and returns the base URL to use in place of the GitHub releases
+// page. releases/latest redirects to it, as on GitHub.
 func Serve(t testing.TB, version, arch, binary string) string {
 	t.Helper()
-	asset := fmt.Sprintf("zakwas_%s_darwin_%s.tar.gz", version, arch)
+	return ServeFor(t, version, runtime.GOOS, arch, binary)
+}
+
+// ServeFor is Serve for the given OS.
+func ServeFor(t testing.TB, version, goos, arch, binary string) string {
+	t.Helper()
+	asset := fmt.Sprintf("zakwas_%s_%s_%s.tar.gz", version, goos, arch)
 	archive := Archive(t, map[string]string{"LICENSE": "MIT", "zakwas": binary})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
