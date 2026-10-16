@@ -19,19 +19,19 @@ const exitInterrupted = 130
 const forceExitAfter = 2 * time.Second
 
 // stopSignals are the signals that end a run: Ctrl-C, a supervisor or
-// timeout(1) asking it to stop, and a closed terminal. SIGINT is always
-// taken, as before. SIGTERM and SIGHUP are left alone when the process
-// started with them ignored (nohup), so that stays true. mcp stops on
+// timeout(1) asking it to stop, and a closed terminal. SIGINT and SIGTERM
+// are always taken, as before. SIGHUP is left alone when the process started
+// with it ignored (nohup); the Go runtime only keeps SIGHUP and SIGINT
+// ignored across start-up, so ignored never reports SIGTERM. mcp stops on
 // SIGTERM and SIGHUP by itself and exits 0.
 func stopSignals(args []string, ignored func(os.Signal) bool) []os.Signal {
 	sigs := []os.Signal{os.Interrupt}
 	if len(args) > 0 && args[0] == "mcp" {
 		return sigs
 	}
-	for _, s := range []os.Signal{syscall.SIGTERM, syscall.SIGHUP} {
-		if !ignored(s) {
-			sigs = append(sigs, s)
-		}
+	sigs = append(sigs, syscall.SIGTERM)
+	if !ignored(syscall.SIGHUP) {
+		sigs = append(sigs, syscall.SIGHUP)
 	}
 	return sigs
 }

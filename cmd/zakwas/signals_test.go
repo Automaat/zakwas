@@ -39,7 +39,7 @@ func TestStopSignals(t *testing.T) {
 		{"no args", nil, none, []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP}},
 		{"mcp handles SIGTERM and SIGHUP itself", []string{"mcp"}, none, []os.Signal{syscall.SIGINT}},
 		{"nohup", []string{"apply"}, func(s os.Signal) bool { return s == syscall.SIGHUP }, []os.Signal{syscall.SIGINT, syscall.SIGTERM}},
-		{"ignored SIGTERM", []string{"apply"}, func(s os.Signal) bool { return s == syscall.SIGTERM }, []os.Signal{syscall.SIGINT, syscall.SIGHUP}},
+		{"SIGTERM is taken even when reported ignored", []string{"apply"}, func(s os.Signal) bool { return s == syscall.SIGTERM }, []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP}},
 		{"a background job keeps taking SIGINT, as before", []string{"apply"}, func(s os.Signal) bool { return s == syscall.SIGINT }, []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP}},
 	}
 	for _, tt := range tests {
