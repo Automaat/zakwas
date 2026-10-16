@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -260,24 +261,61 @@ var geminiPriorities = map[string]int{
 	config.PermissionDeny:   geminiDenyPriority,
 }
 
-// geminiGuardRegex matches the command as written, after a flag, as in
-// `zakwas -c zakwas.yaml apply`, and run by path, any of them quoted.
-// Gemini matches a command regex against the JSON-encoded arguments, as
-// `"command":"<command>"`, where a quote is `\"`, so it starts at the
-// command and a quoted value is spelled out as its own alternative.
-// Gemini rejects a quantified group as unsafe, so none is used: the
-// alternatives allow up to geminiGuardQuotedValues quoted values before
-// the guarded word.
+// The pieces of geminiGuardRegex. Gemini tests the regex against the
+// JSON-encoded call, `"command":"<command>"`, where a quote is `\"`, a tab
+// is `\t` and a newline `\n`, and rejects a quantified group as unsafe, so
+// the quoted values are nested optional groups and none is repeated.
+const (
+	geminiGuardQuotedValues = 6
+	guardLead               = `[ ]*(?:|\\t[ ]*(?:|\\t[ ]*))`
+	guardBlank              = `(?:[ ]|\\t)[ ]*(?:|\\t[ ]*)`
+	guardOneBlank           = `(?:[ ]|\\t)`
+	guardWordEnd            = `(?:[ ;&|)<>"]|\\[tn])`
+	guardAfterBlank         = `(?:[-;&|<>$#"` + "`" + `]|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
+	guardQuotedEnd          = `(?:"|[;&|)<>]|\\n|` + guardBlank + guardAfterBlank + `)`
+	guardEscapedQuote       = `\\\\\\"`
+	guardEscapedApostrophe  = `\\\\'`
+	guardDoubleQuoted       = `\\"[^"]*(?:|` + guardEscapedQuote + `[^"]*(?:|` + guardEscapedQuote + `[^"]*))\\"`
+	guardSingleQuoted       = `'[^']*(?:|` + guardEscapedApostrophe + `[^']*)'`
+	guardQuoted             = `(?:` + guardDoubleQuoted + `|` + guardSingleQuoted + `|` + guardEscapedQuote + `|` + guardEscapedApostrophe + `)`
+	guardFlagStart          = `(?:-|\\\\|[<>&${` + "`" + `]|[0-9]+[<>]|\\"[-$][^"]*\\"|'[-$][^']*')`
+)
+
+// geminiGuardRegex matches a guarded command that starts the shell command
+// as the agent wrote it: the binary bare, by path or quoted, in any case,
+// then the guarded word as the first word after the binary or after flags
+// and their values, as in `zakwas -c "my dir/x.yaml" apply`. A word before
+// the flags, as in `zakwas plan apply`, makes that word the command, so it
+// does not match. A quoted guarded word after flags matches unless a plain
+// word follows it, as in `zakwas -m "apply" plan`; the real command takes
+// no word there, only flags.
 func geminiGuardRegex(words []string) string {
-	middle := []string{"", `[^"]*\s`}
-	for n := 1; n <= geminiGuardQuotedValues; n++ {
-		middle = append(middle, `[^"]*`+strings.Repeat(`\\"[^"]*\\"[^"]*`, n)+`\s`)
+	name := caselessWord(words[0])
+	word := regexp.QuoteMeta(strings.Join(words[1:], " "))
+	quoted := `(?:\\"` + word + `\\"|'` + word + `')`
+	prefix := `(?:|[^ ]*/|\\"[^"]*/\\"|'[^']*/')`
+	binary := `(?:` + prefix + `(?:` + name + `|\\"` + name + `\\"|'` + name + `')|\\"[^"]*/` + name + `\\"|'[^']*/` + name + `')`
+	rest := `[^"']*`
+	for range geminiGuardQuotedValues {
+		rest = `[^"']*(?:|` + guardQuoted + rest + `)`
 	}
-	return `(?:|\S*/|\\"[^"]*/)(?:|\\")` + regexp.QuoteMeta(words[0]) + `(?:|\\"|')\s(?:` + strings.Join(middle, "|") + `)(?:|\\")` +
-		regexp.QuoteMeta(strings.Join(words[1:], " ")) + `(?:[\s"]|\\")`
+	first := `(?:` + word + guardWordEnd + `|` + quoted + guardWordEnd + `)`
+	later := `(?:` + word + guardWordEnd + `|` + quoted + guardQuotedEnd + `)`
+	return guardLead + binary + guardBlank + `(?:` + first + `|` + guardFlagStart + rest + guardOneBlank + later + `)`
 }
 
-const geminiGuardQuotedValues = 3
+func caselessWord(word string) string {
+	var b strings.Builder
+	for _, r := range word {
+		upper, lower := unicode.ToUpper(r), unicode.ToLower(r)
+		if upper == lower {
+			b.WriteString(regexp.QuoteMeta(string(r)))
+			continue
+		}
+		b.WriteString("[" + string(upper) + string(lower) + "]")
+	}
+	return b.String()
+}
 
 // geminiRules are the rules of zakwas.toml: the guard's, agents.permissions
 // and the decisions of the profiles.
