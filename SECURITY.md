@@ -4,7 +4,7 @@ zakwas runs with your user's permissions, asks for `sudo` (Touch ID for sudo, th
 
 ## Reporting a vulnerability
 
-Report privately through [GitHub security advisories](https://github.com/Automaat/zakwas/security/advisories/new). Please don't open a public issue.
+Report privately through [GitHub security advisories](https://github.com/Automaat/zakwas/security/advisories/new). Do not open a public issue.
 
 Include the zakwas version (`zakwas version`), macOS version, the relevant part of your `zakwas.yaml`, and what an attacker could do. You'll get an answer within a week.
 
