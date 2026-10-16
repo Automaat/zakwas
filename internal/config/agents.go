@@ -213,7 +213,7 @@ func (s *Skill) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		return n.Decode(&s.Path)
 	}
-	if err := knownKeys(n, "path", "git", "ref", "providers"); err != nil {
+	if err := knownKeys(n, "a skill", "path", "git", "ref", "providers"); err != nil {
 		return err
 	}
 	type plain Skill
@@ -360,7 +360,7 @@ func (p *AgentPermission) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		return n.Decode(&p.Command)
 	}
-	if err := knownKeys(n, "command", "providers", "justification"); err != nil {
+	if err := knownKeys(n, "a permission", "command", "providers", "justification"); err != nil {
 		return err
 	}
 	type plain AgentPermission
@@ -509,7 +509,7 @@ func (m *Marketplace) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		return n.Decode(&m.Source)
 	}
-	if err := knownKeys(n, "source", "providers"); err != nil {
+	if err := knownKeys(n, "a marketplace", "source", "providers"); err != nil {
 		return err
 	}
 	type plain Marketplace
@@ -520,7 +520,7 @@ func (p *Plugin) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		return n.Decode(&p.ID)
 	}
-	if err := knownKeys(n, "id", "providers"); err != nil {
+	if err := knownKeys(n, "a plugin", "id", "providers"); err != nil {
 		return err
 	}
 	type plain Plugin
@@ -528,15 +528,16 @@ func (p *Plugin) UnmarshalYAML(n *yaml.Node) error {
 }
 
 // knownKeys rejects unknown mapping keys, which yaml's KnownFields doesn't
-// check inside custom unmarshalers.
-func knownKeys(n *yaml.Node, keys ...string) error {
+// check inside custom unmarshalers. The message leaves the key out: a secret
+// pasted as a key name must not be echoed.
+func knownKeys(n *yaml.Node, what string, keys ...string) error {
 	if n.Kind != yaml.MappingNode {
 		return nil
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k := n.Content[i]
 		if !slices.Contains(keys, k.Value) {
-			return fmt.Errorf("line %d: field %s not found, want one of %s", k.Line, k.Value, strings.Join(keys, ", "))
+			return fmt.Errorf("line %d: unknown field in %s; allowed: %s", k.Line, what, strings.Join(keys, ", "))
 		}
 	}
 	return nil

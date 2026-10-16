@@ -47,8 +47,15 @@ func TestMCPOAuthDecoding(t *testing.T) {
 		{"scope with a quote", `oauth: {clientId: c, scope: 'a"b'}`, MCPOAuth{}, "oauth.scope"},
 		{"scope with a backslash", `oauth: {clientId: c, scope: 'a\b'}`, MCPOAuth{}, "oauth.scope"},
 		{"scope as list", "oauth: {clientId: c, scope: [a, b]}", MCPOAuth{}, "oauth.scope must be a string"},
-		{"unknown key", "oauth: {clientId: c, clientSecret: s}", MCPOAuth{}, "field clientSecret not found, want one of clientId, callbackPort, scope"},
-		{"snake case key", "oauth: {client_id: c}", MCPOAuth{}, "field client_id not found"},
+		{"unknown key", "oauth: {clientId: c, clientSecret: s}", MCPOAuth{}, "line 1: unknown field in oauth; allowed: clientId, callbackPort, scope"},
+		{"snake case key", "oauth: {client_id: c}", MCPOAuth{}, "unknown field in oauth; allowed: clientId, callbackPort, scope"},
+		{"client id as number", "oauth: {clientId: 12}", MCPOAuth{}, "oauth.clientId must be a string; quote a value that YAML reads as another type: true, false, a number, a date or null"},
+		{"client id as boolean", "oauth: {clientId: true}", MCPOAuth{}, "oauth.clientId must be a string; quote a value that YAML reads as another type: true, false, a number, a date or null"},
+		{"client id as date", "oauth: {clientId: 2001-01-01}", MCPOAuth{}, "oauth.clientId must be a string"},
+		{"scope as number", "oauth: {clientId: c, scope: 12}", MCPOAuth{}, "oauth.scope must be a string; quote a value that YAML reads as another type"},
+		{"client id as yes is a string", "oauth: {clientId: yes}", MCPOAuth{Enabled: true, ClientID: "yes"}, ""},
+		{"client id as a quoted merge key", `oauth: {clientId: "<<"}`, MCPOAuth{Enabled: true, ClientID: "<<"}, ""},
+		{"client id as an unquoted merge key", "oauth: {clientId: <<}", MCPOAuth{}, "oauth.clientId must be a string"},
 		{"text", "oauth: yes please", MCPOAuth{}, "oauth must be true, false or a mapping with clientId"},
 		{"number", "oauth: 1", MCPOAuth{}, "oauth must be true, false or a mapping with clientId"},
 		{"list", "oauth: [c]", MCPOAuth{}, "oauth must be true, false or a mapping with clientId"},
@@ -372,5 +379,38 @@ func TestVisibleRuneSweep(t *testing.T) {
 	}
 	if accepted < 100000 {
 		t.Errorf("only %d code points accepted, the sweep is not reaching the planes", accepted)
+	}
+}
+
+func TestLoadErrorsDoNotEchoKeys(t *testing.T) {
+	const secret = "ghp_SECRETKEY123"
+	for _, tt := range []struct {
+		name, body, want string
+	}{
+		{"oauth", "agents: {mcp: {a: {url: 'http://x', oauth: {clientId: c, " + secret + ": 1}}}}", "line 1: unknown field in oauth; allowed: clientId, callbackPort, scope"},
+		{"oauth on its own line", "agents:\n  mcp:\n    a:\n      url: http://x\n      oauth:\n        clientId: c\n        " + secret + ": 1\n", "line 7: unknown field in oauth"},
+		{"top level", secret + ": 1", "line 1: unknown field in type config.Config"},
+		{"nested type", "agents: {mcp: {a: {command: x, " + secret + ": y}}}", "line 1: unknown field in type config.MCPServer"},
+		{"marketplace", "agents: {marketplaces: {a: {source: x, " + secret + ": y}}}", "line 1: unknown field in a marketplace; allowed: source, providers"},
+		{"plugin", "agents: {plugins: [{id: a@b, " + secret + ": y}]}", "line 1: unknown field in a plugin; allowed: id, providers"},
+		{"skill", "agents: {skills: [{path: a, " + secret + ": y}]}", "line 1: unknown field in a skill"},
+		{"permission", "agents: {permissions: {allow: [{command: ls, " + secret + ": y}]}}", "line 1: unknown field in a permission"},
+		{"unknown anchor", "agents: {mcp: {a: *" + secret + "}}", "unknown anchor referenced"},
+		{"anchor that contains itself", "agents: {mcp: {a: &" + secret + " {command: x, env: *" + secret + "}}}", "an anchor's value contains itself"},
+		{"duplicate key", "agents:\n  providers: [claude]\n  providers: [codex]\n", "line 3: duplicate mapping key; the first one is at line 2"},
+		{"duplicate secret key", "agents:\n  mcp:\n    " + secret + ": {command: x}\n    " + secret + ": {command: y}\n", "line 4: duplicate mapping key"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tt.body), "/h")
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "SECRETKEY") {
+				t.Errorf("error repeats the key: %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q does not mention %q", err, tt.want)
+			}
+		})
 	}
 }

@@ -2,7 +2,7 @@
 
 `zakwas.yaml` describes one machine, normally a Mac. On Linux some sections are not supported; see [Platform support](#platform-support). zakwas finds it by searching up from the current directory, then `$ZAKWAS_CONFIG`; `-c path` overrides both. The directory holding it is the **config root**: every `src`, `brew.file` and `mise.config` path is relative to it (absolute paths work too).
 
-Every section is optional. Unknown keys are errors, and zakwas reports every problem in the file at once before touching anything.
+Every section is optional. Unknown keys are errors, and zakwas reports every problem in the file at once before touching anything. An error about an unknown or duplicate key gives its line, and one about an unknown anchor has none; neither repeats the key or anchor text, so a secret pasted there stays out of the output.
 
 - [Editor setup](#editor-setup)
 - [Conventions](#conventions)
@@ -549,7 +549,7 @@ A gateway that has no dynamic client registration needs the pre-registered clien
 
 | Key | Required | Description |
 |---|---|---|
-| `clientId` | yes | The OAuth client ID, as a string (quote a number: `'12345'`). It is public, so it is written as is. It may hold letters, digits, punctuation and symbols; spaces, control and invisible characters, combining marks and blank letters such as the Hangul fillers are rejected. |
+| `clientId` | yes | The OAuth client ID, as a string: quote a value YAML reads as another type, such as `'12345'`, `'true'`, `'2024-01-01'` or `'null'`. It is public, so it is written as is. It may hold letters, digits, punctuation and symbols; spaces, control and invisible characters, combining marks and blank letters such as the Hangul fillers are rejected. |
 | `callbackPort` | no | Fixed port (1 to 65535) of the local callback, for a client whose redirect URIs are registered with a port. Default: the agent's own. |
 | `scope` | no | Scopes to request, as a string of visible ASCII names separated by single spaces; double quotes and backslashes are rejected. Default: the scopes the server announces. |
 
@@ -562,7 +562,7 @@ agents:
       oauth: {clientId: 0oa1abcdEXAMPLE, callbackPort: 54661, scope: "read write"}
 ```
 
-`oauth: true` keeps its meaning: only the login command in the plan, nothing extra in the agent's config. The mapping form applies to an HTTP server only and is not combined with `bearerTokenEnv` or an `Authorization` header, like `true`. Unknown keys fail the load, merge keys (`<<`) inside the mapping too, and so does a `clientSecret`: there is no client secret, so only public (PKCE) clients are supported, and a secret never reaches the config repo. A client that needs one stays outside zakwas.
+`oauth: true` keeps its meaning: only the login command in the plan, nothing extra in the agent's config. The mapping form applies to an HTTP server only and is not combined with `bearerTokenEnv` or an `Authorization` header, like `true`. Unknown keys fail the load, merge keys (`<<`) inside the mapping too, and so does a `clientSecret`: there is no client secret, so only public (PKCE) clients are supported, and a secret never reaches the config repo. A client that needs one stays outside zakwas. The error for an unknown key names the line and the allowed keys but never repeats the key, so a secret pasted as a key name stays out of the output.
 
 What each agent gets:
 

@@ -13,6 +13,7 @@ import (
 	"io"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -340,11 +341,16 @@ type Call struct {
 	token json.RawMessage
 }
 
-// Decode reads the arguments into v, refusing fields v doesn't have.
+// Decode reads the arguments into v, refusing fields v doesn't have. The
+// error leaves the field name out: a secret pasted as a name must not be
+// echoed.
 func (c *Call) Decode(v any) error {
 	dec := json.NewDecoder(bytes.NewReader(c.Args))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		if strings.HasPrefix(err.Error(), "json: unknown field ") {
+			return errors.New("bad arguments: unknown field; see the tool's input schema for the allowed ones")
+		}
 		return fmt.Errorf("bad arguments: %w", err)
 	}
 	return nil

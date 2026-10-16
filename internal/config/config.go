@@ -156,10 +156,10 @@ func ParseFor(data []byte, path, home, goos string) (*Config, error) {
 	dec.KnownFields(true)
 	var c Config
 	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, YAMLError(err))
 	}
 	if err := rejectNullProfileNames(data); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, YAMLError(err))
 	}
 	root, err := resolveRoot(path)
 	if err != nil {
@@ -278,7 +278,7 @@ func (c *Config) Validate(home string) error {
 		case time.Time:
 			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: YAML reads %s as a date; quote it to write a string", i, d.Domain, d.Key, yamlDate(v)))
 		default:
-			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value %#v", i, d.Domain, d.Key, d.Value))
+			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value of type %T", i, d.Domain, d.Key, d.Value))
 		}
 	}
 	for i, d := range c.System.Dirs {
