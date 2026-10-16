@@ -77,6 +77,111 @@ jobs:
           go run ./cmd/zakwas -c examples/zakwas.yaml plan --only brew | tee "$RUNNER_TEMP/brew.plan"
           grep -qE '^  - (brew|cask) ' "$RUNNER_TEMP/brew.plan"
 
+  ubuntu:
+    name: ubuntu
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
+        with:
+          # renovate: datasource=github-releases depName=jdx/mise
+          version: 2026.10.12
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.toml') }}
+          restore-keys: go-test-${{ runner.os }}-
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: still builds and vets for macOS
+        env:
+          GOOS: darwin
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: lint
+        run: mise run lint
+
+      - name: shellcheck
+        run: shellcheck install.sh
+
+      - name: actionlint
+        run: actionlint
+
+      - name: unit and e2e tests
+        run: go test -race ./...
+
+      - name: macOS-only modules are rejected
+        run: |
+          if go run ./cmd/zakwas -c examples/zakwas.yaml plan 2> "$RUNNER_TEMP/reject.log"; then
+            echo "the macOS example planned on Linux"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/reject.log"
+          grep -q 'brew: not supported on Linux' "$RUNNER_TEMP/reject.log"
+          grep -q 'docs/config.md#platform-support' "$RUNNER_TEMP/reject.log"
+
+      - name: Linux example resolves
+        run: go run ./cmd/zakwas -c examples/linux/zakwas.yaml plan
+
+      - name: build the binary
+        run: go build -o "$RUNNER_TEMP/zakwas" ./cmd/zakwas
+
+      - name: apply the Linux example
+        run: |
+          "$RUNNER_TEMP/zakwas" -c examples/linux/zakwas.yaml apply -y
+
+      - name: nothing left to change
+        run: |
+          "$RUNNER_TEMP/zakwas" -c examples/linux/zakwas.yaml check
+          "$RUNNER_TEMP/zakwas" -c examples/linux/zakwas.yaml check --offline
+
+      - name: dotfiles are read-only copies
+        run: |
+          if echo x >> "$HOME/.zshrc"; then echo "$HOME/.zshrc is writable"; exit 1; fi
+          test "$(stat -c %a "$HOME/.zshrc")" = 444
+          test "$(stat -c %a "$HOME/.ssh")" = 700
+
+      - name: install.sh from a local release mirror
+        # No release has Linux archives yet, so the installer downloads from
+        # a mirror of this commit's build, served on localhost.
+        run: |
+          mirror="$RUNNER_TEMP/mirror"
+          release="$mirror/releases/download/v0.0.0-ci"
+          archive="zakwas_0.0.0-ci_linux_$(go env GOARCH).tar.gz"
+          mkdir -p "$release" "$RUNNER_TEMP/pkg"
+          go build -o "$RUNNER_TEMP/pkg/zakwas" ./cmd/zakwas
+          tar -czf "$release/$archive" -C "$RUNNER_TEMP/pkg" zakwas
+          (cd "$release" && sha256sum "$archive" > checksums.txt)
+          python3 -m http.server 8123 --bind 127.0.0.1 --directory "$mirror" > "$RUNNER_TEMP/mirror.log" 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          for _ in $(seq 20); do
+            curl -fsS -o /dev/null "http://127.0.0.1:8123/releases/download/v0.0.0-ci/checksums.txt" && break
+            sleep 0.5
+          done
+          export ZAKWAS_RELEASE_URL=http://127.0.0.1:8123/releases
+          ./install.sh --version 0.0.0-ci --dir "$GITHUB_WORKSPACE/examples/linux" --no-apply < /dev/null
+          ~/.local/bin/zakwas version
+          (cd examples/linux && ~/.local/bin/zakwas plan --only system,files,templates)
+          printf '%064d  %s\n' 0 "$archive" > "$release/checksums.txt"
+          if ./install.sh --version 0.0.0-ci --dir "$GITHUB_WORKSPACE/examples/linux" --no-apply < /dev/null; then
+            echo "install.sh accepted a bad checksum"
+            exit 1
+          fi
+
   e2e:
     name: e2e on a fresh Mac
     # Converges a clean macOS runner with the example config. Casks and
