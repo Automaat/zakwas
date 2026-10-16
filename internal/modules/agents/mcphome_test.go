@@ -140,6 +140,7 @@ func TestMCPExpandsTildeCopilot(t *testing.T) {
 }
 
 func TestMCPExpandsTildeGemini(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, config.Agents{MCP: tildeServers()})
 	home := m.Paths.Home
 	apply(t, plan(t, m))
