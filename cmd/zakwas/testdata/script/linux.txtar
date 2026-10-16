@@ -4,6 +4,7 @@ env CLAUDE_CONFIG_DIR=$WORK/claude
 chmod 755 bin/claude
 chmod 755 bin/opencode
 mkdir state
+chmod 644 dotfiles/app/a
 
 zakwas plan
 stdout -count=1 'protect.immutable is macOS-only; files are read-only copies'

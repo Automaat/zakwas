@@ -38,16 +38,7 @@ func newInitFlags(errOut *console) (*flag.FlagSet, *[]string) {
 	fs := flag.NewFlagSet("zakwas init", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		_, _ = io.WriteString(fs.Output(), `Usage: zakwas init DIR [--add PATH]...
-
-Creates a starter config repo in DIR (new or empty) from this machine: a
-Brewfile (taps, formulae, casks, mas apps) from brew bundle dump, your
-global mise config with every tool pinned to its exact version, and every --add file or directory copied under
-dotfiles/. Nothing outside DIR is changed. On Linux the brew and mise
-modules are not supported, so only the --add files are used.
-
-Flags:
-`)
+		_, _ = io.WriteString(fs.Output(), initUsage(platform.Current()))
 		fs.PrintDefaults()
 	}
 	fs.Func("add", "file or directory under $HOME to copy into the repo and manage (repeatable)", func(s string) error {
@@ -55,6 +46,29 @@ Flags:
 		return nil
 	})
 	return fs, &adds
+}
+
+func initUsage(goos string) string {
+	if goos != platform.Darwin {
+		return `Usage: zakwas init DIR [--add PATH]...
+
+Creates a starter config repo in DIR (new or empty) from this machine: every
+--add file or directory copied under dotfiles/. It writes no package or
+tool-version sections, which this system does not support. Nothing outside
+DIR is changed.
+
+Flags:
+`
+	}
+	return `Usage: zakwas init DIR [--add PATH]...
+
+Creates a starter config repo in DIR (new or empty) from this Mac: a
+Brewfile (taps, formulae, casks, mas apps) from brew bundle dump, your
+global mise config with every tool pinned to its exact version, and every --add file or directory copied under
+dotfiles/. Nothing outside DIR is changed.
+
+Flags:
+`
 }
 
 // addition is one --add path: its files are copied from the machine to
@@ -281,6 +295,7 @@ func repoPath(rel string) string {
 func (p *initPlan) config() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# yaml-language-server: $schema=%s\n\n", SchemaURL)
+	header := b.Len()
 	if platform.FeatureSupported("protect.immutable", p.goos) {
 		b.WriteString("protect:\n  immutable: true\n")
 	}
@@ -298,6 +313,9 @@ func (p *initPlan) config() string {
 	}
 	if p.mise {
 		fmt.Fprintf(&b, "\nmise:\n  config: %s\n", miseSrc)
+	}
+	if b.Len() == header {
+		b.WriteString("files: []\n")
 	}
 	return b.String()
 }
@@ -455,12 +473,9 @@ func (p *initPlan) summary() string {
 		fmt.Fprintf(&b, "  skipped %s\n", paths.Pretty(s))
 	}
 	if p.orphans > 0 {
-		fmt.Fprintf(&b, "\nWarning: zakwas already manages %d other file(s) on this machine from another config;\n`zakwas plan` in the new repo lists them as no longer managed, and apply deletes them.\n", p.orphans)
+		fmt.Fprintf(&b, "\nWarning: zakwas already manages %d other file(s) on this %s from another config;\n`zakwas plan` in the new repo lists them as no longer managed, and apply deletes them.\n", p.orphans, platform.Machine(p.goos))
 	}
-	machine := "machine"
-	if p.goos == platform.Darwin {
-		machine = "Mac"
-	}
+	machine := platform.Machine(p.goos)
 	fmt.Fprintf(&b, `
 Next steps:
   1. cd %s && zakwas plan

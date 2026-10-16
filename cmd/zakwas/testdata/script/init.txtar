@@ -2,6 +2,10 @@ env ZAKWAS_TEST_GOOS=darwin
 
 chmod 755 bin/brew
 chmod 755 bin/mise
+chmod 644 home/.zshrc
+chmod 644 home/.config/git/config
+chmod 644 home/.config/git/ignore
+chmod 644 home/.config/mise/config.toml
 
 ! zakwas init
 stderr 'Usage: zakwas init DIR'
