@@ -20,6 +20,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/mcp"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner"
 )
@@ -43,7 +44,11 @@ since an agent starts it in any directory.
 Flags:
 `
 
-const mcpInstructions = `zakwas keeps this Mac's setup in a config repo. Read it with zakwas_config, zakwas_plan and zakwas_check.
+func mcpInstructions(goos string) string {
+	return strings.ReplaceAll(mcpInstructionsText, "this Mac", "this "+platform.Machine(goos))
+}
+
+const mcpInstructionsText = `zakwas keeps this Mac's setup in a config repo. Read it with zakwas_config, zakwas_plan and zakwas_check.
 To change the setup, never edit agent config files or zakwas.yaml: call zakwas_propose, which saves a proposal and changes nothing.
 To record what was added in an agent by hand, call zakwas_capture and pass the operations it returns to zakwas_propose.
 Then tell the user the proposal's id and tier. A proposal applies only after the user confirms it; when zakwas_apply isn't offered, or for a high risk proposal, give the user the command in the proposal's "next" field to run in a terminal.
@@ -89,11 +94,15 @@ func runMCP(ctx context.Context, env Env, args []string, out, errOut *console) i
 	}
 	signal.Ignore(syscall.SIGPIPE)
 	defer signal.Reset(syscall.SIGPIPE)
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+	stopOn := []os.Signal{syscall.SIGTERM}
+	if !signal.Ignored(syscall.SIGHUP) {
+		stopOn = append(stopOn, syscall.SIGHUP)
+	}
+	ctx, stop := signal.NotifyContext(ctx, stopOn...)
 	defer stop()
 	t := &mcpTools{env: env, cfgPath: o.cfgPath, enableApply: o.enableApply}
 	srv := &mcp.Server{
-		Name: "zakwas", Version: env.Version, Instructions: mcpInstructions,
+		Name: "zakwas", Version: env.Version, Instructions: mcpInstructions(env.goos()),
 		Tools: t.tools(), In: env.Stdin, Out: env.Stdout,
 	}
 	if err := srv.Serve(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -110,7 +119,7 @@ type mcpTools struct {
 }
 
 func (t *mcpTools) load() (*config.Config, error) {
-	return loadConfig(t.cfgPath, t.env.Cwd, t.env.Home)
+	return loadConfig(t.cfgPath, t.env)
 }
 
 func objectSchema(properties map[string]any, required ...string) map[string]any {
@@ -143,12 +152,12 @@ func (t *mcpTools) tools() []mcp.Tool {
 		},
 		{
 			Name: "zakwas_plan", Title: "Plan the config", ReadOnly: true, Schema: objectSchema(planProps),
-			Description: "What `zakwas apply` would change on this Mac, as JSON. Changes nothing.",
+			Description: "What `zakwas apply` would change on " + "this " + platform.Machine(t.env.goos()) + ", as JSON. Changes nothing.",
 			Handler:     func(ctx context.Context, c *mcp.Call) (mcp.Result, error) { return t.plan(ctx, c, false) },
 		},
 		{
 			Name: "zakwas_check", Title: "Check for drift", ReadOnly: true, Schema: objectSchema(planProps),
-			Description: "Whether this Mac drifted from the config: {\"drift\": bool} with the plan. Changes nothing.",
+			Description: "Whether this " + platform.Machine(t.env.goos()) + " drifted from the config: {\"drift\": bool} with the plan. Changes nothing.",
 			Handler:     func(ctx context.Context, c *mcp.Call) (mcp.Result, error) { return t.plan(ctx, c, true) },
 		},
 		{
@@ -158,9 +167,9 @@ func (t *mcpTools) tools() []mcp.Tool {
 			Handler: t.capture,
 		},
 		{
-			Name: "zakwas_propose", Title: "Propose a config change", Schema: proposeSchema(),
+			Name: "zakwas_propose", Title: "Propose a config change", Schema: proposeSchema(t.env.goos()),
 			Description: "Saves a change to the config repo as a proposal, with its diff, plan and risk tier, and changes nothing else. Operations: " +
-				strings.Join(proposal.Kinds, ", ") + ". Returns the proposal and what to do next.",
+				strings.Join(proposal.KindsFor(t.env.goos()), ", ") + ". Returns the proposal and what to do next.",
 			Handler: t.propose,
 		},
 		{
@@ -185,7 +194,7 @@ func (t *mcpTools) tools() []mcp.Tool {
 	return tools
 }
 
-func proposeSchema() map[string]any {
+func proposeSchema(goos string) map[string]any {
 	server := objectSchema(map[string]any{
 		"command":          stringProp("Command that starts a stdio server."),
 		"args":             stringsProp("Arguments of the command."),
@@ -198,8 +207,8 @@ func proposeSchema() map[string]any {
 			"scope":         stringProp("OAuth scopes separated by single spaces."),
 		}, "client_id"),
 	})
-	return objectSchema(map[string]any{
-		"kind":          map[string]any{"type": "string", "enum": proposal.Kinds, "description": "The operation."},
+	props := map[string]any{
+		"kind":          map[string]any{"type": "string", "enum": proposal.KindsFor(goos), "description": "The operation."},
 		"name":          stringProp("add-marketplace: marketplace name. add-plugin: NAME@MARKETPLACE. add-brew: package. pin-mise: tool. add-mcp: server name."),
 		"source":        stringProp("add-marketplace: GitHub owner/repo, a git URL, or a local path."),
 		"decision":      map[string]any{"type": "string", "enum": []string{config.PermissionAllow, config.PermissionReview, config.PermissionDeny}, "description": "add-permission and remove-permission: the rule list."},
@@ -209,7 +218,17 @@ func proposeSchema() map[string]any {
 		"cask":          map[string]any{"type": "boolean", "description": "add-brew: the package is a cask."},
 		"providers":     stringsProp("Providers the entry targets; default the section's."),
 		"server":        server,
-	}, "kind")
+	}
+	if !platform.Supported("brew", goos) {
+		delete(props, "cask")
+	}
+	if !platform.Supported("mise", goos) {
+		delete(props, "version")
+	}
+	if !platform.Supported("brew", goos) && !platform.Supported("mise", goos) {
+		props["name"] = stringProp("add-marketplace: marketplace name. add-plugin: NAME@MARKETPLACE. add-mcp: server name.")
+	}
+	return objectSchema(props, "kind")
 }
 
 func jsonResult(v any) (mcp.Result, error) {
@@ -268,7 +287,7 @@ func (t *mcpTools) plan(ctx context.Context, c *mcp.Call, check bool) (mcp.Resul
 		return mcp.Result{}, err
 	}
 	only := strings.Join(args.Only, ",")
-	mods, err := selectModules(Modules(cfg, t.env), only)
+	mods, err := selectModules(Modules(cfg, t.env), only, t.env.goos())
 	if err != nil {
 		return mcp.Result{}, err
 	}

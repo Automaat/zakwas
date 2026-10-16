@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 const baseConfig = `# my setup
@@ -61,7 +62,7 @@ func newRepo(t *testing.T, yamlText string) (*config.Config, string) {
 	write("zakwas.yaml", yamlText)
 	write("Brewfile", baseBrewfile)
 	write("mise/config.toml", baseMise)
-	cfg, err := config.Load(filepath.Join(root, "zakwas.yaml"), home)
+	cfg, err := config.LoadFor(filepath.Join(root, "zakwas.yaml"), home, platform.Darwin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,6 +401,57 @@ func derefPort(p *int) int {
 		return 0
 	}
 	return *p
+}
+
+const linuxConfig = `agents:
+  providers: [claude]
+  marketplaces:
+    market: owner/repo
+  plugins:
+    - first@market
+`
+
+func newLinuxRepo(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	home, root := t.TempDir(), t.TempDir()
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "zakwas.yaml"), []byte(linuxConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFor(filepath.Join(root, "zakwas.yaml"), home, platform.Linux)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg, home
+}
+
+func TestApplyOnLinux(t *testing.T) {
+	cfg, home := newLinuxRepo(t)
+	res, err := Apply([]Op{{Kind: AddPlugin, Name: "second@market"}}, cfg, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.OS() != platform.Linux || len(res.Config.Agents.Plugins) != 2 {
+		t.Errorf("edited config: OS %q, agents %+v", res.Config.OS(), res.Config.Agents)
+	}
+	tests := []struct {
+		name string
+		op   Op
+		want string
+	}{
+		{"brew", Op{Kind: AddBrew, Name: "jq"}, "add-brew: brew: not supported on Linux"},
+		{"mise", Op{Kind: PinMise, Name: "jq", Version: "1.8.0"}, "pin-mise: mise: not supported on Linux"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Apply([]Op{tt.op}, cfg, home); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
 }
 
 func TestApplyQuotesEveryYAMLHazardInEveryField(t *testing.T) {

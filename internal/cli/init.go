@@ -19,6 +19,7 @@ import (
 	"github.com/Automaat/zakwas/internal/install"
 	"github.com/Automaat/zakwas/internal/modules/brew"
 	"github.com/Automaat/zakwas/internal/modules/mise"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
@@ -37,15 +38,7 @@ func newInitFlags(errOut *console) (*flag.FlagSet, *[]string) {
 	fs := flag.NewFlagSet("zakwas init", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		_, _ = io.WriteString(fs.Output(), `Usage: zakwas init DIR [--add PATH]...
-
-Creates a starter config repo in DIR (new or empty) from this Mac: a
-Brewfile (taps, formulae, casks, mas apps) from brew bundle dump, your
-global mise config with every tool pinned to its exact version, and every --add file or directory copied under
-dotfiles/. Nothing outside DIR is changed.
-
-Flags:
-`)
+		_, _ = io.WriteString(fs.Output(), initUsage(platform.Current()))
 		fs.PrintDefaults()
 	}
 	fs.Func("add", "file or directory under $HOME to copy into the repo and manage (repeatable)", func(s string) error {
@@ -53,6 +46,29 @@ Flags:
 		return nil
 	})
 	return fs, &adds
+}
+
+func initUsage(goos string) string {
+	if goos != platform.Darwin {
+		return `Usage: zakwas init DIR [--add PATH]...
+
+Creates a starter config repo in DIR (new or empty) from this machine: every
+--add file or directory copied under dotfiles/. It writes no package or
+tool-version sections, which this system does not support. Nothing outside
+DIR is changed.
+
+Flags:
+`
+	}
+	return `Usage: zakwas init DIR [--add PATH]...
+
+Creates a starter config repo in DIR (new or empty) from this Mac: a
+Brewfile (taps, formulae, casks, mas apps) from brew bundle dump, your
+global mise config with every tool pinned to its exact version, and every --add file or directory copied under
+dotfiles/. Nothing outside DIR is changed.
+
+Flags:
+`
 }
 
 // addition is one --add path: its files are copied from the machine to
@@ -72,6 +88,7 @@ type initPlan struct {
 	home     string
 	adds     []addition
 	skipped  []string
+	goos     string
 	brew     bool
 	mise     bool
 	orphans  int
@@ -94,9 +111,10 @@ func runInit(ctx context.Context, env Env, args []string, out, errOut *console) 
 	p := &initPlan{
 		dir:  absFrom(env.Cwd, env.Home, pos[0]),
 		home: env.Home,
-		brew: env.Runner.Installed("brew"),
-		mise: env.Runner.Installed("mise"),
+		goos: env.goos(),
 	}
+	p.brew = platform.Supported("brew", p.goos) && env.Runner.Installed("brew")
+	p.mise = platform.Supported("mise", p.goos) && env.Runner.Installed("mise")
 	if err := p.check(*adds, env.Cwd); err != nil {
 		errOut.fail(err)
 		return ExitUsage
@@ -194,7 +212,7 @@ func (p *initPlan) check(adds []string, cwd string) error {
 	if err := yaml.Unmarshal([]byte(p.config()), &cfg); err != nil {
 		return fmt.Errorf("generated %s: %w", config.FileName, err)
 	}
-	cfg.Root = p.dir
+	cfg.Root, cfg.GOOS = p.dir, p.goos
 	return cfg.Validate(p.home)
 }
 
@@ -275,25 +293,31 @@ func repoPath(rel string) string {
 }
 
 func (p *initPlan) config() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# yaml-language-server: $schema=%s\n\n", SchemaURL)
-	b.WriteString("protect:\n  immutable: true\n")
+	var sections []string
+	if platform.FeatureSupported("protect.immutable", p.goos) {
+		sections = append(sections, "protect:\n  immutable: true\n")
+	}
 	if len(p.adds) > 0 || p.mise {
-		b.WriteString("\nfiles:\n")
+		var b strings.Builder
+		b.WriteString("files:\n")
 		for _, a := range p.adds {
 			fmt.Fprintf(&b, "  - src: %s\n    dst: %s\n", yamlString(a.src), yamlString(a.dst))
 		}
 		if p.mise {
 			fmt.Fprintf(&b, "  - src: %s\n    dst: %s\n", miseSrc, mise.InstalledConfig)
 		}
+		sections = append(sections, b.String())
 	}
 	if p.brew {
-		b.WriteString("\nbrew:\n  file: Brewfile\n  cleanup: none\n")
+		sections = append(sections, "brew:\n  file: Brewfile\n  cleanup: none\n")
 	}
 	if p.mise {
-		fmt.Fprintf(&b, "\nmise:\n  config: %s\n", miseSrc)
+		sections = append(sections, fmt.Sprintf("mise:\n  config: %s\n", miseSrc))
 	}
-	return b.String()
+	if len(sections) == 0 {
+		sections = append(sections, "files: []\n")
+	}
+	return fmt.Sprintf("# yaml-language-server: $schema=%s\n\n", SchemaURL) + strings.Join(sections, "\n")
 }
 
 func yamlString(s string) string {
@@ -345,7 +369,7 @@ func (p *initPlan) write(ctx context.Context, r runner.Runner, tools map[string]
 	if err := writeFile(filepath.Join(p.dir, ".gitignore"), []byte("*.zakwas-bak*\n"), 0o644); err != nil {
 		return created, err
 	}
-	if _, err := config.Load(cfgPath, p.home); err != nil {
+	if _, err := config.LoadFor(cfgPath, p.home, p.goos); err != nil {
 		return created, err
 	}
 	return created, runner.Check(ctx, r, runner.Cmd{Name: "git", Args: []string{"init", "-q", "-b", "main"}, Dir: p.dir})
@@ -420,20 +444,26 @@ func (p *initPlan) summary() string {
 	dir := paths.Pretty(p.dir)
 	var b strings.Builder
 	fmt.Fprintf(&b, "Created %s\n  %s\n  .gitignore\n", dir, config.FileName)
-	if p.brew {
+	switch {
+	case p.brew:
 		fmt.Fprintf(&b, "  %-29s taps, formulae, casks, mas apps from brew bundle dump\n", "Brewfile")
 		if len(p.trusted) > 0 {
 			fmt.Fprintf(&b, "  %-29s marked trusted: %s (already tapped here)\n", "", strings.Join(p.trusted, ", "))
 		}
-	} else {
+	case !platform.Supported("brew", p.goos):
+		fmt.Fprintf(&b, "  no brew section: the brew module is not supported on %s\n", platform.Name(p.goos))
+	default:
 		b.WriteString("  no brew section: Homebrew is not installed\n")
 	}
-	if p.mise {
+	switch {
+	case p.mise:
 		fmt.Fprintf(&b, "  %-29s global mise config, active tools pinned to exact versions\n", miseSrc)
 		if len(p.unpinned) > 0 {
 			fmt.Fprintf(&b, "  %-29s left as written: %s\n", "", strings.Join(p.unpinned, ", "))
 		}
-	} else {
+	case !platform.Supported("mise", p.goos):
+		fmt.Fprintf(&b, "  no mise section: the mise module is not supported on %s\n", platform.Name(p.goos))
+	default:
 		b.WriteString("  no mise section: mise is not installed\n")
 	}
 	for _, a := range p.adds {
@@ -443,17 +473,18 @@ func (p *initPlan) summary() string {
 		fmt.Fprintf(&b, "  skipped %s\n", paths.Pretty(s))
 	}
 	if p.orphans > 0 {
-		fmt.Fprintf(&b, "\nWarning: zakwas already manages %d other file(s) on this Mac from another config;\n`zakwas plan` in the new repo lists them as no longer managed, and apply deletes them.\n", p.orphans)
+		fmt.Fprintf(&b, "\nWarning: zakwas already manages %d other file(s) on this %s from another config;\n`zakwas plan` in the new repo lists them as no longer managed, and apply deletes them.\n", p.orphans, platform.Machine(p.goos))
 	}
+	machine := platform.Machine(p.goos)
 	fmt.Fprintf(&b, `
 Next steps:
   1. cd %s && zakwas plan
      Files that already match are adopted; others are backed up to *.zakwas-bak on apply.
   2. Create an empty GitHub repo, then:
      git add -A && git commit -m "Initial config" && git remote add origin URL && git push -u origin main
-  3. On a new Mac:
+  3. On a new %s:
      curl -fsSL https://raw.githubusercontent.com/Automaat/zakwas/main/install.sh | bash -s -- --repo URL
-`, shellQuote(dir))
+`, shellQuote(dir), machine)
 	return b.String()
 }
 

@@ -2,6 +2,8 @@ package agents
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +15,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 // cloneRunner answers `git clone` by writing a marketplace into the clone
@@ -302,7 +305,7 @@ func TestOpencodePruneNeverDeletesThroughSymlinkedParent(t *testing.T) {
 	m.Agents.Opencode = &config.Opencode{SkillsDir: "~/.agents/skills"}
 	m.Agents.Plugins = nil
 	changes := plan(t, m)
-	if got := targets(changes); !reflect.DeepEqual(got, []string{"- opencode skill ~/.config/opencode/skills/one (no longer zakwas's link, forget it)"}) {
+	if got := targets(changes); !reflect.DeepEqual(got, []string{"- opencode skill ~/.config/opencode/skills/one (behind a symlinked directory: stop tracking it, the link stays)"}) {
 		t.Fatalf("got %v", got)
 	}
 	apply(t, changes)
@@ -321,6 +324,35 @@ func TestOpencodeSkillsDir(t *testing.T) {
 	marketplace(t, root, "mp", map[string][]string{"a": {"s"}})
 	apply(t, plan(t, m))
 	assertLink(t, filepath.Join(m.Paths.Home, "custom", "skills", "s"), filepath.Join(root, "plugins", "a", "skills", "s"))
+}
+
+func TestOpencodeSkillsDirDefaults(t *testing.T) {
+	xdg := t.TempDir()
+	tests := []struct {
+		name     string
+		xdg      string
+		realHome bool
+		opencode *config.Opencode
+		want     func(home string) string
+	}{
+		{"no XDG", "", true, nil, func(home string) string { return filepath.Join(home, ".config", "opencode", "skills") }},
+		{"XDG_CONFIG_HOME", xdg, true, nil, func(string) string { return filepath.Join(xdg, "opencode", "skills") }},
+		{"relative XDG_CONFIG_HOME is ignored", "rel/config", true, nil, func(home string) string { return filepath.Join(home, ".config", "opencode", "skills") }},
+		{"XDG is ignored for another home", xdg, false, nil, func(home string) string { return filepath.Join(home, ".config", "opencode", "skills") }},
+		{"explicit skillsDir wins", xdg, true, &config.Opencode{SkillsDir: "~/custom"}, func(home string) string { return filepath.Join(home, "custom") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newOpencode(t, config.Agents{Opencode: tt.opencode})
+			if tt.realHome {
+				t.Setenv("HOME", m.Paths.Home)
+			}
+			t.Setenv("XDG_CONFIG_HOME", tt.xdg)
+			if got, want := m.opencodeBackend().skillsDir, tt.want(m.Paths.Home); got != want {
+				t.Errorf("skillsDir = %q, want %q", got, want)
+			}
+		})
+	}
 }
 
 func TestOpencodeManifests(t *testing.T) {
@@ -911,5 +943,135 @@ func TestOpencodePrunesWithoutOpencodeInstalled(t *testing.T) {
 	}
 	if got := targets(changes); !reflect.DeepEqual(got, []string{"- opencode skill gone (b@mp)"}) {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestOpencodeFilesFollowXDGConfigHome(t *testing.T) {
+	xdg := t.TempDir()
+	tests := []struct {
+		name     string
+		xdg      string
+		realHome bool
+		base     func(home string) string
+	}{
+		{"unset", "", true, func(home string) string { return filepath.Join(home, ".config") }},
+		{"absolute", xdg, true, func(string) string { return xdg }},
+		{"another home", xdg, false, func(home string) string { return filepath.Join(home, ".config") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _ := newOpencode(t, config.Agents{})
+			if tt.realHome {
+				t.Setenv("HOME", m.Paths.Home)
+			}
+			t.Setenv("XDG_CONFIG_HOME", tt.xdg)
+			base := tt.base(m.Paths.Home)
+			if got, want := m.instructionsPath(config.ProviderOpencode), filepath.Join(base, "opencode", "AGENTS.md"); got != want {
+				t.Errorf("instructions = %q, want %q", got, want)
+			}
+			if got, want := m.profilePath(config.ProviderOpencode, "review"), filepath.Join(base, "opencode", "agents", "review.md"); got != want {
+				t.Errorf("profile = %q, want %q", got, want)
+			}
+			if got, want := m.opencodeCommandHooksPath(), filepath.Join(base, "opencode", "plugins", "zakwas-hooks.js"); got != want {
+				t.Errorf("hooks = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestOpencodeSkillsMoveWhenSkillsDirChanges(t *testing.T) {
+	m, _ := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
+		Plugins:      []config.Plugin{{ID: "a@mp"}},
+		Opencode:     &config.Opencode{SkillsDir: "~/old/skills"},
+	})
+	root := filepath.Join(m.Paths.Root, "mp")
+	marketplace(t, root, "mp", map[string][]string{"a": {"s"}})
+	apply(t, plan(t, m))
+	oldLink := filepath.Join(m.Paths.Home, "old", "skills", "s")
+	assertLink(t, oldLink, filepath.Join(root, "plugins", "a", "skills", "s"))
+	mine := filepath.Join(m.Paths.Home, "old", "skills", "mine")
+	if err := os.Symlink(root, mine); err != nil {
+		t.Fatal(err)
+	}
+
+	m.Agents.Opencode = &config.Opencode{SkillsDir: "~/new/skills"}
+	changes := plan(t, m)
+	want := []string{"+ opencode skill s (a@mp)", "- opencode skill ~/old/skills/s (a@mp)"}
+	if got := targets(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+	apply(t, changes)
+	assertLink(t, filepath.Join(m.Paths.Home, "new", "skills", "s"), filepath.Join(root, "plugins", "a", "skills", "s"))
+	if _, err := os.Lstat(oldLink); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("old link still there: %v", err)
+	}
+	if _, err := os.Lstat(mine); err != nil {
+		t.Errorf("a link zakwas did not make was touched: %v", err)
+	}
+	if again := plan(t, m); len(again) != 0 {
+		t.Errorf("not converged: %v", targets(again))
+	}
+}
+
+func TestSameDir(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	if err := os.MkdirAll(filepath.Join(real, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"same spelling", filepath.Join(real, "skills"), filepath.Join(real, "skills"), true},
+		{"symlinked alias", filepath.Join(real, "skills"), filepath.Join(alias, "skills"), true},
+		{"alias of a dir not there yet", filepath.Join(real, "new", "skills"), filepath.Join(alias, "new", "skills"), true},
+		{"different dirs", filepath.Join(real, "skills"), filepath.Join(real, "other"), false},
+		{"neither exists", filepath.Join(root, "x", "skills"), filepath.Join(root, "y", "skills"), false},
+		{"nothing there, different case", filepath.Join(real, "new", "skills"), filepath.Join(real, "NEW", "skills"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sameDir(tt.a, tt.b); got != tt.want {
+				t.Errorf("sameDir(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpencodeSkillsKeepTheirLinkWhenTheDirIsRespelledInCase(t *testing.T) {
+	testutil.RequireDarwin(t, "needs a case-insensitive volume")
+	m, _ := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
+		Plugins:      []config.Plugin{{ID: "a@mp"}},
+		Opencode:     &config.Opencode{SkillsDir: "~/cfg/skills"},
+	})
+	root := filepath.Join(m.Paths.Root, "mp")
+	marketplace(t, root, "mp", map[string][]string{"a": {"s"}})
+	apply(t, plan(t, m))
+	probe := filepath.Join(m.Paths.Home, "CFG")
+	if _, err := os.Stat(probe); err != nil {
+		t.Skip("the volume is case sensitive")
+	}
+
+	m.Agents.Opencode = &config.Opencode{SkillsDir: "~/CFG/skills"}
+	for round := 1; round <= 2; round++ {
+		changes := plan(t, m)
+		for _, c := range changes {
+			if c.Action == engine.Remove {
+				t.Fatalf("round %d plans a removal of the only link: %v", round, targets(changes))
+			}
+		}
+		apply(t, changes)
+	}
+	assertLink(t, filepath.Join(m.Paths.Home, "cfg", "skills", "s"), filepath.Join(root, "plugins", "a", "skills", "s"))
+	if again := plan(t, m); len(again) != 0 {
+		t.Errorf("not converged: %v", targets(again))
 	}
 }

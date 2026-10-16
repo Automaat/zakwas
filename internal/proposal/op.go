@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 // Operation kinds.
@@ -28,6 +29,29 @@ const (
 
 // Kinds lists the operations in the order they are documented.
 var Kinds = []string{AddMarketplace, AddPlugin, AddPermission, RemovePermission, AddBrew, PinMise, AddMCP}
+
+var kindModule = map[string]string{AddBrew: "brew", PinMise: "mise"}
+
+// KindError is why kind cannot be proposed on goos, or nil.
+func KindError(kind, goos string) error {
+	module, ok := kindModule[kind]
+	if !ok {
+		return nil
+	}
+	if err := platform.ModuleError(module, goos); err != nil {
+		return fmt.Errorf("%s: %w", kind, err)
+	}
+	return nil
+}
+
+// KindsFor lists the operations that work on goos: add-brew and pin-mise
+// need modules Linux does not have.
+func KindsFor(goos string) []string {
+	return slices.DeleteFunc(slices.Clone(Kinds), func(kind string) bool {
+		module, ok := kindModule[kind]
+		return ok && !platform.Supported(module, goos)
+	})
+}
 
 // Op is one typed edit. Which fields it uses depends on Kind: Name is the
 // marketplace name, plugin id, MCP server name, brew package or mise tool.

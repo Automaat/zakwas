@@ -102,7 +102,7 @@ func TestHungCheckTimesOut(t *testing.T) {
 	CheckTimeout = 100 * time.Millisecond
 
 	m := &Module{
-		Runner:   runner.NewExec(),
+		Runner:   &runner.Exec{Detached: true, Grace: time.Second},
 		Home:     t.TempDir(),
 		Commands: []config.Command{{Name: "hang", Check: "sleep 10", Run: "true"}},
 	}

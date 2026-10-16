@@ -18,6 +18,8 @@ What it manages:
 - **commands**: guarded one-off steps (`run` only while `check` fails)
 - **launchd**: scheduled jobs as user agents
 
+On Linux, the agents module, files, links, templates, commands and system `dirs`/`sshKey` work; the rest is macOS only. See [Linux](#linux).
+
 ![zakwas plan, apply, and a protected dotfile](docs/demo/demo.gif)
 
 *Zakwas* is Polish for sourdough starter: keep it, feed it, and every new loaf comes out the same.
@@ -25,12 +27,12 @@ What it manages:
 ## Who it is for
 
 - **Fits:** you keep dotfiles in git and want apps, tool versions, macOS preferences and agent config declared in one place, with a plan before anything changes. You use several coding agents (Claude Code, Codex, opencode, Gemini CLI, Copilot CLI) and want their setup declared once. You want to know when a Mac drifted.
-- **Does not fit:** Linux or Windows (macOS only; the installer refuses to run elsewhere). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Secrets (keep them out of the config repo).
+- **Does not fit:** Windows, or Linux if you need Homebrew, mise or preferences managed (those modules are macOS only; see [Linux](#linux)). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Secrets (keep them out of the config repo).
 
 ## Status
 
 - **Pre-1.0.** The config format can change between minor versions; check the [release notes](https://github.com/Automaat/zakwas/releases) before upgrading. Machine-readable output carries its own `format_version`.
-- **macOS only.** Release binaries are darwin arm64 and amd64. CI runs on macOS 26; older versions are not tested.
+- **macOS first, Linux in part.** Release binaries are darwin and linux, arm64 and amd64. CI runs on macOS 26 and Ubuntu; older macOS versions are not tested. See [Linux](#linux) for what works there.
 - **One maintainer.** Issues and PRs get answered when there is time; see [.github/SUPPORT.md](.github/SUPPORT.md).
 - **Not notarized.** `install.sh` and `zakwas self-update` verify checksums, and build provenance when a logged-in `gh` is available.
 
@@ -60,7 +62,7 @@ zakwas apply --only files                  # confirm, then ~/.zshrc and a mise c
 | How | Command | Updates |
 |---|---|---|
 | installer (new Mac) | see [New Mac](#new-mac) | `zakwas self-update` |
-| Homebrew | `brew install automaat/tap/zakwas` | `brew upgrade zakwas` |
+| Homebrew (macOS) | `brew install automaat/tap/zakwas` | `brew upgrade zakwas` |
 | mise | `"github:Automaat/zakwas" = "X.Y.Z"` in your mise config | bump the pin (Renovate does it) |
 | Go | `go install github.com/Automaat/zakwas/cmd/zakwas@latest` | same command |
 
@@ -75,7 +77,13 @@ curl -fsSL https://raw.githubusercontent.com/Automaat/zakwas/main/install.sh |
   bash -s -- --repo https://github.com/you/dotfiles.git
 ```
 
-It installs the Command Line Tools and zakwas, clones your config to `~/dotfiles`, then runs `zakwas apply`. zakwas installs Homebrew and mise itself when the config needs them. The options (`--no-apply`, `--dir`, `--version`) are in [Getting started](docs/getting-started.md#set-up-a-second-mac).
+It installs the Command Line Tools and zakwas, clones your config to `~/dotfiles`, then runs `zakwas apply`. On Linux the same command skips the Command Line Tools step. zakwas installs Homebrew and mise itself when the config needs them. The options (`--no-apply`, `--dir`, `--version`) are in [Getting started](docs/getting-started.md#set-up-a-second-mac).
+
+## Linux
+
+The agent features work on Linux: the `agents` module, `capture`, `propose` / `proposals` / `approve`, `zakwas mcp` and the guard. So do `files`, `links`, `templates`, `commands` and `system` (`dirs` and `sshKey`). Release binaries and `install.sh` cover Linux amd64 and arm64 (the installer needs `bash`, `curl` and `tar`); the installer skips the Xcode step and ends with a hint when `~/.local/bin` is not on `PATH`.
+
+macOS only: `brew`, `mise`, `defaults`, `launchd` and `system.sudoTouchID`. A config that uses one on Linux is rejected with a one-line message that names it, so nothing is skipped silently. `protect.immutable` has no `uchg` flag on Linux: files stay read-only (`0444`) copies tracked by hash, and the plan says so. [`examples/linux/zakwas.yaml`](examples/linux/zakwas.yaml) is a config that plans there, and [Platform support](docs/config.md#platform-support) lists every module and option.
 
 ## Agents
 
@@ -93,7 +101,7 @@ Secrets stay environment references. With an `agents` section, a guard denies th
 
 ## Protected dotfiles
 
-`files` and `templates` write copies with write bits stripped; `protect.immutable` adds the macOS `uchg` flag. To change one, edit it in the repo and `zakwas apply`. A file zakwas did not write, or that was edited in place, is backed up to `<file>.zakwas-bak` before it is replaced. See [docs/config.md](docs/config.md#files) and [troubleshooting](docs/troubleshooting.md#the-plan-shows-edited-in-place-or-not-managed-yet-and-a-zakwas-bak-file).
+`files` and `templates` write copies with write bits stripped; `protect.immutable` adds the macOS `uchg` flag (on Linux files stay read-only copies). To change one, edit it in the repo and `zakwas apply`. A file zakwas did not write, or that was edited in place, is backed up to `<file>.zakwas-bak` before it is replaced. See [docs/config.md](docs/config.md#files) and [troubleshooting](docs/troubleshooting.md#the-plan-shows-edited-in-place-or-not-managed-yet-and-a-zakwas-bak-file).
 
 ## Security model
 
