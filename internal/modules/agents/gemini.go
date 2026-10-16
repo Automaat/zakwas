@@ -290,7 +290,7 @@ const (
 	geminiGuardTabs         = 4
 	geminiGuardPathParts    = 2
 	guardWordEnd            = `(?:[ ;&|)<>"]|\\[tn])`
-	guardAfterBlank         = `(?:[-;&|<>$#"` + "`" + `]|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
+	guardAfterBlank         = `(?:[-;&|<>$#"` + "`" + `]|\\n|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
 	guardOneBlank           = `(?:[ ]|\\t)`
 	guardEscapedQuote       = `\\\\\\"`
 	guardEscapedApostrophe  = `\\\\'`
@@ -325,16 +325,24 @@ func guardQuotedEnd() string {
 	return `(?:"|[;&|)<>]|\\n|` + guardBlank() + guardAfterBlank + `)`
 }
 
+// guardPathParts is a path with one to parts quoted parts or escaped
+// spaces. The text between the parts cannot hold a quote or a backslash, so
+// every part starts where the previous text ends and the match stays linear.
+func guardPathParts(parts int) string {
+	text := `[^ "'\\]*`
+	rest := text
+	for range parts - 1 {
+		rest = text + `(?:|` + guardPathPart + rest + `)`
+	}
+	return text + guardPathPart + rest
+}
+
 // guardPathPrefix is the directory part of the binary: a path without
-// blanks, with up to geminiGuardPathParts quoted parts or escaped blanks in
-// it (`"a b"/zakwas`, `/a\ b/zakwas`), or a quoted path that ends before
+// blanks, a path with up to geminiGuardPathParts quoted parts or escaped
+// spaces (`"a b"/zakwas`, `/a\ b/zakwas`), or a quoted path that ends before
 // the name.
 func guardPathPrefix() string {
-	parts := `[^ ]*`
-	for range geminiGuardPathParts {
-		parts = `[^ ]*(?:|` + guardPathPart + parts + `)`
-	}
-	return `(?:|` + parts + `/|\\"[^"]*/\\"|'[^']*/')`
+	return `(?:|[^ ]*/|` + guardPathParts(geminiGuardPathParts) + `/|\\"[^"]*/\\"|'[^']*/')`
 }
 
 // geminiGuardRegex matches a guarded command that starts the shell command
