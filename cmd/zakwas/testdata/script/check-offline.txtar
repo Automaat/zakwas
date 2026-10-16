@@ -1,4 +1,6 @@
 [windows] skip 'the fake brew, mise and defaults are sh scripts'
+env ZAKWAS_TEST_GOOS=darwin
+
 chmod 755 bin/brew
 chmod 755 bin/mise
 chmod 755 bin/defaults

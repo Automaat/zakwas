@@ -19,6 +19,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
 
@@ -106,7 +107,11 @@ func yamlBlocks(t *testing.T, file string) []block {
 }
 
 func parseBlock(b block, root, home string) (*config.Config, error) {
-	return config.Parse(b.body, filepath.Join(root, config.FileName), home)
+	return parseBlockFor(b, root, home, platform.Darwin)
+}
+
+func parseBlockFor(b block, root, home, goos string) (*config.Config, error) {
+	return config.ParseFor(b.body, filepath.Join(root, config.FileName), home, goos)
 }
 
 func TestDocumentedYAMLBlocksLoad(t *testing.T) {
@@ -126,6 +131,26 @@ func TestDocumentedYAMLBlocksLoad(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("found no yaml blocks")
+	}
+}
+
+func TestDocumentedAgentsBlocksLoadOnLinux(t *testing.T) {
+	loaded := 0
+	for _, file := range docFiles(t) {
+		for _, b := range yamlBlocks(t, file) {
+			if b.skip || !isAgentsBlock(t, b) {
+				continue
+			}
+			loaded++
+			t.Run(b.name(), func(t *testing.T) {
+				if _, err := parseBlockFor(b, t.TempDir(), t.TempDir(), platform.Linux); err != nil {
+					t.Errorf("%s does not load on Linux: %v", b.name(), err)
+				}
+			})
+		}
+	}
+	if loaded == 0 {
+		t.Fatal("found no agents blocks")
 	}
 }
 
@@ -247,7 +272,7 @@ func TestDocumentedAgentsBlocksPlan(t *testing.T) {
 					OnOK("codex plugin list --available --json", `{"installed": [], "available": []}`).
 					OnOK("copilot plugin marketplace list --json", "[]").
 					OnOK("copilot plugin list --json", "[]")
-				mods := cli.Modules(cfg, cli.Env{Home: home, Cwd: root, Runner: fake})
+				mods := cli.Modules(cfg, cli.Env{Home: home, Cwd: root, Runner: fake, GOOS: platform.Darwin})
 				i := slices.IndexFunc(mods, func(m engine.Module) bool { return m.Name() == "agents" })
 				if i < 0 {
 					t.Fatalf("%s: no agents module", b.name())

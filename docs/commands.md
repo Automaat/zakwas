@@ -17,7 +17,7 @@ Flags go before or after the command: `zakwas -y apply` and `zakwas apply -y` ar
 | [`proposals`](#proposals) | list pending proposals |
 | [`approve`](#approve) | show a proposal's diff and plan, confirm, apply it and commit it |
 | [`mcp`](#mcp) | serve config reads and proposals to coding agents over MCP |
-| [`init`](#init) | create a starter config repo from this Mac |
+| [`init`](#init) | create a starter config repo from this machine |
 | [`self-update`](#self-update) | replace the zakwas binary with a release |
 | [`completion`](#completion) | print a shell completion script |
 | [`schema`](#schema) | print the JSON Schema of `zakwas.yaml` |
@@ -305,7 +305,7 @@ Claude Code and Codex install the plugin; opencode gets the skill linked. The pl
 zakwas init DIR [--add PATH]...
 ```
 
-Creates a starter config repo in DIR from the current Mac. DIR must not exist or be empty (exit 64 otherwise). Nothing outside DIR is changed.
+Creates a starter config repo in DIR from the current machine. DIR must not exist or be empty (exit 64 otherwise). Nothing outside DIR is changed. On Linux, where `brew` and `mise` are not supported, it writes no `brew` or `mise` section and no `protect` section, and copies only the `--add` files.
 
 | Flag | Meaning |
 |---|---|
@@ -371,7 +371,7 @@ zakwas self-update [--version X.Y.Z]
 |---|---|
 | `--version X.Y.Z` | release to install (a leading `v` is fine); default: latest |
 
-Resolves the latest release from the `https://github.com/Automaat/zakwas/releases/latest` redirect (not the rate-limited API), downloads `zakwas_<version>_darwin_<arm64|amd64>.tar.gz` and `checksums.txt`, verifies the SHA256, and replaces the running binary atomically (temp file in the same directory, `chmod 0755`, rename). Prints a message and does nothing when that version is already running.
+Resolves the latest release from the `https://github.com/Automaat/zakwas/releases/latest` redirect (not the rate-limited API), downloads `zakwas_<version>_<darwin|linux>_<arm64|amd64>.tar.gz` for the running system and `checksums.txt`, verifies the SHA256, and replaces the running binary atomically (temp file in the same directory, `chmod 0755`, rename). Prints a message and does nothing when that version is already running.
 
 Build provenance is checked the way `install.sh` does it (see [security.md](security.md)): when `gh` is installed, logged in (`gh auth status`) and supports `--source-ref`, self-update runs `gh attestation verify <archive> --repo Automaat/zakwas --signer-workflow Automaat/zakwas/.github/workflows/release.yml --source-ref refs/tags/v<version>` and stops (exit 1) if it fails. Without such a `gh` it prints the command to verify by hand and continues. Versions before 0.4.0 carry no attestation and skip the check.
 
@@ -448,7 +448,9 @@ Prints `zakwas <version>` (`dev` for builds outside a release).
 | 1 | error; also when a module failed to plan (the others still apply) |
 | 2 | `check` found drift |
 | 64 | usage error (usage goes to stderr): no or unknown command, unknown flag, conflicting flags, invalid `init`/`self-update` arguments, package-managed binary |
-| 130 | interrupted (Ctrl-C) |
+| 129 | stopped by SIGHUP (closed terminal) |
+| 130 | interrupted (Ctrl-C, SIGINT) |
+| 143 | stopped by SIGTERM (`timeout`, a supervisor) |
 
 ## Environment
 

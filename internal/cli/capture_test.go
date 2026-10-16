@@ -11,6 +11,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/modules/agents"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/proposal"
 )
 
@@ -341,7 +342,7 @@ func TestCaptureIsListedWithTheCommands(t *testing.T) {
 	for _, c := range commandList {
 		found = found || c.name == "capture"
 	}
-	if !found || !strings.Contains(usage(), "capture [--write]") {
+	if !found || !strings.Contains(usage(platform.Current()), "capture [--write]") {
 		t.Error("capture is missing from the command list")
 	}
 }
@@ -393,7 +394,7 @@ func TestFailedApproveRestoresTheOwnershipRecords(t *testing.T) {
 	fake.OnOK("claude plugin marketplace list --json", `[{"name":"sai","source":"github","repo":"o/sai"}]`)
 	fake.OnOK("claude plugin list --json --available", `{"installed": [], "available": [{"pluginId":"x@sai","version":"1"}]}`)
 
-	cfg, err := loadConfig("", env.Cwd, env.Home)
+	cfg, err := loadConfig("", env)
 	if err != nil {
 		t.Fatal(err)
 	}

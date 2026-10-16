@@ -225,9 +225,7 @@ func TestUpdates(t *testing.T) {
 }
 
 func TestImmutableToggle(t *testing.T) {
-	if !immutableSupported {
-		t.Skip("no immutable flag on this OS")
-	}
+	testutil.RequireDarwin(t, "the uchg flag")
 	in, home := newInstaller(t, true)
 	dst := filepath.Join(home, "f")
 	converge(t, in, dst, "x", 0o644)
@@ -686,5 +684,19 @@ func TestIsLink(t *testing.T) {
 	}
 	if isLink(info) {
 		t.Error("a plain directory is not a link")
+	}
+}
+
+func TestImmutableIsANoOpWithoutTheFlag(t *testing.T) {
+	testutil.RequireLinux(t, "no uchg flag to set")
+	in, home := newInstaller(t, true)
+	dst := filepath.Join(home, "f")
+	converge(t, in, dst, "x", 0o644)
+	info, err := os.Stat(dst)
+	if err != nil || info.Mode().Perm() != 0o444 {
+		t.Fatalf("stat = %v, %v; want a 0444 file", info, err)
+	}
+	if locked, err := isImmutable(dst); err != nil || locked {
+		t.Errorf("isImmutable = %v, %v", locked, err)
 	}
 }

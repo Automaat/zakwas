@@ -70,7 +70,7 @@ func (m *Module) instructionsPath(provider string) string {
 	case sharedInstructions:
 		return m.Paths.Dst("~/.agents/AGENTS.md")
 	default:
-		return m.Paths.Dst("~/.config/opencode/AGENTS.md")
+		return filepath.Join(m.xdgConfigHome(), "opencode", "AGENTS.md")
 	}
 }
 

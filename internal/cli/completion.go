@@ -6,10 +6,14 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
-// ModuleNames lists every module in apply order, for --only completion.
-var ModuleNames = []string{"system", "files", "links", "templates", "brew", "mise", "agents", "commands", "launchd", "defaults"}
+// ModuleNames lists every module in apply order.
+var ModuleNames = platform.Names()
+
+func completionModules() []string { return platform.SupportedModules(platform.Current()) }
 
 var shells = []string{"zsh", "bash", "fish"}
 
@@ -49,6 +53,9 @@ var freeFlags = []string{"version", "providers", "justification", "command", "ur
 func flagsOf(fs *flag.FlagSet) []complFlag {
 	var out []complFlag
 	fs.VisitAll(func(f *flag.Flag) {
+		if f.Name == "cask" && !platform.Supported("brew", platform.Current()) {
+			return
+		}
 		cf := complFlag{name: f.Name, usage: f.Usage, kind: fileValue}
 		switch {
 		case isBoolFlag(f):
@@ -148,7 +155,7 @@ func (m completionModel) bash() string {
 	fmt.Fprintf(&b, "            %s) ((i++)) ;;\n", strings.Join(withValue, "|"))
 	b.WriteString("            -*) ;;\n            *) cmd=${COMP_WORDS[i]}; break ;;\n        esac\n    done\n")
 	b.WriteString("    case $prev in\n")
-	fmt.Fprintf(&b, "        -only|--only)\n            local prefix=''\n            [[ $cur == *,* ]] && prefix=${cur%%,*},\n            COMPREPLY=($(compgen -P \"$prefix\" -W '%s' -- \"${cur##*,}\"))\n            return ;;\n", strings.Join(ModuleNames, " "))
+	fmt.Fprintf(&b, "        -only|--only)\n            local prefix=''\n            [[ $cur == *,* ]] && prefix=${cur%%,*},\n            COMPREPLY=($(compgen -P \"$prefix\" -W '%s' -- \"${cur##*,}\"))\n            return ;;\n", strings.Join(completionModules(), " "))
 	fmt.Fprintf(&b, "        %s) return ;;\n", strings.Join(append(fileFlags, valueFlags...), "|"))
 	b.WriteString("    esac\n    case $cmd in\n")
 	fmt.Fprintf(&b, "        '') if [[ $cur == -* ]]; then words='%s'; else words='%s'; fi ;;\n", strings.Join(spelled, " "), strings.Join(commandNames(), " "))
@@ -185,7 +192,7 @@ func (m completionModel) zsh() string {
 	}
 	b.WriteString("  )\n  commands=(\n")
 	for _, c := range commandList {
-		fmt.Fprintf(&b, "    %s\n", zshQuote(c.name+":"+c.help))
+		fmt.Fprintf(&b, "    %s\n", zshQuote(c.name+":"+commandHelp(c.name, platform.Current())))
 	}
 	b.WriteString("  )\n")
 	b.WriteString("  _arguments -C $global_flags '1:command:->command' '*::arg:->args'\n")
@@ -225,7 +232,7 @@ func zshSpec(f complFlag, repeat string) string {
 	case fileValue:
 		spec += ":file:_files"
 	case moduleValue:
-		spec += ":module:_sequence compadd - " + strings.Join(ModuleNames, " ")
+		spec += ":module:_sequence compadd - " + strings.Join(completionModules(), " ")
 	case freeValue:
 		spec += ":" + f.name + ": "
 	}
@@ -241,7 +248,7 @@ func (m completionModel) fish() string {
 	b.WriteString("# fish completion for zakwas; load with: zakwas completion fish | source\n")
 	b.WriteString("complete -c zakwas -f\n")
 	for _, c := range commandList {
-		fmt.Fprintf(&b, "complete -c zakwas -n __fish_use_subcommand -a %s -d %s\n", c.name, fishQuote(c.help))
+		fmt.Fprintf(&b, "complete -c zakwas -n __fish_use_subcommand -a %s -d %s\n", c.name, fishQuote(commandHelp(c.name, platform.Current())))
 	}
 	planCond := fishQuote("__fish_use_subcommand; or __fish_seen_subcommand_from " + strings.Join(planCommands, " "))
 	for _, f := range m.global {
@@ -275,7 +282,7 @@ func fishFlag(cond string, f complFlag) string {
 	case fileValue:
 		opt += " -r -F"
 	case moduleValue:
-		opt += " -x -a " + fishQuote(strings.Join(ModuleNames, " "))
+		opt += " -x -a " + fishQuote(strings.Join(completionModules(), " "))
 	case freeValue:
 		opt += " -x"
 	}

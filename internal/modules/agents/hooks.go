@@ -58,12 +58,7 @@ type klaudiushConfig struct {
 }
 
 func (m *Module) klaudiushConfigPath() string {
-	base := filepath.Join(m.Paths.Home, ".config")
-	if m.Paths.Home == envHome() {
-		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
-			base = xdg
-		}
-	}
+	base := m.xdgConfigHome()
 	xdgPath := filepath.Join(base, "klaudiush", "config.toml")
 	if _, err := os.Stat(xdgPath); err == nil {
 		return xdgPath
@@ -228,12 +223,7 @@ func (m *Module) opencodeKlaudiushPath(p klaudiushProvider) string {
 	if p.PluginPath != "" {
 		return m.hookPath(p.PluginPath)
 	}
-	base := filepath.Join(m.Paths.Home, ".config")
-	if m.Paths.Home == envHome() {
-		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
-			base = xdg
-		}
-	}
+	base := m.xdgConfigHome()
 	return filepath.Join(base, "opencode", "plugin", "klaudiush.ts")
 }
 
@@ -386,6 +376,17 @@ func opencodeHookRegistered(path, binary string) (bool, error) {
 			strings.Contains(source, `case "session.idle":`)) ||
 			(strings.Contains(source, `ctx.tool.hook("execute.before",`) &&
 				strings.Contains(source, `case "session.execution.succeeded":`))), nil
+}
+
+// xdgConfigHome is where XDG-style tools look for their config: $XDG_CONFIG_HOME
+// when it is absolute and zakwas runs against the real home, else ~/.config.
+func (m *Module) xdgConfigHome() string {
+	if m.Paths.Home == envHome() {
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
+			return xdg
+		}
+	}
+	return filepath.Join(m.Paths.Home, ".config")
 }
 
 // envHome is the home directory the process runs with ($HOME, or the user

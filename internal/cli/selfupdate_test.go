@@ -131,7 +131,7 @@ func TestSelfUpdateAttestation(t *testing.T) {
 		msg      string
 		verified bool
 	}{
-		{"verified", "1.2.3", ghFake{installed: true, loggedIn: true}, ExitOK, "new binary", "Verified build provenance of zakwas_1.2.3_darwin_", true},
+		{"verified", "1.2.3", ghFake{installed: true, loggedIn: true}, ExitOK, "new binary", "Verified build provenance of zakwas_1.2.3_" + runtime.GOOS + "_", true},
 		{"verification fails", "1.2.3", ghFake{installed: true, loggedIn: true, verifyExit: 1}, ExitErr, "old binary", "attestation verification failed", true},
 		{"gh missing", "1.2.3", ghFake{}, ExitOK, "new binary", "Skipped attestation check", false},
 		{"gh logged out", "1.2.3", ghFake{installed: true}, ExitOK, "new binary", "--source-ref refs/tags/v1.2.3", false},

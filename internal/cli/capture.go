@@ -86,7 +86,7 @@ func runCapture(ctx context.Context, env Env, args []string, out, errOut *consol
 		fs.Usage()
 		return ExitUsage
 	}
-	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
+	cfg, err := loadConfig(o.cfgPath, env)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr

@@ -157,7 +157,7 @@ curl -fsSL https://raw.githubusercontent.com/Automaat/zakwas/main/install.sh |
   bash -s -- --repo https://github.com/you/dotfiles.git
 ```
 
-The installer starts the Xcode Command Line Tools install if they are missing (finish the dialog, then press a key), installs a checksum-verified zakwas to `~/.local/bin`, clones the repo to `~/dotfiles` (`--dir` changes that; an existing directory is not cloned again, and `--repo` is required when it does not exist) and runs `zakwas apply`. Pass `--no-apply` to stop before applying, for example when the config needs a manual step first; then `cd ~/dotfiles && ~/.local/bin/zakwas plan`, since `~/.local/bin` is not on `PATH` yet. `--version X.Y.Z` pins the release. Open a new terminal afterwards so `PATH` picks up what was installed.
+The installer starts the Xcode Command Line Tools install if they are missing (finish the dialog, then press a key; Linux has no such step), installs a checksum-verified zakwas to `~/.local/bin`, clones the repo to `~/dotfiles` (`--dir` changes that; an existing directory is not cloned again, and `--repo` is required when it does not exist) and runs `zakwas apply`. Pass `--no-apply` to stop before applying, for example when the config needs a manual step first; then `cd ~/dotfiles && ~/.local/bin/zakwas plan`, since `~/.local/bin` is not on `PATH` yet. `--version X.Y.Z` pins the release. Open a new terminal afterwards so `PATH` picks up what was installed.
 
 ## Next
 

@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/schemagen"
 	"github.com/Automaat/zakwas/schema"
 )
@@ -118,6 +119,11 @@ func configs(t *testing.T) map[string][]byte {
 		t.Fatal(err)
 	}
 	out["examples/"+config.FileName] = example
+	linuxExample, err := os.ReadFile(filepath.Join(repoRoot, "examples", "linux", config.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out["examples/linux/"+config.FileName] = linuxExample
 	scripts, err := filepath.Glob(filepath.Join(repoRoot, "cmd", "zakwas", "testdata", "script", "*.txtar"))
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +158,7 @@ func TestValidConfigs(t *testing.T) {
 			if err := os.WriteFile(path, data, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := config.Load(path, t.TempDir()); err != nil {
+			if _, err := config.LoadFor(path, t.TempDir(), platform.Darwin); err != nil {
 				t.Errorf("loader: %v", err)
 			}
 		})
@@ -208,7 +214,7 @@ func TestLoaderAcceptedConfigs(t *testing.T) {
 			if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := config.Load(path, t.TempDir()); err != nil {
+			if _, err := config.LoadFor(path, t.TempDir(), platform.Darwin); err != nil {
 				t.Fatalf("loader: %v", err)
 			}
 			if err := validate(t, s, []byte(doc)); err != nil {
@@ -291,7 +297,7 @@ func TestInvalidConfigs(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.yaml), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := config.Load(path, t.TempDir()); err == nil {
+			if _, err := config.LoadFor(path, t.TempDir(), platform.Darwin); err == nil {
 				t.Error("loader accepted it")
 			}
 		})
@@ -371,7 +377,7 @@ func check(t *testing.T, s *jsonschema.Schema, yamlDoc string, want bool) {
 	if err := os.WriteFile(path, []byte(yamlDoc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, loadErr := config.Load(path, t.TempDir())
+	_, loadErr := config.LoadFor(path, t.TempDir(), platform.Darwin)
 	schemaErr := validate(t, s, []byte(yamlDoc))
 	if (loadErr == nil) != want || (schemaErr == nil) != want {
 		t.Errorf("%s: loader accepts %v (%v), schema accepts %v (%v), want %v", strings.TrimSpace(yamlDoc), loadErr == nil, loadErr, schemaErr == nil, schemaErr, want)

@@ -1,11 +1,12 @@
 # zakwas.yaml reference
 
-`zakwas.yaml` describes one Mac. zakwas finds it by searching up from the current directory, then `$ZAKWAS_CONFIG`; `-c path` overrides both. The directory holding it is the **config root**: every `src`, `brew.file` and `mise.config` path is relative to it (absolute paths work too).
+`zakwas.yaml` describes one machine, normally a Mac. On Linux some sections are not supported; see [Platform support](#platform-support). zakwas finds it by searching up from the current directory, then `$ZAKWAS_CONFIG`; `-c path` overrides both. The directory holding it is the **config root**: every `src`, `brew.file` and `mise.config` path is relative to it (absolute paths work too).
 
 Every section is optional. Unknown keys are errors, and zakwas reports every problem in the file at once before touching anything. An error about an unknown or duplicate key gives its line, and one about an unknown anchor has none; neither repeats the key or anchor text, so a secret pasted there stays out of the output.
 
 - [Editor setup](#editor-setup)
 - [Conventions](#conventions)
+- [Platform support](#platform-support)
 - [protect](#protect)
 - [files](#files)
 - [links](#links)
@@ -115,13 +116,40 @@ Other editors (Helix, JetBrains, Sublime) that run yaml-language-server honor th
 
 **Module order**: system → files → links → templates → brew → mise → agents → commands → launchd → defaults. `--only brew,defaults` runs a subset.
 
+## Platform support
+
+zakwas runs on macOS, Linux and, in part, Windows. Each section below is supported on the systems marked here. A config that uses a section its system does not support fails validation with a one-line error that names the section and the system, for `plan`, `check`, `apply` and the other commands alike; no module is skipped silently. Options of a supported section are listed after the modules.
+
+| Module | macOS | Linux | Windows | Why |
+|---|---|---|---|---|
+| `system` | yes | yes | no | `dirs` and `sshKey` work on macOS and Linux; Windows has no file modes to set yet; see `system.sudoTouchID` below |
+| `files` | yes | yes | yes | |
+| `links` | yes | yes | no | symlinks need a privilege Windows users lack by default and have no fallback yet; use `files` there |
+| `templates` | yes | yes | yes | |
+| `brew` | yes | no | no | bootstraps Homebrew for macOS and manages casks |
+| `mise` | yes | no | no | its bootstrap installs the macOS build of mise; on Linux install mise yourself and use `commands` or a `files` entry for its config; Windows has no bootstrap yet |
+| `agents` | yes | yes | yes | paths follow `$HOME` (`%USERPROFILE%` on Windows), `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$XDG_CONFIG_HOME` and the other variables the agents read |
+| `commands` | yes | yes | no | `sh -c` in your home directory; Windows has no `sh` |
+| `launchd` | yes | no | no | launchd is macOS's service manager |
+| `defaults` | yes | no | no | drives the macOS `defaults` tool |
+
+| Option | macOS | Linux | Windows | Why |
+|---|---|---|---|---|
+| `system.sudoTouchID` | yes | no | no | Touch ID and `pam_tid.so` are macOS only; rejected elsewhere |
+| `agents.skills` | yes | yes | no | skills are linked with symlinks, which Windows does not support yet |
+| `protect.immutable` | yes | fallback | fallback | the `uchg` flag is macOS only; elsewhere files stay read-only copies (`0444` on Linux, the read-only attribute on Windows, tracked by hash) and the plan warns once |
+
+On Windows, parts of `agents` also wait for symlinks or `sh` and fail the plan of just that provider or feature: the plugin skills opencode links, opencode's command hooks plugin and the Gemini extension link. See [agents.md](agents.md#windows).
+
+`--only` with a module the system does not support fails with the same error. Shell completion offers only the modules that run on the current system. File name comparisons (overlapping destinations, skill names) stay case-insensitive on Linux, which is stricter than its file systems need: two names that differ only in case are rejected on both systems.
+
 ## protect
 
 How `files` and `templates` are locked down after zakwas writes them.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `immutable` | bool | `false` | Also set the macOS `uchg` flag, so even the owner can't edit, `chmod` or `rm` the file (`:w!` fails too) without `chflags nouchg`. |
+| `immutable` | bool | `false` | Also set the macOS `uchg` flag, so even the owner can't edit, `chmod` or `rm` the file (`:w!` fails too) without `chflags nouchg`. On Linux there is no such flag: files stay read-only copies and the plan warns once. |
 
 Write bits are always stripped, with or without `immutable`. `plan` flags a file whose protection was removed (`mode 644 → 444`, `set immutable`) and `apply` restores it.
 
@@ -275,7 +303,7 @@ The `claude` (Claude Code), `codex` (Codex), `opencode`, `gemini` (Gemini CLI) a
 | `codex.settings` | map | no | | Selected global Codex config.toml values, edited in place independently of profiles. See [global Codex settings](#global-codex-settings). |
 | `profiles` | map | no | | Profile name → what it may do, declared once and rendered for Claude Code, Codex, opencode, Gemini CLI and Copilot CLI: `description`, `prompt`, `tools`, `edit`, `shell`, `sandbox`, `network`, `reviewer`, `mcp`, `providers` and per-provider `claude`, `codex`, `opencode`, `gemini`, `copilot` blocks. See [profiles](#profiles). |
 | `skills` | list | no | | Standalone skills linked into every managed agent: a path, or `{path, git, ref, providers}`. See [skills](#skills). |
-| `opencode.skillsDir` | string | no | `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
+| `opencode.skillsDir` | string | no | `$XDG_CONFIG_HOME/opencode/skills`, else `~/.config/opencode/skills` | Where opencode skills are linked; absolute or `~/…`. |
 | `guard` | bool | no | `true` | Keep the managed agents from applying this config. See [guard](#guard). |
 
 A marketplace `source` is a GitHub `owner/repo` or a git URL (either optionally with `#ref`), or a local path starting with `./`, `../`, `~/` or `/` (relative paths resolve from the directory holding `zakwas.yaml`). A marketplace targets `agents.providers` unless it lists its own `providers`; a plugin targets its marketplace's providers unless it lists its own, which must be a subset.
@@ -302,11 +330,11 @@ For Copilot CLI, which reads Claude-format marketplaces, `apply` adds missing ma
 
 The Copilot plan fails when `copilot` is not on `PATH`, or when a declared marketplace is already added from a different source or ref. Copilot's list omits the ref, so zakwas reads it from the marketplace's entry in `settings.json`, where Copilot records the ref it added the marketplace with, and none when it was added without one. A declared `#ref` that differs from the recorded ref, or that is declared while the entry records none, fails the plan; remove the marketplace with `copilot plugin marketplace remove <name>` (`--force` when plugins from it are installed, which uninstalls them) and apply again. The error names the ref the marketplace was added with, as `comes from o/mk#old`, or says `(added without a ref)` when the declared ref conflicts with an entry that records none. A marketplace declared without a ref, or with an empty one (`o/mk#`), is not compared by ref, whatever ref it was added with. A marketplace with no entry in `settings.json` (the file is missing or unreadable, or Copilot didn't write one) has no known ref, so only its source is compared. A declared plugin missing from its marketplace fails its install on apply: the plan never browses a marketplace, since Copilot clones one that isn't cached yet. zakwas runs `copilot` from `/` and honors `COPILOT_HOME` (a relative one resolves from the directory zakwas runs in). zakwas never writes Copilot's `config.json` or `settings.json`; Copilot keeps its own marketplace and plugin state in them.
 
-For opencode, which has no plugin system, zakwas links each skill of every declared plugin (the paths its `plugin.json` or marketplace entry lists under `skills`, or else each `skills/<name>/` holding a `SKILL.md`) into `~/.config/opencode/skills/<name>`. `apply` fetches the git marketplaces of those plugins with `git clone --depth 1` into `~/.local/share/zakwas/agents/<name>` (a `#ref` must be a branch or tag) and uses local ones in place; the plugin directory comes from the first of `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` that lists the plugin, and must be inside the marketplace repo, symlinks resolved; skill paths that resolve outside it are skipped.
+For opencode, which has no plugin system, zakwas links each skill of every declared plugin (the paths its `plugin.json` or marketplace entry lists under `skills`, or else each `skills/<name>/` holding a `SKILL.md`) into `opencode/skills/<name>` under `$XDG_CONFIG_HOME` (`~/.config` when unset). `apply` fetches the git marketplaces of those plugins with `git clone --depth 1` into `~/.local/share/zakwas/agents/<name>` (a `#ref` must be a branch or tag) and uses local ones in place; the plugin directory comes from the first of `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` that lists the plugin, and must be inside the marketplace repo, symlinks resolved; skill paths that resolve outside it are skipped.
 
 `plan` never fetches: a marketplace not fetched yet shows as a fetch, followed by one step that links its plugins' skills and applies the other listed changes, checking every skill name before linking any. Under `prune`, links of those plugins' skills that the fetched copy no longer ships are removed in the same step; any other removal that only shows up after the fetch is left for the next plan. `zakwas upgrade` pulls the fetched copies first; the links point into them, so skill updates need no relink.
 
-zakwas records what it linked and fetched in `~/.local/state/zakwas/opencode.json`; it only replaces or removes its own links, so a skill directory you put there yourself fails the plan instead, and a link you made to the same skill is left alone and never pruned. Two plugins shipping a skill with the same name, ignoring case, fail the plan, naming both. Like other modules, zakwas won't write through a symlinked parent under `$HOME` (this covers its own cache and state under `~/.local` too), so when `~/.config/opencode` is a link into your repo, set `opencode.skillsDir` (opencode also loads `~/.agents/skills`). `OPENCODE_CONFIG_DIR` is ignored, since tools like Orca point it at a private config; set `opencode.skillsDir` to install elsewhere (also when `XDG_CONFIG_HOME` moves opencode's config).
+zakwas records what it linked and fetched in `~/.local/state/zakwas/opencode.json`; it only replaces or removes its own links. When `opencode.skillsDir` changes, or `$XDG_CONFIG_HOME` moves the default, the plan links the declared skills in the new directory and removes zakwas's own links to them from the old one; links of skills you no longer declare stay there until `prune` removes them. A skill directory you put there yourself fails the plan instead, and a link you made to the same skill is left alone and never pruned. Two plugins shipping a skill with the same name, ignoring case, fail the plan, naming both. Like other modules, zakwas won't write through a symlinked parent under `$HOME` (this covers its own cache and state under `~/.local` too), so when `~/.config/opencode` is a link into your repo, set `opencode.skillsDir` (opencode also loads `~/.agents/skills`). `OPENCODE_CONFIG_DIR` is ignored, since tools like Orca point it at a private config; set `opencode.skillsDir` to install elsewhere (also when `XDG_CONFIG_HOME` moves opencode's config).
 
 With `prune`, links zakwas made for skills no declared plugin ships anymore are removed (also in an earlier `skillsDir`), then fetched copies of marketplaces no opencode plugin uses anymore. The plan fails when `opencode` is not on `PATH`; when no plugin names opencode, it only prunes then. All of this is strict only for plugins that name opencode, in their own `providers`, their marketplace's or `agents.providers`: a plugin that targets opencode by the all-providers default is linked where it can be and otherwise skipped (missing opencode or git, a failed fetch, which `zakwas upgrade` retries, a failed pull, which keeps the copy it has, a plugin stored elsewhere, a skill path that is taken), so a Claude-only config gets no opencode errors once opencode is installed; a skill name shipped by two plugins fails either way.
 
@@ -344,7 +372,7 @@ agents:
 |---|---|
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` |
 | Codex | `${CODEX_HOME:-~/.codex}/AGENTS.md` |
-| opencode | `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` is ignored, as for skills, and `opencode.skillsDir` doesn't move it) |
+| opencode | `$XDG_CONFIG_HOME/opencode/AGENTS.md`, else `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` is ignored, as for skills, and `opencode.skillsDir` doesn't move it) |
 | Gemini CLI | `${GEMINI_CLI_HOME:-~}/.gemini/zakwas/GEMINI.md`, the context file of the [zakwas extension](#gemini-cli); `~/.gemini/GEMINI.md`, which Gemini's memory tool writes to, is never touched |
 | Copilot CLI | `${COPILOT_HOME:-~/.copilot}/instructions/zakwas.instructions.md`, with `applyTo: "**"` frontmatter added so that Copilot loads it in every session |
 | shared | `~/.agents/AGENTS.md`, only with `sharedInstructions: true`; read by Warp, Cline and Factory Droid, not by Claude Code, Codex or opencode |
@@ -582,7 +610,7 @@ Only declared leaves are updated. Removing a value or the settings block leaves 
 |---|---|---|
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md` (a subagent file; Claude Code scans the directory recursively) | `claude --agent <name>` |
 | Codex | `${CODEX_HOME:-~/.codex}/<name>.config.toml` (layered over `config.toml`) | `codex --profile <name>` |
-| opencode | `~/.config/opencode/agents/<name>.md` | `opencode --agent <name>` |
+| opencode | `$XDG_CONFIG_HOME/opencode/agents/<name>.md`, else `~/.config/opencode/agents/<name>.md` | `opencode --agent <name>` |
 | Gemini CLI | `${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md` (a subagent of the [zakwas extension](#gemini-cli)) | `@<name>` at the start of a prompt, or let Gemini delegate |
 | Copilot CLI | `${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md` (a custom agent; only when `copilot` is named) | `copilot --agent <name>` |
 
@@ -706,15 +734,15 @@ Gemini rewrites `~/.gemini/settings.json` itself, and its memory tool writes the
 - The files are protected copies, like [`instructions`](#instructions): a file already there is backed up first, and zakwas records their hashes in `~/.local/state/zakwas/gemini-files.json` (the context file and the subagents in `instruction-files.json` and `agent-profiles.json`). When `gemini` leaves the config, zakwas runs `gemini extensions uninstall zakwas` first, since gemini needs the manifest for it, then removes the files it wrote. Empty directories stay.
 - Commands in `hooks.commands` receive Gemini's event JSON on stdin and answer in its format: a hook must print nothing but JSON on stdout. Gemini asks you to approve the extension's hooks when it loads them, as for any extension.
 - Gemini keeps no plugin marketplaces here: `marketplaces` and `plugins` can't name it, and `prune` and `upgrade` leave it alone.
-- The guard rules are one `commandRegex` per guarded command, tested against the command string as the agent wrote it. A command is denied when, after optional spaces and up to two tabs, it starts with the binary and the guarded word follows as the first word or after flags:
-  - The binary is `zakwas` in any case, bare, by path (`~/.local/bin/zakwas`, `$HOME/bin/zakwas`) or quoted with `"` or `'`, also a quoted path with spaces or one that ends before the name (`"/my dir/"zakwas`). Words are separated by spaces or up to two tabs.
+- The guard rules are one `commandRegex` per guarded command, tested against the command string as the agent wrote it. A command is denied when, after optional blanks, it starts with the binary and the guarded word follows as the first word or after flags:
+  - The binary is `zakwas` in any case, bare, by path (`~/.local/bin/zakwas`, `$HOME/bin/zakwas`) or quoted with `"` or `'`, also a quoted path with spaces or one that ends before the name (`"/my dir/"zakwas`), or a path with up to two quoted parts or escaped spaces in total when any of them holds a space (`"a b"/zakwas`, `/a\ b/zakwas`). Blanks are spaces and tabs in any mix, up to four tabs in a run (a space and two tabs, tab-space-tab), before the binary, between the binary and the next word, and after a quoted guarded word; between flags and their values there is no limit.
   - The guarded word is bare, `"apply"` or `'apply'`. Before it may stand flags, their values and redirections: the first word after the binary must start with `-`, `$`, `{`, a backtick, a backslash or a redirection, or be a quoted word that starts with `-` or `$`, and up to six quoted values (`"…"`, `'…'` or `$'…'`, which may hold an escaped quote) or escaped quotes (`it\'s`, `a\"b`) may follow before the guarded word.
-  - Not denied, because the guarded word is not the command: a word before the flags (`zakwas plan apply`, `zakwas propose "apply"`), a guarded word inside a quoted value (`-c "apply notes/x.yaml"`), and a quoted guarded word that is followed by a plain word (`zakwas -m "apply" plan`; the real command takes only flags after the word). A quoted guarded word that ends the command, or is followed by blanks, a comment (`zakwas -y "apply" # why`), a flag, a quoted flag or an expansion, is denied.
-  - Denied although harmless, since a regex can't tell flag values from words: after a leading flag, a bare guarded word anywhere later in the command (`zakwas -c apply plan`, `zakwas -y plan | grep apply`); a quoted guarded word followed by a flag, a quoted flag or an expansion (`zakwas -m "apply" -y plan`, `zakwas -m "apply" $F plan`); and a bare guarded word inside a quoted value after a word that holds an escaped quote or apostrophe (`it\'s`, `"a \"b\""`), since the quotes after it can pair shifted.
+  - Not denied, because the guarded word is not the command: a word before the flags (`zakwas plan apply`, `zakwas propose "apply"`), a guarded word inside a quoted value (`-c "apply notes/x.yaml"`), and a quoted guarded word after flags that is followed by a plain or quoted word (`zakwas -m "apply" plan`, `zakwas -y "approve" x.yaml`, `zakwas --json "apply" "y" status`; for `apply` and `upgrade` the real command takes only flags after the word, while `approve`, `mcp` and `self-update` accept a plain word after a redirection, so `zakwas 2>&1 "approve" 12` is allowed although it runs the real command). A quoted guarded word after flags is denied when it ends the command or is followed by blanks and then the end of the command or a newline, a comment (`zakwas -y "apply" # why`), a flag, a quoted flag, an expansion (`$`, a backtick), a backslash, an operator or a redirection (`; & | < >`, `2>&1`); any other word after the blanks makes it an allowed argument.
+  - Denied although harmless, since a regex can't tell flag values from words: after a leading flag, a bare guarded word anywhere later in the command (`zakwas -c apply plan`, `zakwas -y plan | grep apply`); a quoted guarded word followed by a flag, a quoted flag or an expansion (`zakwas -m "apply" -y plan`, `zakwas -m "apply" $F plan`); and a bare guarded word inside a quoted value after a word that holds an escaped quote or apostrophe (`it\'s`, `"a \"b\""`), since the quotes after it can pair shifted; and a command with a tab or newline before the last slash before `zakwas` (`/x<TAB>y/zakwas apply`, `ls<TAB>/zakwas apply`), since the regex reads the tab as part of the path.
 - What the guard rules don't match, so such a command falls to your other rules (by default Gemini asks you):
   - Anything before the binary: a wrapper (`env`, `sudo`, `command`, `exec`, `nohup`, `time`, `xargs`, `eval`, `bash -lc '…'`), an assignment (`FOO=1 zakwas apply`) or a redirection (`>/dev/null zakwas apply`). Gemini itself unwraps `sh -c`, `bash -c` and `zsh -c`, and checks the pieces of a chain, pipe, subshell, command substitution or compound statement.
   - A spelling the shell reads as the binary or the word but the regex doesn't: `\zakwas`, `z""akwas`, `zakwas ap""ply`, a variable (`${ZAKWAS:-zakwas} apply`, `zakwas $SUBCOMMAND`), an alias, a function or a symlink under another name.
-  - More than six quoted values and escaped quotes before the guarded word, more than two tabs in a run between words, and a backslash-newline continuation.
+  - More than six quoted values and escaped quotes before the guarded word, more than four tabs in a run of blanks before the binary, between the binary and the guarded word, or after a quoted guarded word, more than two quoted parts or escaped spaces in total in the path of the binary when any of them holds a space, and a backslash-newline continuation.
 - In YOLO approval mode Gemini tests a rule only against the whole command string and doesn't split it, so the guard rules deny only a command that starts with a guarded command. A chain (`echo hi; zakwas apply`), pipe, subshell (`(zakwas apply)`), command substitution (`echo $(zakwas apply)`), compound statement or `bash -c "zakwas apply"` wrapper is allowed there, and no regex can change that; in the other modes Gemini splits the command and denies it. In YOLO mode only the [refusal](security.md#what-the-guard-does) stops `apply`, which an agent can get around by unsetting `GEMINI_CLI`. Don't run Gemini in YOLO mode where the guard matters. This was checked against `@google/gemini-cli-core` 0.64.0.
 
 ## system
@@ -724,7 +752,7 @@ Machine-level setup.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `dirs` | list | `[]` | Directories to create (below). |
-| `sudoTouchID` | bool | `false` | Allow Touch ID for `sudo` by adding `pam_tid.so` to `/etc/pam.d/sudo_local`, which survives macOS updates. |
+| `sudoTouchID` | bool | `false` | Allow Touch ID for `sudo` by adding `pam_tid.so` to `/etc/pam.d/sudo_local`, which survives macOS updates. macOS only; rejected on Linux. |
 | `sshKey` | object | none | Generate an SSH key when missing (below). |
 
 `dirs` entries:

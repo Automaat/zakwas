@@ -405,12 +405,7 @@ func (m *Module) planJSONCommandHooks(provider string, want, owned []commandHook
 }
 
 func (m *Module) opencodeCommandHooksPath() string {
-	base := filepath.Join(m.Paths.Home, ".config")
-	if m.Paths.Home == envHome() {
-		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
-			base = xdg
-		}
-	}
+	base := m.xdgConfigHome()
 	return filepath.Join(base, "opencode", "plugins", "zakwas-hooks.js")
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -92,7 +93,7 @@ func TestFetch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := serve(t, tt.rel)
-			u := &Updater{BaseURL: srv.URL + "/releases", Arch: "arm64"}
+			u := &Updater{BaseURL: srv.URL + "/releases", OS: "darwin", Arch: "arm64"}
 			got, err := u.Fetch(context.Background(), "1.2.3")
 			if tt.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.err) {
@@ -107,9 +108,61 @@ func TestFetch(t *testing.T) {
 	}
 }
 
+func TestAssetName(t *testing.T) {
+	tests := []struct {
+		goos, arch, want string
+	}{
+		{"darwin", "arm64", "zakwas_1.2.3_darwin_arm64.tar.gz"},
+		{"darwin", "amd64", "zakwas_1.2.3_darwin_amd64.tar.gz"},
+		{"linux", "amd64", "zakwas_1.2.3_linux_amd64.tar.gz"},
+		{"linux", "arm64", "zakwas_1.2.3_linux_arm64.tar.gz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos+"/"+tt.arch, func(t *testing.T) {
+			u := &Updater{OS: tt.goos, Arch: tt.arch}
+			if got := u.Asset("1.2.3"); got != tt.want {
+				t.Errorf("Asset = %q, want %q", got, tt.want)
+			}
+			if err := u.checkTarget(); err != nil {
+				t.Errorf("checkTarget: %v", err)
+			}
+		})
+	}
+}
+
+func TestAssetDefaultsToThisMachine(t *testing.T) {
+	want := "zakwas_1.2.3_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+	if got := (&Updater{}).Asset("1.2.3"); got != want {
+		t.Errorf("Asset = %q, want %q", got, want)
+	}
+}
+
+func TestFetchUnsupportedTarget(t *testing.T) {
+	for _, target := range [][2]string{{"windows", "amd64"}, {"linux", "386"}, {"freebsd", "arm64"}} {
+		u := &Updater{BaseURL: "http://127.0.0.1:1/releases", OS: target[0], Arch: target[1]}
+		_, err := u.Fetch(context.Background(), "1.2.3")
+		if err == nil || !strings.Contains(err.Error(), "no zakwas release for "+target[0]+"/"+target[1]) {
+			t.Errorf("%v: err = %v", target, err)
+		}
+	}
+}
+
+func TestFetchLinux(t *testing.T) {
+	base := selfupdatetest.ServeFor(t, "1.2.3", "linux", "amd64", "linux binary")
+	u := &Updater{BaseURL: base, OS: "linux", Arch: "amd64"}
+	got, err := u.Fetch(context.Background(), "1.2.3")
+	if err != nil || string(got) != "linux binary" {
+		t.Errorf("Fetch = %q, %v", got, err)
+	}
+	other := &Updater{BaseURL: base, OS: "darwin", Arch: "amd64"}
+	if _, err := other.Fetch(context.Background(), "1.2.3"); err == nil || !strings.Contains(err.Error(), "no entry for zakwas_1.2.3_darwin_amd64.tar.gz") {
+		t.Errorf("darwin asset served from a linux release: %v", err)
+	}
+}
+
 func TestFetchMissingRelease(t *testing.T) {
 	srv := serve(t, release{})
-	u := &Updater{BaseURL: srv.URL + "/releases", Arch: "arm64"}
+	u := &Updater{BaseURL: srv.URL + "/releases", OS: "darwin", Arch: "arm64"}
 	if _, err := u.Fetch(context.Background(), "9.9.9"); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("err = %v, want a 404", err)
 	}
@@ -182,5 +235,29 @@ func TestAttested(t *testing.T) {
 		if got := Attested(v); got != want {
 			t.Errorf("Attested(%q) = %v, want %v", v, got, want)
 		}
+	}
+}
+
+func TestManagedByLinux(t *testing.T) {
+	home := "/home/me"
+	tests := []struct {
+		name string
+		exe  string
+		env  map[string]string
+		want string
+	}{
+		{"install.sh", "/home/me/.local/bin/zakwas", nil, ""},
+		{"usr local bin", "/usr/local/bin/zakwas", nil, ""},
+		{"mise default", "/home/me/.local/share/mise/installs/github-automaat-zakwas/1.0.0/zakwas", nil, "mise"},
+		{"XDG_DATA_HOME", "/home/me/data/mise/installs/zakwas/1.0.0/zakwas", map[string]string{"XDG_DATA_HOME": "/home/me/data"}, "mise"},
+		{"linuxbrew cellar", "/home/linuxbrew/.linuxbrew/Cellar/zakwas/1.0.0/bin/zakwas", map[string]string{"HOMEBREW_PREFIX": "/home/linuxbrew/.linuxbrew"}, "brew upgrade zakwas"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ManagedBy(tt.exe, home, func(k string) string { return tt.env[k] })
+			if (tt.want == "") != (got == "") || !strings.Contains(got, tt.want) {
+				t.Errorf("ManagedBy(%q) = %q, want mention of %q", tt.exe, got, tt.want)
+			}
+		})
 	}
 }

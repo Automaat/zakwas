@@ -10,11 +10,15 @@ import (
 	"github.com/rogpeppe/go-internal/testscript"
 
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
-		"zakwas": func() { os.Exit(run()) },
+		"zakwas": func() {
+			goosOverride = os.Getenv("ZAKWAS_TEST_GOOS")
+			os.Exit(run())
+		},
 	})
 }
 
@@ -66,20 +70,48 @@ func linkTo(ts *testscript.TestScript, neg bool, args []string) {
 	}
 }
 
-func TestInstallDirs(t *testing.T) {
+func TestExtraPathDirs(t *testing.T) {
 	tests := []struct {
 		goos string
 		want []string
 	}{
-		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join("home", ".local", "bin")}},
-		{"windows", []string{filepath.Join("home", ".local", "bin")}},
+		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", "/home/u/.local/bin"}},
+		{"linux", []string{"/usr/local/bin", "/home/u/.local/bin"}},
+		{"windows", []string{filepath.Join("/home/u", ".local", "bin")}},
 	}
 	for _, tt := range tests {
-		got := installDirs("home", tt.goos)
-		if !slices.Equal(got, tt.want) {
-			t.Errorf("%s: installDirs = %v, want %v", tt.goos, got, tt.want)
+		t.Run(tt.goos, func(t *testing.T) {
+			if got := extraPathDirs(tt.goos, "/home/u"); !slices.Equal(got, tt.want) {
+				t.Errorf("extraPathDirs(%q) = %v, want %v", tt.goos, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtendPathKeepsOrderAndSkipsDuplicates(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture uses POSIX PATH entries")
+	t.Setenv("PATH", "/usr/local/bin:/bin")
+	extendPath("/home/u")
+	got := filepath.SplitList(os.Getenv("PATH"))
+	if got[0] != "/usr/local/bin" || got[1] != "/bin" {
+		t.Errorf("PATH reordered: %v", got)
+	}
+	if n := countOf(got, "/usr/local/bin"); n != 1 {
+		t.Errorf("/usr/local/bin appears %d times: %v", n, got)
+	}
+	if !slices.Contains(got, "/home/u/.local/bin") {
+		t.Errorf("~/.local/bin missing: %v", got)
+	}
+}
+
+func countOf(list []string, want string) int {
+	n := 0
+	for _, s := range list {
+		if s == want {
+			n++
 		}
 	}
+	return n
 }
 
 func TestSamePathEntry(t *testing.T) {

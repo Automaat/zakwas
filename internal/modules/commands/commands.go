@@ -47,7 +47,9 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 func (m *Module) satisfied(ctx context.Context, c config.Command) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, CheckTimeout)
 	defer cancel()
-	res, err := m.Runner.Run(ctx, m.sh(c.Check))
+	check := m.sh(c.Check)
+	check.Group = true
+	res, err := m.Runner.Run(ctx, check)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return false, fmt.Errorf("%s: check timed out after %s", c.Name, CheckTimeout)
 	}

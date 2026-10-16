@@ -3,15 +3,17 @@
 package files
 
 import (
+	"cmp"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 // Module installs Files. Keep lists destinations the shared installer writes
@@ -21,17 +23,23 @@ type Module struct {
 	Keep      []string
 	Paths     config.Paths
 	Installer *install.Installer
+	// Immutable is protect.immutable as configured, before the platform
+	// decides whether the installer can honor it.
+	Immutable bool
+	// GOOS is the operating system the plan is for; empty means this one.
+	GOOS string
 }
 
 func (m *Module) Name() string { return "files" }
 
-// Warnings says once that protect.immutable can't be honored here: only
-// macOS has the flag, so installed copies are only read-only.
+// Warnings tells once that protect.immutable can't lock files here. Files
+// is the one module every config has, so it carries the notice for the
+// templates and agents instruction copies too.
 func (m *Module) Warnings(context.Context) []string {
-	if m.Installer == nil || !m.Installer.Immutable || install.ImmutableSupported {
+	if !m.Immutable || platform.FeatureSupported("protect.immutable", cmp.Or(m.GOOS, platform.Current())) {
 		return nil
 	}
-	return []string{"protect.immutable has no effect on " + runtime.GOOS + ": installed files are read-only copies without the immutable flag"}
+	return []string{fmt.Sprintf("protect.immutable is %s-only; files are read-only copies", platform.Name(platform.Darwin))}
 }
 
 func (m *Module) Plan(_ context.Context) ([]engine.Change, error) {

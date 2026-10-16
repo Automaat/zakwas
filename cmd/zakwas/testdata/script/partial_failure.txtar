@@ -1,4 +1,6 @@
 [windows] skip 'the fake brew is an sh script and links are symlinks'
+env ZAKWAS_TEST_GOOS=darwin
+
 chmod 755 bin/brew
 
 ! zakwas apply -y

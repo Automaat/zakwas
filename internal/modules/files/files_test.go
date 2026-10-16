@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -245,5 +246,28 @@ func TestCaseOnlyRenameKeepsFile(t *testing.T) {
 	}
 	if again, _ := m.Plan(context.Background()); len(again) != 0 {
 		t.Errorf("not converged: %v", again)
+	}
+}
+
+func TestWarnsOnceWhereImmutableIsUnsupported(t *testing.T) {
+	tests := []struct {
+		name      string
+		goos      string
+		immutable bool
+		want      []string
+	}{
+		{"linux with immutable", "linux", true, []string{"protect.immutable is macOS-only; files are read-only copies"}},
+		{"linux without immutable", "linux", false, nil},
+		{"darwin with immutable", "darwin", true, nil},
+		{"darwin without immutable", "darwin", false, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, _, _ := newFilesModule(t, nil)
+			m.GOOS, m.Immutable = tt.goos, tt.immutable
+			if got := m.Warnings(context.Background()); !slices.Equal(got, tt.want) {
+				t.Errorf("Warnings = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

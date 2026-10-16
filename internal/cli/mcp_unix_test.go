@@ -50,3 +50,23 @@ func TestMCPApplyStopsOnSIGTERMAndPutsTheFilesBack(t *testing.T) {
 		t.Fatal("the server ignored SIGTERM")
 	}
 }
+
+func TestMCPStopsCleanlyOnSIGHUPAndSIGTERM(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGHUP, syscall.SIGTERM} {
+		t.Run(sig.String(), func(t *testing.T) {
+			env, _ := setup(t, linksOnly)
+			c := startMCP(t, env, formClient)
+			if err := syscall.Kill(os.Getpid(), sig); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-c.done:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("the server ignored %v", sig)
+			}
+			if c.code != ExitOK {
+				t.Errorf("exit %d, want %d", c.code, ExitOK)
+			}
+		})
+	}
+}

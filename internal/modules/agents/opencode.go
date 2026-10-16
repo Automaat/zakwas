@@ -33,10 +33,19 @@ func (m *Module) opencodeBackend() *opencode {
 	return &opencode{
 		runner:    m.Runner,
 		paths:     m.Paths,
-		skillsDir: m.Paths.Dst(m.Agents.OpencodeSkillsDir()),
+		skillsDir: m.opencodeSkillsDir(),
 		cacheDir:  filepath.Join(m.Paths.Home, ".local", "share", "zakwas", "agents"),
 		statePath: filepath.Join(m.Paths.Home, ".local", "state", "zakwas", "opencode.json"),
 	}
+}
+
+// opencodeSkillsDir is agents.opencode.skillsDir, else the skills directory
+// under opencode's config home, which follows $XDG_CONFIG_HOME like opencode.
+func (m *Module) opencodeSkillsDir() string {
+	if o := m.Agents.Opencode; o != nil && o.SkillsDir != "" {
+		return m.Paths.Dst(o.SkillsDir)
+	}
+	return filepath.Join(m.xdgConfigHome(), "opencode", "skills")
 }
 
 // opencodeState maps each fetched git marketplace to its source, each
@@ -178,6 +187,8 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 	}
 	if d.prune {
 		changes = append(changes, o.planPrune(d, st, want, waiting)...)
+	} else {
+		changes = append(changes, o.planMoved(st, want, waiting)...)
 	}
 	if len(waiting) == 0 {
 		return append(fetches, changes...), nil
@@ -478,24 +489,7 @@ func (o *opencode) planPrune(d desired, st opencodeState, want map[string]wanted
 		if wanted[strings.ToLower(link)] || waiting[s.Plugin] {
 			continue
 		}
-		forget := func(st *opencodeState) { delete(st.Skills, link) }
-		current, err := os.Readlink(link)
-		if err != nil || current != s.Target || install.CheckParents(o.paths, link) != nil {
-			changes = append(changes, engine.Change{
-				Action: engine.Remove, Target: o.label(link), Detail: "no longer zakwas's link, forget it",
-				Apply: func(context.Context) error { return o.update(forget) },
-			})
-			continue
-		}
-		changes = append(changes, engine.Change{
-			Action: engine.Remove, Target: o.label(link), Detail: s.Plugin, Destructive: true,
-			Apply: func(context.Context) error {
-				if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
-					return err
-				}
-				return o.update(forget)
-			},
-		})
+		changes = append(changes, o.planDropLink(link, s))
 	}
 	for _, name := range slices.Sorted(maps.Keys(st.Marketplaces)) {
 		dir := filepath.Join(o.cacheDir, name)
@@ -513,6 +507,108 @@ func (o *opencode) planPrune(d desired, st opencodeState, want map[string]wanted
 		})
 	}
 	return changes
+}
+
+// planDropLink removes one link zakwas made, or only forgets it when it was
+// changed since or sits behind a symlinked directory zakwas won't write
+// through.
+func (o *opencode) planDropLink(link string, s opencodeSkill) engine.Change {
+	forget := func(st *opencodeState) { delete(st.Skills, link) }
+	current, err := os.Readlink(link)
+	switch {
+	case err != nil || current != s.Target:
+		return engine.Change{
+			Action: engine.Remove, Target: o.label(link), Detail: "no longer zakwas's link, forget it",
+			Apply: func(context.Context) error { return o.update(forget) },
+		}
+	case install.CheckParents(o.paths, link) != nil:
+		return engine.Change{
+			Action: engine.Remove, Target: o.label(link), Detail: "behind a symlinked directory: stop tracking it, the link stays",
+			Apply: func(context.Context) error { return o.update(forget) },
+		}
+	}
+	return engine.Change{
+		Action: engine.Remove, Target: o.label(link), Detail: s.Plugin, Destructive: true,
+		Apply: func(context.Context) error {
+			if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			return o.update(forget)
+		},
+	}
+}
+
+// planMoved drops the links zakwas made in an earlier skillsDir for skills
+// that are linked in the current one, so changing skillsDir (or
+// XDG_CONFIG_HOME, which moves the default) doesn't leave both. Without
+// prune, links of skills no longer declared stay where they are. A link
+// that is the same file as the one in the current directory is never
+// dropped: the two spellings reach one directory, which a case-insensitive
+// volume or a symlink does.
+func (o *opencode) planMoved(st opencodeState, want map[string]wantedSkill, waiting map[string]bool) []engine.Change {
+	var changes []engine.Change
+	for _, link := range slices.Sorted(maps.Keys(st.Skills)) {
+		s := st.Skills[link]
+		if waiting[s.Plugin] || sameDir(filepath.Dir(link), o.skillsDir) {
+			continue
+		}
+		name, ok := wantedName(want, filepath.Base(link))
+		if !ok || sameLink(link, o.linkPath(name)) {
+			continue
+		}
+		changes = append(changes, o.planDropLink(link, s))
+	}
+	return changes
+}
+
+func wantedName(want map[string]wantedSkill, base string) (string, bool) {
+	for name := range want {
+		if strings.EqualFold(name, base) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// sameLink reports whether two paths, symlinks not followed, are one file.
+func sameLink(a, b string) bool {
+	ai, err := os.Lstat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Lstat(b)
+	return err == nil && os.SameFile(ai, bi)
+}
+
+// sameDir reports whether two directory paths reach one directory: by file
+// identity where they exist, else through their nearest existing ancestors
+// with the rest compared without case.
+func sameDir(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ancestorA, restA := nearestExisting(a)
+	ancestorB, restB := nearestExisting(b)
+	if ancestorA == nil || ancestorB == nil || !os.SameFile(ancestorA, ancestorB) {
+		return false
+	}
+	return strings.EqualFold(restA, restB)
+}
+
+func nearestExisting(path string) (os.FileInfo, string) {
+	path = filepath.Clean(path)
+	rest := ""
+	for {
+		if info, err := os.Stat(path); err == nil {
+			return info, rest
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return nil, rest
+		}
+		rest = filepath.Join(filepath.Base(path), rest)
+		path = parent
+	}
 }
 
 // converge plans again once the pending marketplaces are fetched and

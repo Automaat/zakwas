@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
@@ -47,10 +48,15 @@ func offlineModules(mods []engine.Module, explicit bool) ([]engine.Module, error
 	return out, nil
 }
 
+// offlineSkippedOn is offlineSkipped without the modules goos does not have.
+func offlineSkippedOn(goos string) []string {
+	return slices.DeleteFunc(slices.Clone(offlineSkipped), func(name string) bool { return !platform.Supported(name, goos) })
+}
+
 // offlineNotChecked lists what an offline check left out: the modules that
 // need commands, then the offline ones --only did not select.
-func offlineNotChecked(ran []engine.Module) []string {
-	out := slices.Clone(offlineSkipped)
+func offlineNotChecked(ran []engine.Module, goos string) []string {
+	out := offlineSkippedOn(goos)
 	for _, name := range offlineChecked {
 		if !slices.ContainsFunc(ran, func(m engine.Module) bool { return m.Name() == name }) {
 			out = append(out, name)

@@ -13,32 +13,30 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Automaat/zakwas/internal/cli"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
 // version is set by the release build.
 var version = "dev"
 
-// exitInterrupted follows the shell convention of 128 + SIGINT.
-const exitInterrupted = 130
+// goosOverride is set by tests to run the CLI as another operating system;
+// empty means the real one.
+var goosOverride string
 
 func main() {
 	os.Exit(run())
 }
 
-// run restores default SIGINT handling after the first one, so a second
-// Ctrl-C kills zakwas instead of being swallowed.
+// run stops on the first of SIGINT, SIGTERM and SIGHUP and exits 128 plus its
+// number; a second signal kills zakwas.
 func run() int {
 	if len(os.Args) == 2 && (os.Args[1] == "version" || os.Args[1] == "--version") {
 		fmt.Println("zakwas", version)
 		return cli.ExitOK
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop, caught := watchSignals(context.Background(), dieOf, stopSignals(os.Args[1:], signal.Ignored)...)
 	defer stop()
-	go func() {
-		<-ctx.Done()
-		stop()
-	}()
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -74,19 +72,21 @@ func run() int {
 		GitHubActions: os.Getenv("GITHUB_ACTIONS") == "true",
 		Version:       version,
 		Host:          hostname(),
+		GOOS:          goosOverride,
 	})
-	if ctx.Err() != nil {
-		return exitInterrupted
+	if sig := caught(); sig != nil {
+		return exitCodeFor(sig)
 	}
 	return code
 }
 
-// extendPath appends the dirs Homebrew and mise install into: this run may
-// install them, and a fresh shell doesn't have them on PATH yet. exec looks
-// binaries up in PATH on every call, so later modules find them.
+// extendPath appends the dirs zakwas's own bootstraps install into: this run
+// may install them, and a fresh shell doesn't have them on PATH yet. exec
+// looks binaries up in PATH on every call, so later modules find them. The
+// dirs need not exist yet, for the same reason.
 func extendPath(home string) {
 	dirs := filepath.SplitList(os.Getenv("PATH"))
-	for _, d := range installDirs(home, runtime.GOOS) {
+	for _, d := range extraPathDirs(runtime.GOOS, home) {
 		if !slices.ContainsFunc(dirs, func(have string) bool { return samePathEntry(have, d, runtime.GOOS) }) {
 			dirs = append(dirs, d)
 		}
@@ -94,12 +94,19 @@ func extendPath(home string) {
 	_ = os.Setenv("PATH", strings.Join(dirs, string(os.PathListSeparator)))
 }
 
-func installDirs(home, goos string) []string {
+// extraPathDirs are Homebrew's prefix on macOS, the dir both OSes put
+// user-installed tools in (not on Windows), and ~/.local/bin, where mise and the agent CLIs'
+// own installers put binaries.
+func extraPathDirs(goos, home string) []string {
 	userBin := filepath.Join(home, ".local", "bin")
 	if goos == "windows" {
 		return []string{userBin}
 	}
-	return []string{"/opt/homebrew/bin", "/usr/local/bin", userBin}
+	dirs := []string{"/usr/local/bin", userBin}
+	if goos == platform.Darwin {
+		dirs = append([]string{"/opt/homebrew/bin"}, dirs...)
+	}
+	return dirs
 }
 
 func samePathEntry(a, b, goos string) bool {

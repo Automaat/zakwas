@@ -52,7 +52,7 @@ func (m *Module) profilePath(provider, name string) string {
 	case config.ProviderCopilot:
 		return filepath.Join(m.copilotBackend().home, "agents", name+".agent.md")
 	}
-	return m.Paths.Dst("~/.config/opencode/agents/" + name + ".md")
+	return filepath.Join(m.xdgConfigHome(), "opencode", "agents", name+".md")
 }
 
 // planProfiles renders agents.profiles for every managed provider and

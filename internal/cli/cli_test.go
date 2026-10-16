@@ -16,6 +16,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/lock"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
 	"github.com/Automaat/zakwas/internal/testutil"
@@ -42,8 +43,11 @@ func setup(t *testing.T, cfg string) (Env, string) {
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.Chmod(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return Env{Home: home, Cwd: root, Runner: runnertest.New()}, home
+	return Env{Home: home, Cwd: root, Runner: runnertest.New(), GOOS: platform.Darwin}, home
 }
 
 func invoke(env Env, stdin string, args ...string) result {

@@ -4,6 +4,7 @@ package runner
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +26,13 @@ type Cmd struct {
 	Env    []string
 	Stdin  string
 	Stream bool
+	// Group asks for the command to run in its own process group, which is
+	// interrupted on cancel and killed after the grace period, so a shell
+	// that forks its last command (dash) or a child that ignores SIGINT
+	// doesn't outlive the timeout. Exec honors it only when it has no
+	// terminal (Exec.Detached): a background group is stopped when it
+	// reads /dev/tty, and without a terminal there is nothing to read.
+	Group bool
 }
 
 // String renders the command the way a user would type it.
@@ -66,11 +74,17 @@ type Exec struct {
 	Stderr  io.Writer
 	Env     []string
 	NoStdin bool
+	// Detached means the process has no controlling terminal, so commands
+	// that ask for a Group get one.
+	Detached bool
+	// Grace is how long a cancelled command gets after SIGINT; zero is
+	// WaitDelay.
+	Grace time.Duration
 }
 
 // NewExec returns an Exec streaming to the process stdout/stderr.
 func NewExec() *Exec {
-	return &Exec{Stdout: os.Stdout, Stderr: os.Stderr}
+	return &Exec{Stdout: os.Stdout, Stderr: os.Stderr, Detached: !hasTerminal()}
 }
 
 // WaitDelay is how long a cancelled command gets to exit after SIGINT
@@ -88,7 +102,11 @@ func (e *Exec) Installed(name string) bool {
 func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Cancel = func() error { return interrupt(cmd.Process) }
-	cmd.WaitDelay = WaitDelay
+	grace := cmp.Or(e.Grace, WaitDelay)
+	cmd.WaitDelay = grace
+	if c.Group && !c.Stream && e.Detached {
+		defer ownGroup(cmd, grace)()
+	}
 	cmd.Dir = c.Dir
 	cmd.Env = slices.Concat(os.Environ(), e.Env, c.Env)
 	if c.Stdin != "" {

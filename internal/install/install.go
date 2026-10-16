@@ -40,10 +40,6 @@ func ReadOnly(perm fs.FileMode) fs.FileMode {
 	return perm.Perm() &^ 0o222
 }
 
-// ImmutableSupported reports whether this platform has the immutable flag
-// that protect.immutable sets: only macOS does.
-const ImmutableSupported = immutableSupported
-
 // Plan returns the change that makes dst a protected copy of want, or nil.
 func (in *Installer) Plan(dst string, want []byte, perm fs.FileMode) (*engine.Change, error) {
 	if err := in.loadState(); err != nil {

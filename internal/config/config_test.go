@@ -8,8 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/testutil"
 )
+
+func loadMac(path, home string) (*Config, error) { return LoadFor(path, home, platform.Darwin) }
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -45,7 +48,7 @@ system:
 commands:
   - {name: n, check: "true", run: "true"}
 `)
-	c, err := Load(p, testutil.Abs("/h"))
+	c, err := loadMac(p, testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +81,7 @@ func TestLoadResolvesSymlinkedRoot(t *testing.T) {
 	if err := os.Symlink(real, alias); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Load(filepath.Join(alias, FileName), testutil.Abs("/h"))
+	c, err := loadMac(filepath.Join(alias, FileName), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +306,7 @@ commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Load(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h"))
+			_, err := loadMac(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h"))
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -397,7 +400,7 @@ agents:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Load(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h")); err != nil {
+			if _, err := loadMac(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h")); err != nil {
 				t.Error(err)
 			}
 		})
@@ -414,7 +417,7 @@ func mustRead(t *testing.T, path string) string {
 }
 
 func TestAgentsProviders(t *testing.T) {
-	c, err := Load(writeConfig(t, `
+	c, err := loadMac(writeConfig(t, `
 agents:
   marketplaces:
     sai: o/sai
@@ -495,7 +498,7 @@ func TestPaths(t *testing.T) {
 func TestPermissionsFor(t *testing.T) {
 	load := func(t *testing.T, body string) *Agents {
 		t.Helper()
-		c, err := Load(writeConfig(t, body), testutil.Abs("/h"))
+		c, err := loadMac(writeConfig(t, body), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -552,7 +555,7 @@ agents:
 func TestGeminiIsOptIn(t *testing.T) {
 	load := func(yaml string) *Agents {
 		t.Helper()
-		c, err := Load(writeConfig(t, yaml), testutil.Abs("/h"))
+		c, err := loadMac(writeConfig(t, yaml), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -599,7 +602,7 @@ func TestGeminiIsOptIn(t *testing.T) {
 }
 
 func TestAgentsMCPFor(t *testing.T) {
-	c, err := Load(writeConfig(t, `
+	c, err := loadMac(writeConfig(t, `
 agents:
   mcp:
     b: {command: b}
@@ -631,7 +634,7 @@ agents:
 }
 
 func TestAgentsSkillsFor(t *testing.T) {
-	c, err := Load(writeConfig(t, `
+	c, err := loadMac(writeConfig(t, `
 agents:
   skills:
     - skills/b
@@ -682,7 +685,7 @@ func TestAgentsGuard(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := Load(writeConfig(t, tt.yaml), testutil.Abs("/home/u"))
+			cfg, err := loadMac(writeConfig(t, tt.yaml), testutil.Abs("/home/u"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -888,5 +891,103 @@ func TestMCPServerRecognizesZakwasExe(t *testing.T) {
 		if got := len(s.PromptTools()) > 0; got != want {
 			t.Errorf("%q: prompts = %v, want %v", command, got, want)
 		}
+	}
+}
+
+func TestLoadForPlatform(t *testing.T) {
+	linuxOK := `
+protect: {immutable: true}
+files:
+  - {src: a, dst: ~/.a}
+links:
+  - {src: b, dst: ~/.b}
+templates:
+  files:
+    - {src: c.tmpl, dst: ~/.c}
+system:
+  dirs: [{path: ~/.ssh, mode: 0700}]
+  sshKey: {path: ~/.ssh/id_ed25519, comment: me}
+commands:
+  - {name: n, check: "true", run: "true"}
+agents:
+  providers: [claude, codex]
+`
+	tests := []struct {
+		name, yaml, goos string
+		want             []string
+	}{
+		{"every linux module on linux", linuxOK, "linux", nil},
+		{"every linux module on darwin", linuxOK, "darwin", nil},
+		{"all modules on darwin", `
+brew: {file: Brewfile}
+mise: {config: m.toml}
+defaults: [{domain: d, key: k, value: 1}]
+launchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]
+system: {sudoTouchID: true}
+`, "darwin", nil},
+		{"brew on linux", "brew: {file: Brewfile}\n", "linux", []string{"brew: not supported on Linux"}},
+		{"mise on linux", "mise: {config: m.toml}\n", "linux", []string{"mise: not supported on Linux"}},
+		{"defaults on linux", "defaults: [{domain: d, key: k, value: 1}]\n", "linux", []string{"defaults: not supported on Linux"}},
+		{"launchd on linux", "launchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]\n", "linux", []string{"launchd: not supported on Linux"}},
+		{"sudoTouchID on linux", "system: {sudoTouchID: true}\n", "linux", []string{"system.sudoTouchID: not supported on Linux"}},
+		{"sudoTouchID off on linux", "system: {sudoTouchID: false}\n", "linux", nil},
+		{"every problem is named", "brew: {file: Brewfile}\nmise: {config: m.toml}\nsystem: {sudoTouchID: true}\n", "linux", []string{"brew: not supported", "mise: not supported", "system.sudoTouchID: not supported"}},
+		{"invalid macOS fields are not second-guessed on linux", "brew: {}\ndefaults: [{domain: d}]\n", "linux", []string{"brew: not supported", "defaults: not supported"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadFor(writeConfig(t, tt.yaml), "/h", tt.goos)
+			if len(tt.want) == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			lines := strings.Split(err.Error(), "\n")
+			if len(lines) != len(tt.want) {
+				t.Fatalf("got %d lines, want %d:\n%v", len(lines), len(tt.want), err)
+			}
+			for i, w := range tt.want {
+				if !strings.Contains(lines[i], w) || !strings.Contains(lines[i], platform.DocsAnchor) {
+					t.Errorf("line %d = %q, want %q pointing at %s", i, lines[i], w, platform.DocsAnchor)
+				}
+			}
+		})
+	}
+}
+
+func TestParseForRecordsTheOS(t *testing.T) {
+	c, err := ParseFor([]byte("commands: []\n"), filepath.Join(t.TempDir(), FileName), "/h", platform.Linux)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OS() != platform.Linux {
+		t.Errorf("OS = %q", c.OS())
+	}
+	if got := (&Config{}).OS(); got != platform.Current() {
+		t.Errorf("default OS = %q, want %q", got, platform.Current())
+	}
+}
+
+func TestExamplesLoadWhereTheyClaimTo(t *testing.T) {
+	tests := []struct {
+		path, goos string
+		ok         bool
+	}{
+		{"../../examples/zakwas.yaml", platform.Darwin, true},
+		{"../../examples/zakwas.yaml", platform.Linux, false},
+		{"../../examples/linux/zakwas.yaml", platform.Linux, true},
+		{"../../examples/linux/zakwas.yaml", platform.Darwin, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path+" on "+tt.goos, func(t *testing.T) {
+			_, err := LoadFor(tt.path, t.TempDir(), tt.goos)
+			if (err == nil) != tt.ok {
+				t.Errorf("err = %v, want ok = %v", err, tt.ok)
+			}
+		})
 	}
 }

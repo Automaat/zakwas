@@ -1,6 +1,12 @@
 [windows] skip 'the fake brew and mise are sh scripts'
+env ZAKWAS_TEST_GOOS=darwin
+
 chmod 755 bin/brew
 chmod 755 bin/mise
+chmod 644 home/.zshrc
+chmod 644 home/.config/git/config
+chmod 644 home/.config/git/ignore
+chmod 644 home/.config/mise/config.toml
 
 ! zakwas init
 stderr 'Usage: zakwas init DIR'
@@ -31,7 +37,8 @@ rm $WORK/calls
 
 cd repo
 zakwas plan
-cmpenv stdout $WORK/plan.golden
+[darwin] cmpenv stdout $WORK/plan.golden
+[!darwin] cmpenv stdout $WORK/plan-nouchg.golden
 
 # Modules plan concurrently, so their queries arrive in any order.
 exec sh -c 'LC_ALL=C sort "$WORK/calls" > "$WORK/calls.sorted"'
@@ -72,6 +79,15 @@ mise:
 -- mise.golden --
 [tools]
 jq = "1.7.1"
+-- plan-nouchg.golden --
+files
+  ~ ~/.zshrc                    mode 644 → 444, already matches, start tracking
+  ~ ~/.config/git/config        mode 644 → 444, already matches, start tracking
+  ~ ~/.config/git/ignore        mode 644 → 444, already matches, start tracking
+  ~ ~/.config/mise/config.toml  not managed yet, back up to config.toml.zakwas-bak
+✓ up to date: system, links, templates, brew, mise, commands, defaults
+
+Plan: 0 to add, 4 to change, 0 to remove, 0 to run.
 -- plan.golden --
 files
   ~ ~/.zshrc                    mode 644 → 444, set immutable, already matches, start tracking
