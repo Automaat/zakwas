@@ -64,6 +64,7 @@ zakwas apply --only files                  # confirm, then ~/.zshrc and a mise c
 - `init` writes `zakwas.yaml`, a `Brewfile` from what Homebrew has installed, your global mise tools pinned to their current versions, and a copy of each file you `--add`. It does not apply anything.
 - `plan` lists every change, one line each; read it before you apply. `apply --only files` limits the run to the `files` module: your `~/.zshrc`, plus `~/.config/mise/config.toml` when `init` found mise (an existing one is backed up first).
 - After `apply`, `~/.zshrc` is read-only and immutable: edit `~/dotfiles/dotfiles/zshrc` and apply again. A warning about uncommitted changes is expected until you commit the new repo. To undo, see [Stop managing a file](docs/troubleshooting.md#stop-managing-a-file-or-remove-zakwas).
+- Want to see a full config before writing your own? [`examples/`](examples) is a complete sample config repo (`zakwas.yaml`, a `Brewfile` and dotfiles) with an `agents` section: MCP servers, instructions, a skill and a profile. From the clone, `zakwas -c examples/zakwas.yaml plan --only files,agents` shows what it would do and changes nothing.
 - Already on Homebrew or mise, or want Go? See [Install](#install). Push `~/dotfiles` to GitHub and any other Mac is one command away: [New Mac](#new-mac).
 
 ## New Mac
@@ -282,6 +283,7 @@ Report a vulnerability through [SECURITY.md](SECURITY.md), not a public issue.
 - [docs/config.md](docs/config.md): every key in `zakwas.yaml`
 - [docs/commands.md](docs/commands.md): commands, flags, exit codes, environment
 - [docs/examples.md](docs/examples.md): snippets for common setups
+- [examples/](examples): a complete sample config repo, including an `agents` section ([examples/zakwas.yaml](examples/zakwas.yaml))
 - [docs/agents.md](docs/agents.md): coding agents: what each supports and the capture, propose, approve flow
 - [docs/security.md](docs/security.md): what zakwas verifies, how coding agents are kept from applying the config, when it uses sudo
 - [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md), [.github/SUPPORT.md](.github/SUPPORT.md)

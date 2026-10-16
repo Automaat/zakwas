@@ -51,7 +51,7 @@ Notes on the cells:
 
 ## Start small
 
-Instructions, one MCP server and one skill are enough to see the model. Everything below needs no agent CLI installed:
+Instructions, one MCP server and one skill are enough to see the model. The full version of this snippet, with a profile and the rest of a config repo around it, is [examples/zakwas.yaml](../examples/zakwas.yaml). Everything below needs no agent CLI installed:
 
 ```yaml
 agents:
