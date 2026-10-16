@@ -162,7 +162,7 @@ The installer starts the Xcode Command Line Tools install if they are missing (f
 ## Next
 
 - [Coding agents](agents.md): MCP servers, instructions, skills and permissions for Claude Code, Codex and others.
-- [launchd jobs](config.md#launchd): scheduled jobs; the [daily drift notification](examples.md#daily-drift-notification) recipe is ready to copy.
-- [Recipes](examples.md): tested snippets for common setups.
+- [launchd jobs](config.md#launchd): scheduled jobs; the [daily drift notification](recipes.md#daily-drift-notification) recipe is ready to copy.
+- [Recipes](recipes.md): tested snippets for common setups.
 - [Troubleshooting](troubleshooting.md): first-use errors, backups, immutable files, removing zakwas.
 - [Config reference](config.md) and [command reference](commands.md): every key and flag.

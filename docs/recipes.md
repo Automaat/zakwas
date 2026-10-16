@@ -1,6 +1,6 @@
-# Examples
+# Recipes
 
-Complete, working config: [`examples/`](../examples), whose [`zakwas.yaml`](../examples/zakwas.yaml) also has an `agents` section (MCP servers, instructions, a skill and a profile). The snippets below are the pieces, one feature each.
+Snippets for common setups, one feature each. Copy the piece you need into your own `zakwas.yaml`. The complete sample config repo, with a `Brewfile`, dotfiles and an `agents` section, is [`examples/`](../examples), whose [`zakwas.yaml`](../examples/zakwas.yaml) CI plans and applies.
 
 ## Minimal: dotfiles only
 
@@ -335,6 +335,7 @@ osascript -e "display notification \"$message\" with title \"zakwas\""
 
 ## CI: review before apply
 
+<!-- recipe: skip -->
 ```yaml
 - run: zakwas plan -out plan.json --diff
 - run: zakwas plan --json | jq '.summary'
