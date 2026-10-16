@@ -262,3 +262,12 @@ func TestPrintDefaultsExceptHidesOneFlag(t *testing.T) {
 		t.Errorf("nothing hidden differs from PrintDefaults:\n%s\nwant\n%s", all.String(), want.String())
 	}
 }
+
+func TestCompletionOffersCaskOnlyWhereBrewExists(t *testing.T) {
+	want := platform.Supported("brew", platform.Current())
+	for _, shell := range shells {
+		if got := strings.Contains(completion(t, shell), "cask"); got != want {
+			t.Errorf("%s completion mentions cask = %v, want %v", shell, got, want)
+		}
+	}
+}

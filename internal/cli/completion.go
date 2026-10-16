@@ -53,6 +53,9 @@ var freeFlags = []string{"version", "providers", "justification", "command", "ur
 func flagsOf(fs *flag.FlagSet) []complFlag {
 	var out []complFlag
 	fs.VisitAll(func(f *flag.Flag) {
+		if f.Name == "cask" && !platform.Supported("brew", platform.Current()) {
+			return
+		}
 		cf := complFlag{name: f.Name, usage: f.Usage, kind: fileValue}
 		switch {
 		case isBoolFlag(f):

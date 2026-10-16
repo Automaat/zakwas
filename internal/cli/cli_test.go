@@ -41,6 +41,9 @@ func setup(t *testing.T, cfg string) (Env, string) {
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.Chmod(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return Env{Home: home, Cwd: root, Runner: runnertest.New(), GOOS: platform.Darwin}, home
 }

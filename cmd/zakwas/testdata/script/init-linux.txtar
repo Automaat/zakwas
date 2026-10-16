@@ -10,6 +10,7 @@ exists plain/.gitignore
 ! exists plain/Brewfile
 ! exists plain/dotfiles
 grep '^files: \[\]$' plain/zakwas.yaml
+! grep '\n\n\n' plain/zakwas.yaml
 ! grep 'protect:|brew:|mise:' plain/zakwas.yaml
 cd plain
 zakwas plan
@@ -27,6 +28,7 @@ cd ..
 
 zakwas init withfile --add ~/.zshrc
 grep 'src: dotfiles/zshrc' withfile/zakwas.yaml
+! grep '\n\n\n' withfile/zakwas.yaml
 ! grep 'protect:|brew:|mise:|files: \[\]' withfile/zakwas.yaml
 cmp withfile/dotfiles/zshrc home/.zshrc
 cd withfile

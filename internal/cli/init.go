@@ -293,31 +293,31 @@ func repoPath(rel string) string {
 }
 
 func (p *initPlan) config() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# yaml-language-server: $schema=%s\n\n", SchemaURL)
-	header := b.Len()
+	var sections []string
 	if platform.FeatureSupported("protect.immutable", p.goos) {
-		b.WriteString("protect:\n  immutable: true\n")
+		sections = append(sections, "protect:\n  immutable: true\n")
 	}
 	if len(p.adds) > 0 || p.mise {
-		b.WriteString("\nfiles:\n")
+		var b strings.Builder
+		b.WriteString("files:\n")
 		for _, a := range p.adds {
 			fmt.Fprintf(&b, "  - src: %s\n    dst: %s\n", yamlString(a.src), yamlString(a.dst))
 		}
 		if p.mise {
 			fmt.Fprintf(&b, "  - src: %s\n    dst: %s\n", miseSrc, mise.InstalledConfig)
 		}
+		sections = append(sections, b.String())
 	}
 	if p.brew {
-		b.WriteString("\nbrew:\n  file: Brewfile\n  cleanup: none\n")
+		sections = append(sections, "brew:\n  file: Brewfile\n  cleanup: none\n")
 	}
 	if p.mise {
-		fmt.Fprintf(&b, "\nmise:\n  config: %s\n", miseSrc)
+		sections = append(sections, fmt.Sprintf("mise:\n  config: %s\n", miseSrc))
 	}
-	if b.Len() == header {
-		b.WriteString("files: []\n")
+	if len(sections) == 0 {
+		sections = append(sections, "files: []\n")
 	}
-	return b.String()
+	return fmt.Sprintf("# yaml-language-server: $schema=%s\n\n", SchemaURL) + strings.Join(sections, "\n")
 }
 
 func yamlString(s string) string {
