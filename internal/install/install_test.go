@@ -622,3 +622,58 @@ func writableMode() string {
 	}
 	return "644"
 }
+
+func TestWriteAtomicReplacesAReadOnlyFile(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "sub", "f")
+	if err := WriteAtomic(dst, []byte("one"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteAtomic(dst, []byte("two"), 0o444); err != nil {
+		t.Fatalf("replacing a protected copy: %v", err)
+	}
+
+	if got, _ := os.ReadFile(dst); string(got) != "two" {
+		t.Errorf("content = %q, want two", got)
+	}
+	info, err := os.Stat(dst)
+	if err != nil || !testutil.SamePerm(info.Mode(), 0o444) {
+		t.Errorf("mode = %v, %v; want read-only", info, err)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(dst))
+	if len(entries) != 1 {
+		t.Errorf("temp files left behind: %v", entries)
+	}
+}
+
+func TestBackupMovesAReadOnlyFile(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "f")
+	if err := WriteAtomic(dst, []byte("protected"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	name, err := Backup(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := os.ReadFile(name); string(got) != "protected" {
+		t.Errorf("backup = %q", got)
+	}
+	if _, err := os.Lstat(dst); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the original is still there: %v", err)
+	}
+	if info, err := os.Stat(name); err != nil || !testutil.SamePerm(info.Mode(), 0o644) {
+		t.Errorf("the backup must be writable: %v, %v", info, err)
+	}
+}
+
+func TestExecutableCopyConvergesOnTheSecondPlan(t *testing.T) {
+	in, home := newInstaller(t, false)
+	dst := filepath.Join(home, "g")
+	converge(t, in, dst, "x", 0o755)
+
+	if c := converge(t, in, dst, "x", 0o755); c != nil {
+		t.Errorf("a second plan wants %v", c)
+	}
+}

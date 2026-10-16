@@ -186,7 +186,7 @@ func TestEnableAndUpgrade(t *testing.T) {
 		writeFile(t, filepath.Join(loc, "plugins", "f", ".claude-plugin", "plugin.json"), `{"version":"1.3.0"}`)
 		writeFile(t, filepath.Join(loc, ".claude-plugin", "plugin.json"), `{"version":"5.0.0"}`)
 		writeFile(t, m.claude().knownPath(), knownJSON(map[string]bool{"sai": true}))
-		fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai","installLocation":"`+loc+`"}]`)
+		fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai","installLocation":"`+testutil.Esc(loc)+`"}]`)
 		fake.OnOK(pluginList, `{"installed": [
 			{"id":"a@sai","version":"1.0.0","scope":"user","enabled":false},
 			{"id":"b@sai","version":"2.0.0","scope":"user","enabled":true},

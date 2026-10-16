@@ -147,6 +147,34 @@ func TestClaudeMCPCreatesAndDropsConfig(t *testing.T) {
 	assertConverged(t, m)
 }
 
+func TestClaudeMCPEditsKeepCRLFAndLFFiles(t *testing.T) {
+	for _, tt := range []struct{ name, eol string }{{"CRLF", "\r\n"}, {"LF", "\n"}} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := mcpModule(t, []string{config.ProviderClaude}, map[string]config.MCPServer{"a": stdioServer("a")})
+			cfg := filepath.Join(m.Paths.Home, ".claude.json")
+			existing := strings.ReplaceAll("{\n  \"numStartups\": 3\n}\n", "\n", tt.eol)
+			writeFile(t, cfg, existing)
+
+			apply(t, plan(t, m))
+			got := readFile(t, cfg)
+
+			if strings.Count(got, "\n") != strings.Count(got, tt.eol) {
+				t.Errorf("mixed line endings in %q", got)
+			}
+			if !strings.Contains(got, `"numStartups": 3`) || !strings.Contains(got, `"command": "a"`) {
+				t.Errorf("edit lost content: %q", got)
+			}
+			assertConverged(t, m)
+
+			m.Agents.MCP = nil
+			apply(t, plan(t, m))
+			if got := readFile(t, cfg); got != existing {
+				t.Errorf("removing the server left %q, want the original %q", got, existing)
+			}
+		})
+	}
+}
+
 func TestClaudeMCPFollowsConfigDir(t *testing.T) {
 	m := mcpModule(t, []string{config.ProviderClaude}, map[string]config.MCPServer{"a": stdioServer("a")})
 	m.ClaudeConfigDir = filepath.Join(m.Paths.Home, "alt")

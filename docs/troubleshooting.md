@@ -10,6 +10,7 @@ What a new user runs into first, and what to do. Every message below is what zak
 - [`agents: plan failed: ... is not installed`](#agents-plan-failed--is-not-installed)
 - [`refusing to apply from a ... session`](#refusing-to-apply-from-a--session)
 - [Where zakwas keeps its state](#where-zakwas-keeps-its-state)
+- [Windows](#windows)
 - [Stop managing a file, or remove zakwas](#stop-managing-a-file-or-remove-zakwas)
 
 ## `zakwas.yaml not found`
@@ -95,6 +96,19 @@ zakwas: refusing to apply from a Claude Code session: an agent that can apply th
 With an `agents` section the guard is on. `apply`, `upgrade` and `approve` exit 1 before they change anything when a coding agent started the shell they run in; `plan`, `check`, `capture` and `propose` still work. Run the command in a terminal window you opened yourself, outside the agent.
 
 zakwas recognizes an agent session by environment variables the agents set (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, `COPILOT_AGENT_SESSION_ID` and a few more). A terminal that was opened from inside an agent inherits them: check with `env | grep -E 'CLAUDE|CODEX|OPENCODE|GEMINI|COPILOT'` and open a fresh window. To turn the guard off, set `agents.guard: false`; read [security.md](security.md#coding-agents) first.
+
+## Windows
+
+Windows support is early; the agent features and the portable core run, see [agents.md](agents.md#windows). The messages you meet:
+
+- `the brew module is macOS only, so it does not run on Windows` (also `system`, `defaults`, `launchd`), `the mise module is not supported on Windows yet`, `the commands module runs sh snippets and is not supported on Windows yet`: remove those sections from the config you use on Windows, or keep a separate `zakwas.yaml` for it. `plan --only files,templates,agents` plans just the supported modules.
+- `symlinks are not supported on Windows yet`: `links` and `agents.skills` need symlinks. Use `files` for the first; skills wait for a later release.
+- `zakwas: self-update is not supported on Windows yet`: download the newer zip or run `install.ps1` again.
+- `claude: command not found` while it works in your terminal: zakwas starts agent CLIs without a shell, so they must be on `PATH` as `.exe` or `.cmd`. npm's `claude.cmd` and `codex.cmd` are found; a `.ps1` alone is not. Open a new terminal after installing an agent so the process sees the new `PATH`.
+- `Access is denied` replacing a file: another program holds it open, such as an editor or the agent itself. zakwas retries briefly, then fails; close the program and apply again.
+- A managed file is read-only because zakwas set the read-only attribute. `protect.immutable` has no effect on Windows and `plan` says so. Clear it with `attrib -r <file>` only for a quick experiment.
+- Paths in `zakwas.yaml` keep `~/` and `/`; `~\` and `C:\...` also work. A template that writes `{{ .Home }}` into JSON gets backslashes: use `{{ .Home | printf "%q" }}` or write the path with forward slashes.
+- Long paths: zakwas does not add the `\\?\` prefix. Turn on long path support in Windows if a state or cache path fails with a file name error.
 
 ## Where zakwas keeps its state
 

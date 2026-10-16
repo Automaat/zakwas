@@ -32,7 +32,7 @@ stdout 'up to date: agents'
 
 cp zakwas-missing.yaml zakwas.yaml
 ! zakwas plan --only agents
-stdout 'agents.instructions: source .*/nope.md: no such file or directory'
+stdout 'agents.instructions: source .*[/\\]nope\.md: (no such file or directory|The system cannot find the file specified\.)'
 cmp claude/CLAUDE.md AGENTS.md
 
 cp zakwas-none.yaml zakwas.yaml

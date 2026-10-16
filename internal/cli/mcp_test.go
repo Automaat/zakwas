@@ -17,6 +17,7 @@ import (
 	"github.com/Automaat/zakwas/internal/lock"
 	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 type mcpClient struct {
@@ -581,6 +582,7 @@ func TestMCPApplyDeclinedWithoutARunLockStillSaysSo(t *testing.T) {
 }
 
 func TestMCPApplyRefusesAnUnopenableLockFile(t *testing.T) {
+	testutil.SkipOnWindows(t, "directory and file modes (chmod 0500, 0000) have no Windows equivalent")
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores file modes")
 	}

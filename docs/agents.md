@@ -50,6 +50,19 @@ Notes on the cells:
 - An HTTP server can name a pre-registered OAuth client (`oauth: {clientId, callbackPort, scope}`); every provider takes all three keys, each in its own spelling. See [OAuth clients](config.md#oauth-clients).
 - A profile field a provider cannot express is listed in the plan as a warning, and `check` stays clean. See the [field mapping](config.md#profiles).
 
+## Windows
+
+Windows is early. The agent features run natively: plugins and marketplaces through the `claude`, `codex` and `copilot` CLIs (`.exe` and npm `.cmd` shims on `PATH` both work), MCP servers, instructions, permissions, profiles, `capture`, `propose`, `approve` and `zakwas mcp`. State lives under `%USERPROFILE%\.local\state\zakwas`, and config paths in `zakwas.yaml` keep `~/` and `/`.
+
+What does not work yet, and fails the plan of just that provider or feature with a "not supported on Windows" message:
+
+- `agents.skills` and the plugin skills opencode links, which need symlinks
+- opencode command hooks, whose plugin runs through `/bin/sh`
+- the Gemini CLI provider's extension link
+- guard deny rules for PowerShell and `cmd` (Claude's `Bash(...)` rules and Codex's `forbidden` rules are written; the refusal to apply from an agent session works)
+
+zakwas keeps the line endings of the files it edits: a `config.toml` or `settings.json` saved with CRLF stays CRLF, and files it creates use LF.
+
 ## Start small
 
 Instructions, one MCP server and one skill are enough to see the model. The full version of this snippet, with a profile and the rest of a config repo around it, is [examples/zakwas.yaml](../examples/zakwas.yaml). Everything below needs no agent CLI installed:

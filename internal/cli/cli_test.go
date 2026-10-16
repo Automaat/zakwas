@@ -119,6 +119,8 @@ func TestApplyConfirmation(t *testing.T) {
 		{"answer no", true, "n\n", []string{"apply"}, ExitErr, false, "aborted"},
 		{"no answer", true, "", []string{"apply"}, ExitErr, false, "aborted"},
 		{"answer yes", true, "yes\n", []string{"apply"}, ExitOK, true, "Apply 1 step(s)? [y/N]"},
+		{"answer yes with a Windows line ending", true, "y\r\n", []string{"apply"}, ExitOK, true, "Apply 1 step(s)? [y/N]"},
+		{"answer no with a Windows line ending", true, "n\r\n", []string{"apply"}, ExitErr, false, "aborted"},
 		{"no terminal", false, "yes\n", []string{"apply"}, ExitUsage, false, "stdin is not a terminal"},
 		{"no terminal with -y", false, "", []string{"apply", "-y"}, ExitOK, true, "Applied 1 of 1 steps"},
 	}

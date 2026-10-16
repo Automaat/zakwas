@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/rogpeppe/go-internal/testscript"
@@ -62,5 +63,38 @@ func linkTo(ts *testscript.TestScript, neg bool, args []string) {
 	ok := err == nil && got == ts.MkAbs(args[1])
 	if ok == neg {
 		ts.Fatalf("%s → %q (err %v), want %s", args[0], got, err, ts.MkAbs(args[1]))
+	}
+}
+
+func TestInstallDirs(t *testing.T) {
+	tests := []struct {
+		goos string
+		want []string
+	}{
+		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join("home", ".local", "bin")}},
+		{"windows", []string{filepath.Join("home", ".local", "bin")}},
+	}
+	for _, tt := range tests {
+		got := installDirs("home", tt.goos)
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("%s: installDirs = %v, want %v", tt.goos, got, tt.want)
+		}
+	}
+}
+
+func TestSamePathEntry(t *testing.T) {
+	tests := []struct {
+		a, b, goos string
+		want       bool
+	}{
+		{"/usr/local/bin", "/usr/local/bin", "darwin", true},
+		{"/usr/local/bin", "/USR/local/bin", "darwin", false},
+		{`C:\Users\Me\.local\bin`, `c:\users\me\.local\bin`, "windows", true},
+		{"C:/Users/me/bin", "C:/Users/me/bin/", "windows", true},
+	}
+	for _, tt := range tests {
+		if got := samePathEntry(tt.a, tt.b, tt.goos); got != tt.want {
+			t.Errorf("samePathEntry(%q, %q, %s) = %v, want %v", tt.a, tt.b, tt.goos, got, tt.want)
+		}
 	}
 }

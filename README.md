@@ -25,12 +25,12 @@ What it manages:
 ## Who it is for
 
 - **Fits:** you keep dotfiles in git and want apps, tool versions, macOS preferences and agent config declared in one place, with a plan before anything changes. You use several coding agents (Claude Code, Codex, opencode, Gemini CLI, Copilot CLI) and want their setup declared once. You want to know when a Mac drifted.
-- **Does not fit:** Linux or Windows (macOS only; the installer refuses to run elsewhere). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Secrets (keep them out of the config repo).
+- **Does not fit:** Linux, or Windows beyond the agent features (the Mac modules need macOS and `install.sh` refuses to run elsewhere; see [Windows](#windows-early)). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Secrets (keep them out of the config repo).
 
 ## Status
 
 - **Pre-1.0.** The config format can change between minor versions; check the [release notes](https://github.com/Automaat/zakwas/releases) before upgrading. Machine-readable output carries its own `format_version`.
-- **macOS only.** Release binaries are darwin arm64 and amd64. CI runs on macOS 26; older versions are not tested.
+- **macOS first.** Release binaries are darwin arm64 and amd64, plus an early Windows build of the agent features (windows amd64 and arm64). CI runs on macOS 26; older versions are not tested.
 - **One maintainer.** Issues and PRs get answered when there is time; see [.github/SUPPORT.md](.github/SUPPORT.md).
 - **Not notarized.** `install.sh` and `zakwas self-update` verify checksums, and build provenance when a logged-in `gh` is available.
 
@@ -90,6 +90,19 @@ agents:
 ```
 
 Secrets stay environment references. With an `agents` section, a guard denies the managed agents `zakwas apply`; they can `propose` changes, and you `approve` them in a terminal. See [docs/agents.md](docs/agents.md).
+
+## Windows (early)
+
+Windows runs the agent features and the portable core: `agents` (plugins, marketplaces, MCP servers, instructions, permissions, profiles and command hooks), `propose`, `proposals`, `approve`, `capture`, `zakwas mcp`, `files`, `templates`, and `plan`, `check` and `apply` for those. Install from PowerShell, then use it as on a Mac:
+
+```powershell
+irm https://raw.githubusercontent.com/Automaat/zakwas/main/install.ps1 -OutFile install.ps1
+.\install.ps1 -AddToPath
+```
+
+`install.ps1` checks the release zip against `checksums.txt` and installs `zakwas.exe` to `%LOCALAPPDATA%\Programs\zakwas`. You can also unzip a `zakwas_X.Y.Z_windows_<arch>.zip` from the [releases](https://github.com/Automaat/zakwas/releases) yourself.
+
+Not supported yet, and reported by `plan` instead of failing at `apply`: the macOS modules (`brew`, `defaults`, `system`, `launchd`), `mise`, `commands` (they run `sh`), `links` and `agents.skills` (they need symlinks), opencode's hook plugin, `zakwas self-update`, and `protect.immutable` (files are only read-only). The guard's deny rules cover the Bash form of `zakwas apply`, not PowerShell or `cmd`; the refusal to apply from an agent session still works. Windows is tested on `windows-latest` only. See [docs/agents.md](docs/agents.md#windows) and [troubleshooting](docs/troubleshooting.md#windows).
 
 ## Protected dotfiles
 

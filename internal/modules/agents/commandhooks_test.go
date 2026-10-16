@@ -268,3 +268,66 @@ func mustJSON(t *testing.T, value string) []byte {
 	}
 	return data
 }
+
+func TestClaudeAndCodexCommandHooksConvergeAndRemove(t *testing.T) {
+	home := t.TempDir()
+	claudePath := filepath.Join(home, ".claude", "settings.json")
+	codexPath := filepath.Join(home, ".codex", "hooks.json")
+	writeHookTestFile(t, claudePath, `{"theme":"dark"}`)
+	m := &Module{
+		Agents: config.Agents{
+			Providers: []string{"claude", "codex"},
+			Hooks:     &config.AgentHooks{Commands: []config.AgentCommandHook{{Event: "beforeTool", Command: "/bin/check-tool"}}},
+		},
+		Paths: config.Paths{Home: home}, Runner: runnertest.New(),
+	}
+	apply := func(want int) {
+		t.Helper()
+		changes, err := m.Plan(context.Background())
+		if err != nil || len(changes) != want {
+			t.Fatalf("plan = %d changes, %v; want %d", len(changes), err, want)
+		}
+		for _, change := range changes {
+			if err := change.Apply(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	apply(2)
+	for _, path := range []string{claudePath, codexPath} {
+		data, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(data), "/bin/check-tool") {
+			t.Errorf("%s = %q, %v", path, data, err)
+		}
+	}
+	if data, _ := os.ReadFile(claudePath); !strings.Contains(string(data), `"theme"`) {
+		t.Errorf("the user's own settings were lost: %s", data)
+	}
+	apply(0)
+
+	m.Agents.Hooks = nil
+	apply(2)
+	for _, path := range []string{claudePath, codexPath} {
+		if data, _ := os.ReadFile(path); strings.Contains(string(data), "check-tool") {
+			t.Errorf("%s still holds the hook: %s", path, data)
+		}
+	}
+}
+
+func TestOpencodeCommandHooksAreNotPlannedOnWindows(t *testing.T) {
+	saved := hostOS
+	hostOS = "windows"
+	defer func() { hostOS = saved }()
+	want := []commandHookRegistration{{Event: "beforeTool", Command: "check"}}
+
+	named := &Module{Agents: config.Agents{Providers: []string{config.ProviderOpencode}}, Paths: config.Paths{Home: t.TempDir()}, Runner: runnertest.New()}
+	if change, err := named.planOpencodeCommandHooks(want); change != nil || err == nil || !strings.Contains(err.Error(), "not supported on Windows yet") {
+		t.Errorf("a named opencode: %v, %v; want the error", change, err)
+	}
+
+	implicit := &Module{Paths: config.Paths{Home: t.TempDir()}, Runner: runnertest.New()}
+	if change, err := implicit.planOpencodeCommandHooks(want); change != nil || err != nil {
+		t.Errorf("opencode by default: %v, %v; want it skipped", change, err)
+	}
+}

@@ -210,7 +210,7 @@ func TestKlaudiushGeminiEvidenceEvents(t *testing.T) {
 			binary := filepath.Join(home, "bin", "klaudiush")
 			settings := filepath.Join(home, "gemini.json")
 			writeHookTestFile(t, binary, "binary")
-			writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = false\n[providers.gemini]\nenabled = true\nsettings_path = \""+settings+"\"\n[evidence.tool_phase]\nenabled = true\n"+tt.filter)
+			writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = false\n[providers.gemini]\nenabled = true\nsettings_path = \""+testutil.Esc(settings)+"\"\n[evidence.tool_phase]\nenabled = true\n"+tt.filter)
 			events := []string{"BeforeTool", "AfterTool", "AfterAgent", "SessionStart", "SessionEnd", "Notification", "PreCompress"}
 			var groups []string
 			for _, event := range events {

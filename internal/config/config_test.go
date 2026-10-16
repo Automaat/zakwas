@@ -817,3 +817,76 @@ func winAbs(body string) string {
 	}
 	return strings.ReplaceAll(body, "dst: /", "dst: C:/")
 }
+
+func TestCutHome(t *testing.T) {
+	tests := []struct {
+		in   string
+		rest string
+		ok   bool
+	}{
+		{"~/.zshrc", ".zshrc", true},
+		{"~/", "", true},
+		{"~", "", false},
+		{"~user/x", "", false},
+		{"x/~/y", "", false},
+		{`~\.zshrc`, ".zshrc", runtime.GOOS == "windows"},
+	}
+	for _, tt := range tests {
+		rest, ok := CutHome(tt.in)
+		if ok != tt.ok || ok && rest != tt.rest {
+			t.Errorf("CutHome(%q) = %q, %v; want %q, %v", tt.in, rest, ok, tt.rest, tt.ok)
+		}
+	}
+	if !IsHomePath("~") || !IsHomePath("~/x") || IsHomePath("~x") || IsHomePath("/x") {
+		t.Error("IsHomePath")
+	}
+}
+
+func TestCutPathPrefixFoldsCaseOnRequest(t *testing.T) {
+	sep := string(filepath.Separator)
+	home := sep + "Users" + sep + "Me"
+	tests := []struct {
+		name string
+		path string
+		fold bool
+		rest string
+		ok   bool
+	}{
+		{"same case", home + sep + "x", false, "x", true},
+		{"other case, exact", sep + "users" + sep + "me" + sep + "x", false, "", false},
+		{"other case, folded", sep + "users" + sep + "me" + sep + "x", true, "x", true},
+		{"sibling with the same prefix", home + "x" + sep + "y", true, "", false},
+		{"the directory itself", home, true, "", false},
+		{"shorter than the directory", sep + "Us", true, "", false},
+	}
+	for _, tt := range tests {
+		rest, ok := cutPathPrefix(tt.path, home, tt.fold)
+		if ok != tt.ok || rest != tt.rest {
+			t.Errorf("%s: cutPathPrefix(%q) = %q, %v; want %q, %v", tt.name, tt.path, rest, ok, tt.rest, tt.ok)
+		}
+	}
+}
+
+func TestPrettyUsesSlashesForHomePaths(t *testing.T) {
+	p := Paths{Home: testutil.Abs("/h")}
+	if got := p.Pretty(filepath.Join(p.Home, ".config", "git", "config")); got != "~/.config/git/config" {
+		t.Errorf("Pretty = %q", got)
+	}
+}
+
+func TestMCPServerRecognizesZakwasExe(t *testing.T) {
+	for command, want := range map[string]bool{
+		"zakwas":                     true,
+		"/usr/local/bin/zakwas":      true,
+		`C:\Users\me\bin\zakwas.exe`: true,
+		"C:/Users/me/bin/Zakwas.EXE": true,
+		"zakwas-other":               false,
+		"notzakwas":                  false,
+		`C:\bin\zakwas.exe.bak`:      false,
+	} {
+		s := MCPServer{Command: command, Args: []string{"mcp", "--enable-apply"}}
+		if got := len(s.PromptTools()) > 0; got != want {
+			t.Errorf("%q: prompts = %v, want %v", command, got, want)
+		}
+	}
+}
