@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
@@ -254,5 +256,17 @@ func TestCmdQuotingRules(t *testing.T) {
 				t.Errorf("stdout = %q, want %q", got, tt.wantOut)
 			}
 		})
+	}
+}
+
+func TestEscapedLenMatchesTheStandardLibrary(t *testing.T) {
+	args := []string{
+		"", "a", "a b", `a"b`, `a\b`, `a\"b`, `a\\"b`, `a b\`, `a b\\`, `"`, `""`, `\`, `\\`, "tab\there",
+		`C:\Program Files\x y\`, `say "hi there" \`, "é ü", "😀 x", strings.Repeat(`\`, 50) + `"`, strings.Repeat(`a\ `, 20),
+	}
+	for _, a := range args {
+		if got, want := escapedLen(a), len(utf16.Encode([]rune(syscall.EscapeArg(a)))); got != want {
+			t.Errorf("escapedLen(%q) = %d, syscall.EscapeArg gives %d", a, got, want)
+		}
 	}
 }

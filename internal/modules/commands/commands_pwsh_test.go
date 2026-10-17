@@ -3,9 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -90,23 +88,6 @@ func TestPowerShellExitCodes(t *testing.T) {
 					t.Errorf("exit %d, want %d\nscript:\n%s\nstdout: %s\nstderr: %s", res.ExitCode, tt.want, tt.script, res.Stdout, res.Stderr)
 				}
 			})
-		}
-	})
-}
-
-func TestPowerShellKeepsLeadingUsingStatements(t *testing.T) {
-	script := "# a note\nusing namespace System.Text\n\n[StringBuilder]::new() | Out-Null\nNew-Item -ItemType File -Path (Join-Path $env:ZK_USING_DIR ok) | Out-Null"
-	eachPowerShell(t, func(t *testing.T, shell string) {
-		dir := t.TempDir()
-		t.Setenv("ZK_USING_DIR", dir)
-
-		res := runPowerShell(t, shell, script)
-
-		if res.ExitCode != 0 {
-			t.Fatalf("exit %d\nstdout: %s\nstderr: %s", res.ExitCode, res.Stdout, res.Stderr)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "ok")); err != nil {
-			t.Errorf("the script did not run: %v", err)
 		}
 	})
 }

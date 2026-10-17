@@ -162,33 +162,27 @@ func TestShellChoice(t *testing.T) {
 
 func TestPowerShellInvocation(t *testing.T) {
 	m := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Windows}
-	script := "Write-Output 'a \"b\"'\ngit status"
+	script := "using namespace System.Text\nWrite-Output 'a \"b\"'\n} ; exit 0 ; . {"
 
 	got, err := m.cmd(config.Command{Name: "n"}, script)
 	if err != nil {
 		t.Fatal(err)
 	}
-	head := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"}
-	if len(got.Args) != len(head)+1 || !slices.Equal(got.Args[:len(head)], head) {
-		t.Fatalf("args = %q, want %q and one script", got.Args, head)
+	want := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psWrapper}
+	if !slices.Equal(got.Args, want) {
+		t.Fatalf("args = %q, want %q: the script travels as data, never inside the command line", got.Args, want)
 	}
-	wrapped := got.Args[len(head)]
-	for _, want := range []string{script, "UTF8Encoding", "exit $zkCode"} {
-		if !strings.Contains(wrapped, want) {
-			t.Errorf("wrapped script lacks %q:\n%s", want, wrapped)
-		}
+	if strings.Contains(psWrapper, "using namespace") || strings.Contains(strings.Join(got.Args, " "), "exit 0 ; .") {
+		t.Error("the user's text is spliced into the wrapper")
 	}
-	if !strings.HasPrefix(wrapped, psPrologue) || !strings.HasSuffix(wrapped, psEpilogue) {
-		t.Errorf("the script is not framed by the prologue and epilogue:\n%s", wrapped)
+	if !slices.Contains(got.Env, psScriptVar+"="+script) || !slices.Contains(got.Env, "POWERSHELL_TELEMETRY_OPTOUT=1") {
+		t.Errorf("env = %q; want the script and the telemetry opt-out", got.Env)
 	}
-	if !strings.Contains(wrapped, script+"\n$zkOK=$?") {
-		t.Errorf("the status is read after a newline, so a trailing comment can't swallow it:\n%s", wrapped)
-	}
-	if got.Label != "pwsh -Command Write-Output 'a \"b\"'…" {
+	if got.Label != "pwsh -Command using namespace System.Text…" {
 		t.Errorf("label = %q", got.Label)
 	}
-	if got.CmdLine != "" {
-		t.Errorf("PowerShell is quoted by Go, not by hand: %q", got.CmdLine)
+	if got.CmdLine != "" || !got.KeepConsoleCP {
+		t.Errorf("CmdLine = %q, KeepConsoleCP = %v", got.CmdLine, got.KeepConsoleCP)
 	}
 }
 
@@ -278,32 +272,6 @@ func TestEntriesStopAtTheFirstFailureAcrossShells(t *testing.T) {
 	}
 }
 
-func TestSplitUsingHoistsLeadingUsingStatements(t *testing.T) {
-	tests := []struct {
-		name, script, head, body string
-	}{
-		{"no using", "Get-Date\nUsing namespace X\n", "", "Get-Date\nUsing namespace X\n"},
-		{"one", "using namespace System.Text\nGet-Date", "using namespace System.Text\n", "Get-Date"},
-		{"comments and blanks before and between", "# note\n\nusing module Foo\n  # more\nUSING NAMESPACE X\n\nGet-Date", "# note\n\nusing module Foo\n  # more\nUSING NAMESPACE X\n", "\nGet-Date"},
-		{"comments with no using stay", "# note\nGet-Date", "", "# note\nGet-Date"},
-		{"assembly and type", "using assembly System.Web\nusing type X\nx", "using assembly System.Web\nusing type X\n", "x"},
-		{"only using", "using namespace X", "using namespace X", ""},
-		{"a command named using something", "using-thing foo\nx", "", "using-thing foo\nx"},
-		{"a later using is the user's", "x\nusing namespace X", "", "x\nusing namespace X"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			head, body := splitUsing(tt.script)
-			if head != tt.head || body != tt.body {
-				t.Errorf("splitUsing = %q, %q; want %q, %q", head, body, tt.head, tt.body)
-			}
-			if got := psScript(tt.script); tt.head != "" && !strings.HasPrefix(got, tt.head+psPrologue) {
-				t.Errorf("using statements are not first:\n%s", got)
-			}
-		})
-	}
-}
-
 func TestShortenKeepsMessagesToOneLine(t *testing.T) {
 	long := strings.Repeat("x", 100)
 	tests := []struct{ in, want string }{
@@ -348,25 +316,60 @@ func TestShNotInstalled(t *testing.T) {
 	}
 }
 
-func TestLongWindowsCommandLineFailsThePlan(t *testing.T) {
-	long := strings.Repeat("Write-Output 'x'\n", 3000)
-	m := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Windows}
-
-	_, err := m.cmd(config.Command{Name: "big", Shell: "pwsh"}, long)
-
-	if err == nil || !strings.Contains(err.Error(), "big: the pwsh command line is ") || !strings.Contains(err.Error(), "32767") || strings.Contains(err.Error(), "\n") {
-		t.Errorf("err = %v", err)
-	}
-	if _, err := m.cmd(config.Command{Name: "small", Shell: "pwsh"}, "Get-Date"); err != nil {
-		t.Errorf("a short script fails: %v", err)
-	}
-	cmdLong := strings.Repeat("a", 33000)
-	if _, err := m.cmd(config.Command{Name: "big", Shell: "cmd"}, cmdLong); err == nil {
-		t.Error("a 33000 character cmd line was accepted")
-	}
+func TestLongScriptsFailThePlanWithOneLine(t *testing.T) {
+	win := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Windows}
 	unix := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Linux}
-	if _, err := unix.cmd(config.Command{Name: "big"}, long+long); err != nil {
-		t.Errorf("Unix has no such limit: %v", err)
+	tests := []struct {
+		name   string
+		m      *Module
+		shell  string
+		script string
+		want   string
+	}{
+		{"pwsh at the Windows limit", win, "pwsh", strings.Repeat("a", maxWindowsEnvVar-len(psScriptVar+"=")), ""},
+		{"pwsh over the Windows limit", win, "pwsh", strings.Repeat("a", maxWindowsEnvVar-len(psScriptVar+"=")+1), "big: the pwsh script is 32767 characters, over the 32766 one environment variable holds"},
+		{"pwsh counts UTF-16 units", win, "powershell", strings.Repeat("😀", 16400), "big: the powershell script is "},
+		{"pwsh on Linux", unix, "pwsh", strings.Repeat("a", maxUnixEnvVar+1), "big: the pwsh script is 131072 bytes"},
+		{"pwsh on Linux is fine well past the Windows limit", unix, "pwsh", strings.Repeat("a", 100000), ""},
+		{"cmd over 8191", win, "cmd", strings.Repeat("a", 8200), "big: the cmd line is "},
+		{"cmd at the limit", win, "cmd", strings.Repeat("a", maxCmdLine-len(`cmd.exe /d /s /c ""`)), ""},
+		{"bash over the arguments limit", win, "bash", strings.Repeat("a b ", 9000), "big: the bash command line is "},
+		{"bash with many backslashes is not counted twice", win, "bash", strings.Repeat(`\`, 17000), ""},
+		{"sh on Linux has no such limit", unix, "sh", strings.Repeat("a b ", 90000), ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.m.cmd(config.Command{Name: "big", Shell: tt.shell}, tt.script)
+
+			switch {
+			case tt.want == "" && err != nil:
+				t.Errorf("err = %v", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want) || strings.Contains(err.Error(), "\n")):
+				t.Errorf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestEscapedLenFollowsGoQuoting(t *testing.T) {
+	tests := []struct {
+		arg  string
+		want int
+	}{
+		{"", 2},
+		{"abc", 3},
+		{`a\b`, 3},
+		{"a b", 5},
+		{`a"b`, 4},
+		{`a\"b`, 6},
+		{`a b\`, 7},
+		{"é", 1},
+		{"😀", 2},
+	}
+	for _, tt := range tests {
+		if got := escapedLen(tt.arg); got != tt.want {
+			t.Errorf("escapedLen(%q) = %d, want %d", tt.arg, got, tt.want)
+		}
 	}
 }
 

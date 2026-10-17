@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf16"
 
@@ -10,8 +11,19 @@ import (
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
-// maxCommandLine is what CreateProcess accepts on Windows, in UTF-16 units.
-const maxCommandLine = 32767
+// Windows hands a process at most 32,766 characters of command line and
+// 32,767 per environment variable, both counting the terminating NUL; cmd.exe
+// itself stops at 8,191.
+const (
+	maxWindowsArgs   = 32766
+	maxWindowsEnvVar = 32766
+	maxCmdLine       = 8191
+	// maxUnixEnvVar is Linux's limit for one environment string.
+	maxUnixEnvVar = 131071
+)
+
+// psScriptVar carries a PowerShell snippet to the wrapper as data.
+const psScriptVar = "ZAKWAS_PS_SCRIPT"
 
 // labelWidth is how much of a script an error message shows.
 const labelWidth = 80
@@ -22,6 +34,7 @@ const labelWidth = 80
 // one line, handed over verbatim with /s so its quote stripping applies.
 func (m *Module) cmd(c config.Command, script string) (runner.Cmd, error) {
 	sh := m.shellFor(c)
+	win := m.goos() == platform.Windows
 	run := runner.Cmd{Dir: m.Home}
 	switch sh {
 	case config.ShellSh, config.ShellBash:
@@ -29,10 +42,16 @@ func (m *Module) cmd(c config.Command, script string) (runner.Cmd, error) {
 	case config.ShellPowerShell, config.ShellPwsh:
 		run.Name = sh
 		run.Args = []string{"-NoProfile", "-NonInteractive"}
-		if m.goos() == platform.Windows {
+		if win {
 			run.Args = append(run.Args, "-ExecutionPolicy", "Bypass")
 		}
-		run.Args = append(run.Args, "-Command", psScript(script))
+		run.Env = []string{"POWERSHELL_TELEMETRY_OPTOUT=1"}
+		if plainPowerShell(script) {
+			run.Args = append(run.Args, "-Command", plainScript(script))
+		} else {
+			run.Args = append(run.Args, "-Command", psWrapper)
+			run.Env = append(run.Env, psScriptVar+"="+script)
+		}
 		run.Label = sh + " -Command " + shorten(script)
 		run.KeepConsoleCP = true
 	case config.ShellCmd:
@@ -43,15 +62,72 @@ func (m *Module) cmd(c config.Command, script string) (runner.Cmd, error) {
 	default:
 		return run, fmt.Errorf("%s: unknown shell %q", c.Name, sh)
 	}
-	if (run.Name != "sh" || c.Shell != "" || m.goos() == platform.Windows) && !m.Runner.Installed(run.Name) {
+	if (run.Name != "sh" || c.Shell != "" || win) && !m.Runner.Installed(run.Name) {
 		return run, fmt.Errorf("%s: shell %s is not installed (%s not found on PATH)", c.Name, sh, run.Name)
 	}
-	if m.goos() == platform.Windows {
-		if n := commandLineLength(run); n > maxCommandLine {
-			return run, fmt.Errorf("%s: the %s command line is %d characters, over the %d Windows allows; put the script in a file and call it (& ./script.ps1)", c.Name, sh, n, maxCommandLine)
+	return run, tooLong(c.Name, sh, script, run, win)
+}
+
+// tooLong is the one-line error for a script the operating system would
+// refuse to hand to its shell.
+func tooLong(name, sh, script string, run runner.Cmd, win bool) error {
+	switch {
+	case sh == config.ShellCmd && win:
+		if n := utf16Len(run.CmdLine); n > maxCmdLine {
+			return fmt.Errorf("%s: the cmd line is %d characters, over the %d cmd.exe allows; put the script in a .cmd file and call it", name, n, maxCmdLine)
+		}
+	case (sh == config.ShellPwsh || sh == config.ShellPowerShell) && !plainPowerShell(script):
+		n, limit, unit := len(script), maxUnixEnvVar, "bytes"
+		if win {
+			n, limit, unit = utf16Len(psScriptVar+"="+script), maxWindowsEnvVar, "characters"
+		}
+		if n > limit {
+			return fmt.Errorf("%s: the %s script is %d %s, over the %d one environment variable holds; put it in a file and call it (& ./script.ps1)", name, sh, n, unit, limit)
+		}
+	case win:
+		if n := windowsArgsLen(run); n > maxWindowsArgs {
+			return fmt.Errorf("%s: the %s command line is %d characters, over the %d Windows allows; put the script in a file and call it", name, sh, n, maxWindowsArgs)
 		}
 	}
-	return run, nil
+	return nil
+}
+
+func utf16Len(s string) int { return len(utf16.Encode([]rune(s))) }
+
+// windowsArgsLen is the length of the command line Go builds for run on
+// Windows, following syscall.EscapeArg: an argument with a space, tab or
+// quote is quoted, quotes are escaped, and backslashes are doubled only
+// where they precede a quote or the closing one.
+func windowsArgsLen(run runner.Cmd) int {
+	n := utf16Len(run.Name)
+	for _, a := range run.Args {
+		n += 1 + escapedLen(a)
+	}
+	return n
+}
+
+func escapedLen(a string) int {
+	if a == "" {
+		return 2
+	}
+	n, slashes := 0, 0
+	for _, r := range a {
+		switch r {
+		case '\\':
+			slashes++
+			n++
+		case '"':
+			n += slashes + 2
+			slashes = 0
+		default:
+			n += utf16Len(string(r))
+			slashes = 0
+		}
+	}
+	if strings.ContainsAny(a, " \t") {
+		n += 2 + slashes
+	}
+	return n
 }
 
 // shorten is the first line of script, cut to labelWidth, for messages.
@@ -68,72 +144,55 @@ func shorten(script string) string {
 	return first
 }
 
-// commandLineLength is an upper bound of the command line Go builds for run
-// on Windows: every argument quoted, quotes and backslashes escaped.
-func commandLineLength(run runner.Cmd) int {
-	if run.CmdLine != "" {
-		return len(utf16.Encode([]rune(run.CmdLine)))
-	}
-	n := len(utf16.Encode([]rune(run.Name)))
-	for _, a := range run.Args {
-		n += len(utf16.Encode([]rune(a))) + 3 + strings.Count(a, `"`) + strings.Count(a, `\`)
-	}
-	return n
-}
-
-// The PowerShell wrapper. The script runs dot-sourced in a script block, so
-// its variables and functions behave as at the top level, and no try block
-// turns its statement errors into aborts. $LASTEXITCODE gets a validation
-// attribute that notes the newest error each time anything, the engine
-// included, assigns it: when the newest error is still that one at the
-// end, no cmdlet failed since the last native command, so a failure is that
-// command's. A cmdlet that failed later is exit code 1. The console code
-// page the wrapper changes is put back by the runner (KeepConsoleCP), which
-// also covers `exit`, `throw` and a kill.
-const (
-	psPrologue = "$ProgressPreference='SilentlyContinue';try{$PSStyle.OutputRendering='PlainText'}catch{};" +
-		"try{[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding}catch{};" +
-		"$zkTop=$null;$zkOK=$true;$zkCode=$null;$zkFresh=$false;" +
-		"[ValidateScript({$global:zkTop=if($Error.Count){$Error[0]}else{$null};$true})]$global:LASTEXITCODE=0;" +
-		". {\n"
-	psEpilogue = "\n$zkOK=$?;$zkCode=$LASTEXITCODE;$zkFresh=[object]::ReferenceEquals($(if($Error.Count){$Error[0]}else{$null}),$zkTop)};" +
-		"if($zkOK){exit 0}elseif($zkCode -and $zkFresh){exit $zkCode}else{exit 1}"
+var (
+	flowControl = regexp.MustCompile(`(?i)\b(return|break|continue)\b`)
+	usingWord   = regexp.MustCompile(`(?i)\busing\b`)
 )
 
-// psScript wraps script. A script's leading using statements (and the
-// comments and blank lines before them) move above the wrapper, where
-// PowerShell requires them.
-func psScript(script string) string {
-	head, body := splitUsing(script)
-	return head + psPrologue + body + psEpilogue
+// plainPowerShell reports a script that has to be the top-level text of the
+// command, as in a plain `pwsh -Command`: `return`, `break` and `continue`
+// end a script without letting anything run after it, and PowerShell reads
+// the exit code from the status of the statement they follow. Such a script
+// exits 0 or 1 (or its own `exit N`) and gets no native exit code; the
+// words are looked for anywhere in the text, so a false match only costs
+// that code.
+func plainPowerShell(script string) bool { return flowControl.MatchString(script) }
+
+// plainScript is a script run as the top-level command: after a line of
+// settings on the same line as its first, so line numbers stay yours,
+// unless it holds `using`, which must come first.
+func plainScript(script string) string {
+	if usingWord.MatchString(script) {
+		return script
+	}
+	return psSettings + ";" + script
 }
 
-// splitUsing cuts script after its last leading using statement.
-func splitUsing(script string) (head, body string) {
-	lines := strings.SplitAfter(script, "\n")
-	end := 0
-	for i, line := range lines {
-		t := strings.TrimSpace(line)
-		switch {
-		case isUsing(t):
-			end = i + 1
-		case t == "" || strings.HasPrefix(t, "#"):
-		default:
-			return strings.Join(lines[:end], ""), strings.Join(lines[end:], "")
-		}
-	}
-	return strings.Join(lines[:end], ""), strings.Join(lines[end:], "")
-}
+const psSettings = "$ProgressPreference='SilentlyContinue';try{$PSStyle.OutputRendering='PlainText'}catch{};" +
+	"try{[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding}catch{}"
 
-func isUsing(line string) bool {
-	word, rest, ok := strings.Cut(strings.ToLower(line), " ")
-	if !ok || word != "using" {
-		return false
-	}
-	kind, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
-	switch kind {
-	case "namespace", "module", "assembly", "type":
-		return true
-	}
-	return false
-}
+// psWrapper is the fixed PowerShell program that runs a script which does
+// not use return, break or continue. The script arrives as data in the
+// environment, so no text of it can close the wrapper. It is parsed first
+// on its own, so a syntax error is a normal terminating error with your
+// line numbers (and a leading `using` or block comment is where PowerShell
+// wants it), then again with three statements appended that record `$?`,
+// `$LASTEXITCODE` and the newest error. It runs in a child scope. Resolving
+// a native command or script notes the newest error; when it is still the
+// newest at the end, no cmdlet failed since the last native command, so a
+// failure is that command's exit code, otherwise it is 1. $LASTEXITCODE
+// itself is left alone, and a script that ends early some other way leaves
+// the failure default. The console code page the wrapper changes is put
+// back by the runner (KeepConsoleCP), which also covers `exit`, `throw`
+// and a kill.
+const psWrapper = psSettings + `
+$__zakwas_src=$env:ZAKWAS_PS_SCRIPT
+$env:ZAKWAS_PS_SCRIPT=$null
+$__zakwas_ok=$false;$__zakwas_code=$null;$__zakwas_top=$null;$__zakwas_fresh=$false
+$ExecutionContext.InvokeCommand.PostCommandLookupAction={param($n,$e);if($e.Command -and ($e.Command.CommandType -eq 'Application' -or $e.Command.CommandType -eq 'ExternalScript')){$global:__zakwas_top=@($Error)[0]}}
+$null=[scriptblock]::Create($__zakwas_src)
+$__zakwas_sb=[scriptblock]::Create($__zakwas_src+[char]10+'$global:__zakwas_ok=$?;$global:__zakwas_code=$LASTEXITCODE;$global:__zakwas_fresh=[object]::ReferenceEquals(@($Error)[0],$global:__zakwas_top)')
+$__zakwas_src=$null
+$Error.Clear()
+& $__zakwas_sb
+if($__zakwas_ok){exit 0}elseif($__zakwas_code -and $__zakwas_fresh){exit $__zakwas_code}else{exit 1}`
