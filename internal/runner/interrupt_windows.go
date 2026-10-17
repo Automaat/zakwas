@@ -32,14 +32,14 @@ func setCmdLine(cmd *exec.Cmd, line string) {
 
 var consoleMu sync.Mutex
 
-// keepConsoleCP serializes the commands that touch the console code page, so
+// setConsoleCP serializes the commands that change the console code page, so
 // one's restore can't land in the middle of another's run.
-func keepConsoleCP() func() {
+func setConsoleCP(cp uint32) func() {
 	consoleMu.Lock()
-	restore := restoreCodePage(func() uint32 {
-		cp, _ := windows.GetConsoleOutputCP()
-		return cp
-	}, func(cp uint32) { _ = windows.SetConsoleOutputCP(cp) })
+	restore := switchCodePage(func() uint32 {
+		cur, _ := windows.GetConsoleOutputCP()
+		return cur
+	}, func(v uint32) { _ = windows.SetConsoleOutputCP(v) }, cp)
 	return func() {
 		restore()
 		consoleMu.Unlock()

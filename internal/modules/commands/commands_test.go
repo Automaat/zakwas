@@ -168,35 +168,57 @@ func TestPowerShellInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psSettings + ";" + script}
+	want := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script}
 	if !slices.Equal(got.Args, want) {
-		t.Fatalf("args = %q, want %q: the script is the command's own text, after one line of settings", got.Args, want)
+		t.Fatalf("args = %q, want %q", got.Args, want)
 	}
-	if !slices.Contains(got.Env, "POWERSHELL_TELEMETRY_OPTOUT=1") {
-		t.Errorf("env = %q; want the telemetry opt-out", got.Env)
+	if !slices.Equal(got.Env, []string{"POWERSHELL_TELEMETRY_OPTOUT=1", "NO_COLOR=1"}) {
+		t.Errorf("env = %q; want only the telemetry opt-out and NO_COLOR", got.Env)
 	}
 	if got.Label != "pwsh -Command Write-Output 'a \"b\"'…" {
 		t.Errorf("label = %q", got.Label)
 	}
-	if got.CmdLine != "" || !got.KeepConsoleCP {
-		t.Errorf("CmdLine = %q, KeepConsoleCP = %v", got.CmdLine, got.KeepConsoleCP)
+	if got.CmdLine != "" || got.ConsoleCP != 65001 {
+		t.Errorf("CmdLine = %q, ConsoleCP = %d", got.CmdLine, got.ConsoleCP)
 	}
 }
 
-func TestPowerShellScriptWithUsingRunsUntouched(t *testing.T) {
-	tests := []string{
+// TestPowerShellGetsTheScriptByteForByte: nothing is put before, after or
+// around the script, so what PowerShell parses is what the config says.
+func TestPowerShellGetsTheScriptByteForByte(t *testing.T) {
+	scripts := []string{
+		"param()\nexit 3",
+		"[CmdletBinding()]param()\nexit 0",
+		"begin {}\nSet-Content out.txt hi",
+		"end { exit 4 }",
+		"process {}",
+		"dynamicparam {}",
+		"#requires -Version 5\nGet-Date",
 		"using namespace System.Text\nGet-Date",
-		"<# a note #>\nusing namespace System.Text",
-		"# note\n\nUSING\tmodule Foo",
-		"using namespace X; Get-Date",
+		"<# note #>\nusing namespace System.Text",
+		"# comment\r\nGet-Date\r\n",
+		"\tGet-Date\t",
+		"-1",
+		"& { 'x' }",
+		"@(1, 2)",
+		"$?",
+		"$LASTEXITCODE",
+		"Set-StrictMode -Version Latest\nGet-Date",
+		"  \n",
 	}
-	for _, script := range tests {
-		if got := psScript(script); got != script {
-			t.Errorf("psScript(%q) = %q; a using statement must stay first", script, got)
+	for _, goos := range []string{platform.Linux, platform.Darwin, platform.Windows} {
+		for _, shell := range []string{"pwsh", "powershell"} {
+			m := &Module{Runner: runnertest.New(), Home: "/h", GOOS: goos}
+			for _, script := range scripts {
+				got, err := m.cmd(config.Command{Name: "n", Shell: shell}, script)
+				if err != nil {
+					t.Fatalf("%s %s %q: %v", goos, shell, script, err)
+				}
+				if last := got.Args[len(got.Args)-1]; last != script || got.Args[len(got.Args)-2] != "-Command" {
+					t.Errorf("%s %s: args end with %q, want the script %q after -Command", goos, shell, last, script)
+				}
+			}
 		}
-	}
-	if got := psScript("Get-Date"); got != psSettings+";Get-Date" {
-		t.Errorf("psScript = %q", got)
 	}
 }
 
@@ -347,8 +369,8 @@ func TestLongScriptsFailThePlanWithOneLine(t *testing.T) {
 		{"cmd at the limit", win, "cmd", strings.Repeat("a", maxCmdLine-len(`cmd.exe /d /s /c ""`)), ""},
 		{"bash over the arguments limit", win, "bash", strings.Repeat("a b ", 9000), "big: the bash command line is "},
 		{"bash with many backslashes is not counted twice", win, "bash", strings.Repeat(`\`, 17000), ""},
-		{"pwsh on Linux at the limit", linux, "pwsh", strings.Repeat("a", maxLinuxArg-len(psSettings+";")), ""},
-		{"pwsh on Linux over the limit", linux, "pwsh", strings.Repeat("a", maxLinuxArg-len(psSettings+";")+1), "big: the pwsh script is 131072 bytes, over the 131071 Linux allows in one argument"},
+		{"pwsh on Linux at the limit", linux, "pwsh", strings.Repeat("a", maxLinuxArg), ""},
+		{"pwsh on Linux over the limit", linux, "pwsh", strings.Repeat("a", maxLinuxArg+1), "big: the pwsh script is 131072 bytes, over the 131071 Linux allows in one argument"},
 		{"sh on Linux over the limit", linux, "sh", strings.Repeat("a", maxLinuxArg+1), "big: the sh script is 131072 bytes"},
 		{"sh on macOS has no such limit", mac, "sh", strings.Repeat("a b ", 90000), ""},
 	}

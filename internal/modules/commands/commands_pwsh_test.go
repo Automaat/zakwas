@@ -91,6 +91,7 @@ func TestPowerShellExitCodes(t *testing.T) {
 }
 
 func TestPowerShellWritesUTF8AndQuotes(t *testing.T) {
+	ensureConsole(t)
 	eachPowerShell(t, func(t *testing.T, shell string) {
 		res := runPowerShell(t, shell, `Write-Output 'zażółć gęślą "q" it''s'`)
 

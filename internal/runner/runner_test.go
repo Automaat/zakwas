@@ -137,27 +137,36 @@ func TestExecStreamStdin(t *testing.T) {
 	}
 }
 
-func TestRestoreCodePage(t *testing.T) {
+func TestSwitchCodePage(t *testing.T) {
 	tests := []struct {
-		name        string
-		start, then uint32
-		wantSet     []uint32
+		name         string
+		start, then  uint32
+		wantSetCalls []uint32
 	}{
-		{"changed by the command", 850, 65001, []uint32{850}},
-		{"left alone", 850, 850, nil},
+		{"set, then put back", 850, 65001, []uint32{65001, 850}},
+		{"already there", 65001, 65001, nil},
+		{"the command changed it again", 850, 437, []uint32{65001, 850}},
 		{"no console", 0, 65001, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cp := tt.start
 			var set []uint32
-			restore := restoreCodePage(func() uint32 { return cp }, func(v uint32) { set = append(set, v); cp = v })
+			restore := switchCodePage(func() uint32 { return cp }, func(v uint32) { set = append(set, v); cp = v }, 65001)
 
-			cp = tt.then
+			if tt.start != 0 && cp != 65001 {
+				t.Errorf("code page is %d while the command runs, want 65001", cp)
+			}
+			if tt.start != 0 {
+				cp = tt.then
+			}
 			restore()
 
-			if !slices.Equal(set, tt.wantSet) {
-				t.Errorf("set %v, want %v", set, tt.wantSet)
+			if !slices.Equal(set, tt.wantSetCalls) {
+				t.Errorf("set %v, want %v", set, tt.wantSetCalls)
+			}
+			if cp != tt.start && tt.start != 0 {
+				t.Errorf("code page is %d after, want %d", cp, tt.start)
 			}
 		})
 	}

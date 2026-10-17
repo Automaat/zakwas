@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -24,12 +23,9 @@ type outcome struct {
 	files  map[string]string
 }
 
-var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
-// normalize drops what differs by design: line ending style and the colour
-// codes plain pwsh adds to warnings, which the wrapper turns off.
+// normalize drops only the line ending style, which differs by system.
 func normalize(s string) string {
-	return strings.TrimRight(ansi.ReplaceAllString(strings.ReplaceAll(s, "\r\n", "\n"), ""), " \n")
+	return strings.TrimRight(strings.ReplaceAll(s, "\r\n", "\n"), " \n")
 }
 
 func listFiles(t *testing.T, dir string) map[string]string {
@@ -54,7 +50,8 @@ func listFiles(t *testing.T, dir string) map[string]string {
 }
 
 // runPlain is the reference: the script as the text of a plain
-// `pwsh -NoProfile -NonInteractive -Command`.
+// `pwsh -NoProfile -NonInteractive -Command`, with the two environment
+// variables zakwas adds (no colour codes, no telemetry).
 func runPlain(t *testing.T, shell, script string) outcome {
 	t.Helper()
 	dir := t.TempDir()
@@ -66,7 +63,7 @@ func runPlain(t *testing.T, shell, script string) outcome {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, append(args, "-Command", script)...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "ZK_DIR="+dir)
+	cmd.Env = append(os.Environ(), "ZK_DIR="+dir, "NO_COLOR=1", "POWERSHELL_TELEMETRY_OPTOUT=1")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Run()
@@ -74,6 +71,9 @@ func runPlain(t *testing.T, shell, script string) outcome {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		code = exitErr.ExitCode()
+		if code < 0 {
+			t.Logf("plain run died: %v", err)
+		}
 	} else if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +92,9 @@ func runOurs(t *testing.T, shell, script string) outcome {
 	res, err := m.Runner.Run(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if res.ExitCode < 0 {
+		t.Logf("zakwas run died (exit %d): stderr %q", res.ExitCode, res.Stderr)
 	}
 	return outcome{res.ExitCode, normalize(res.Stdout), listFiles(t, dir)}
 }
@@ -119,6 +122,29 @@ func TestScriptsRunLikePlainPowerShell(t *testing.T) {
 		{"a block comment only", "<# nothing #>", 0},
 		{"a block comment, then a command", "<# note #> Write-Output y", 0},
 		{"a bare exit", "exit", -1},
+		{"begin block then a statement", "begin {}\nSet-Content -LiteralPath " + zkFile + " -Value hi", 1},
+		{"a lone begin block", "begin { Write-Output b }", -1},
+		{"process blocks", "process { Write-Output p }", -1},
+		{"begin process end", "begin { 'b' } process { 'p' } end { 'e' }", -1},
+		{"end block exit", "end { exit 4 }", 4},
+		{"dynamicparam block", "dynamicparam {}", -1},
+		{"empty param", "param()\nexit 3", 3},
+		{"param, then output", "param()\nWrite-Output ok", 0},
+		{"param with a default", "param($a = 'x')\nWrite-Output $a", 0},
+		{"cmdletbinding and param", "[CmdletBinding()]param()\nexit 0", 0},
+		{"outputtype and param", "[OutputType([string])]param()\nWrite-Output ok", 0},
+		{"alias and param", "[Alias('x')]param()\nWrite-Output ok", 0},
+		{"requires first", "#requires -Version 5\nWrite-Output ok", 0},
+		{"requires is only a comment in -Command", "#requires -Version 99\nWrite-Output ok", 0},
+		{"strict mode first", "Set-StrictMode -Version Latest\nWrite-Output ok", 0},
+		{"the status as the first statement", "$?", 0},
+		{"the status as the first statement, assigned", "$s = $?\nif ($s) { exit 0 } else { exit 9 }", 0},
+		{"LASTEXITCODE as the first statement", "$LASTEXITCODE", 0},
+		{"LASTEXITCODE in a string first", "\"le=[$LASTEXITCODE]\"", 0},
+		{"Error count first", "$Error.Count", 0},
+		{"ProgressPreference untouched", "$ProgressPreference", 0},
+		{"OutputEncoding untouched", "$OutputEncoding.WebName", 0},
+		{"ErrorActionPreference untouched", "$ErrorActionPreference", 0},
 		{"a leading minus", "-1", 0},
 		{"a leading splat array", "@(1, 2)", 0},
 		{"a leading call operator", "& { 'x' }", 0},
@@ -211,10 +237,13 @@ func TestScriptsRunLikePlainPowerShell(t *testing.T) {
 		{"a pipeline failing in the middle", "1..3 | ForEach-Object { if ($_ -eq 2) { Write-Error 'two' } else { $_ } }", 0},
 		{"a failing native command in a function", "function f { " + nativeExit(4) + " }\nf", -1},
 	}
+	slots := make(chan struct{}, 3)
 	eachPowerShell(t, func(t *testing.T, shell string) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				t.Parallel()
+				slots <- struct{}{}
+				defer func() { <-slots }()
 				plain, ours := runPlain(t, shell, tt.script), runOurs(t, shell, tt.script)
 
 				if plain.code != 0 && ours.code == 0 {

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode/utf16"
 
@@ -23,9 +22,14 @@ const (
 // labelWidth is how much of a script an error message shows.
 const labelWidth = 80
 
+// utf8CodePage is the console output code page PowerShell is started with
+// on Windows, which it takes for its output encoding.
+const utf8CodePage = 65001
+
 // cmd builds the invocation of script in c's shell. sh stays exactly
-// `sh -c script`. PowerShell never reads a profile or prompts and runs the
-// script as the text of a plain -Command. cmd.exe takes one line, handed
+// `sh -c script`. PowerShell never reads a profile or prompts and gets the
+// script untouched as the text of -Command; only its environment and the
+// console code page differ from a plain run. cmd.exe takes one line, handed
 // over verbatim with /s so its quote stripping applies.
 func (m *Module) cmd(c config.Command, script string) (runner.Cmd, error) {
 	sh := m.shellFor(c)
@@ -40,10 +44,10 @@ func (m *Module) cmd(c config.Command, script string) (runner.Cmd, error) {
 		if win {
 			run.Args = append(run.Args, "-ExecutionPolicy", "Bypass")
 		}
-		run.Args = append(run.Args, "-Command", psScript(script))
-		run.Env = []string{"POWERSHELL_TELEMETRY_OPTOUT=1"}
+		run.Args = append(run.Args, "-Command", script)
+		run.Env = []string{"POWERSHELL_TELEMETRY_OPTOUT=1", "NO_COLOR=1"}
 		run.Label = sh + " -Command " + shorten(script)
-		run.KeepConsoleCP = true
+		run.ConsoleCP = utf8CodePage
 	case config.ShellCmd:
 		line := strings.TrimRight(script, " \t\r\n")
 		run.Name, run.Args = "cmd.exe", []string{"/d", "/s", "/c", line}
@@ -131,20 +135,3 @@ func shorten(script string) string {
 	}
 	return first
 }
-
-var usingWord = regexp.MustCompile(`(?i)\busing\b`)
-
-// psScript is the text handed to PowerShell as the command: the script
-// itself, so its exit code is the one a plain `pwsh -Command` gives. A line
-// of settings (UTF-8 output, no colour codes, no progress bars) goes before
-// it on the same line, so line numbers stay yours, unless the script has
-// `using`, which must come first and then runs untouched.
-func psScript(script string) string {
-	if usingWord.MatchString(script) {
-		return script
-	}
-	return psSettings + ";" + script
-}
-
-const psSettings = "$ProgressPreference='SilentlyContinue';try{$PSStyle.OutputRendering='PlainText'}catch{};" +
-	"try{[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding}catch{};$Error.Clear()"

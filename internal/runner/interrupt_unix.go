@@ -15,7 +15,7 @@ func interrupt(p *os.Process) error { return p.Signal(os.Interrupt) }
 
 func setCmdLine(*exec.Cmd, string) {}
 
-func keepConsoleCP() func() { return func() {} }
+func setConsoleCP(uint32) func() { return func() {} }
 
 func hasTerminal() bool {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)

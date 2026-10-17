@@ -40,11 +40,11 @@ type Cmd struct {
 	// as is, for programs like cmd.exe that don't parse it the way Go quotes
 	// it. Other systems ignore it.
 	CmdLine string
-	// KeepConsoleCP puts the console's output code page back once the
-	// command is done, for a command that changes it (a PowerShell script
-	// forcing UTF-8). Only Windows has one; a command killed by a timeout
-	// is covered too.
-	KeepConsoleCP bool
+	// ConsoleCP, when not zero, is the console output code page the command
+	// runs with, put back once it is done (a kill on timeout included). A
+	// child takes its output encoding from it when it starts. Only Windows
+	// has one, and only with a console attached.
+	ConsoleCP uint32
 }
 
 // String renders the command the way a user would type it.
@@ -118,8 +118,8 @@ func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Cancel = func() error { return interrupt(cmd.Process) }
 	setCmdLine(cmd, c.CmdLine)
-	if c.KeepConsoleCP {
-		defer keepConsoleCP()()
+	if c.ConsoleCP != 0 {
+		defer setConsoleCP(c.ConsoleCP)()
 	}
 	grace := cmp.Or(e.Grace, WaitDelay)
 	cmd.WaitDelay = grace
@@ -175,12 +175,16 @@ func Check(ctx context.Context, r Runner, c Cmd) error {
 	return err
 }
 
-// restoreCodePage notes the console code page now (0 means there is no
-// console) and returns a function that sets it back if it changed.
-func restoreCodePage(get func() uint32, set func(uint32)) func() {
+// switchCodePage sets the console code page to cp (0 from get means there is
+// no console, and nothing is touched) and returns a function that puts the
+// old one back.
+func switchCodePage(get func() uint32, set func(uint32), cp uint32) func() {
 	was := get()
 	if was == 0 {
 		return func() {}
+	}
+	if was != cp {
+		set(cp)
 	}
 	return func() {
 		if get() != was {
