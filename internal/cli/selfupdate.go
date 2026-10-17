@@ -59,6 +59,7 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 		}
 		defer func() { _ = held.Release() }()
 	}
+	cleanSelfUpdateLeftovers(env, selfUpdateGOOS, errOut)
 	u := &selfupdate.Updater{BaseURL: env.ReleaseURL, OS: selfUpdateGOOS}
 	var version string
 	if *want == "" {
@@ -77,7 +78,7 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 	}
 	bin, err := fetchVerified(ctx, env, u, version, out)
 	if err == nil {
-		err = selfupdate.Replace(exe, env.Home, bin)
+		err = selfupdate.Replace(exe, env.Home, warning(errOut), bin)
 	}
 	if err != nil {
 		errOut.fail(err)
@@ -85,6 +86,28 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 	}
 	out.printf("zakwas %s → %s (%s)\n", current, version, exe)
 	return ExitOK
+}
+
+func warning(errOut *console) func(string) {
+	return func(msg string) { errOut.print("zakwas: warning: " + msg + "\n") }
+}
+
+// cleanSelfUpdateLeftovers removes the old copies and staged files a
+// Windows self-update left. It changes files and the state it keeps, so only
+// the commands that hold the run lock call it: apply, upgrade and
+// self-update. plan, check and the rest never do.
+func cleanSelfUpdateLeftovers(env Env, goos string, errOut *console) {
+	if goos != "windows" {
+		return
+	}
+	exe := env.Executable
+	if exe == "" {
+		var err error
+		if exe, err = selfupdate.Executable(); err != nil {
+			return
+		}
+	}
+	selfupdate.CleanupOld(env.Home, exe, warning(errOut))
 }
 
 // fetchVerified downloads a release, checks its SHA256 and, like install.sh,

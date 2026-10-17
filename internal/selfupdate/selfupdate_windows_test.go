@@ -57,14 +57,14 @@ func TestReplaceSwapsABinaryThatIsRunning(t *testing.T) {
 	exe := runningCopy(t)
 	home := t.TempDir()
 
-	if err := Replace(exe, home, []byte("new")); err != nil {
+	if err := Replace(exe, home, nil, []byte("new")); err != nil {
 		t.Fatalf("a running zakwas.exe must be replaceable: %v", err)
 	}
 
 	if got := read(t, exe); got != "new" {
 		t.Errorf("exe = %q, want new", got)
 	}
-	old := recorded(t, StatePath(home))
+	old := recorded(t, Swapper{StatePath: StatePath(home)}).Old
 	if len(old) != 1 {
 		t.Fatalf("recorded %q", old)
 	}
@@ -76,48 +76,70 @@ func TestReplaceSwapsABinaryThatIsRunning(t *testing.T) {
 func TestReplaceTwiceWhileTheFirstOldCopyRuns(t *testing.T) {
 	exe := runningCopy(t)
 	home := t.TempDir()
-	if err := Replace(exe, home, []byte("v2")); err != nil {
+	w := Swapper{StatePath: StatePath(home)}
+	if err := w.ReplaceRunning(exe, []byte("v2")); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := Replace(exe, home, []byte("v3")); err != nil {
+	if err := w.ReplaceRunning(exe, []byte("v3")); err != nil {
 		t.Fatalf("a second update must not wait for the copy the first one left: %v", err)
 	}
 
 	if got := read(t, exe); got != "v3" {
 		t.Errorf("exe = %q, want v3", got)
 	}
-	if got := len(recorded(t, StatePath(home))); got != 2 {
+	if got := len(recorded(t, w).Old); got != 2 {
 		t.Errorf("recorded %d old copies, want 2", got)
 	}
 }
 
 func TestCleanupOldRemovesTheCopyOnceItStopsRunning(t *testing.T) {
 	exe := runningCopy(t)
-	home := t.TempDir()
-	if err := Replace(exe, home, []byte("new")); err != nil {
+	w := Swapper{StatePath: StatePath(t.TempDir())}
+	if err := w.ReplaceRunning(exe, []byte("new")); err != nil {
 		t.Fatal(err)
 	}
-	old := recorded(t, StatePath(home))[0]
+	old := recorded(t, w).Old[0]
 
-	cleanupOld(StatePath(home), exe)
+	w.CleanupOld(exe)
 	if _, err := os.Lstat(old); err != nil {
 		t.Fatalf("cleanup removed a copy that is still running: %v", err)
 	}
-	if len(recorded(t, StatePath(home))) != 1 {
+	if len(recorded(t, w).Old) != 1 {
 		t.Fatalf("the running copy was forgotten")
 	}
 
 	stopRunning(t)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		cleanupOld(StatePath(home), exe)
+		w.CleanupOld(exe)
 		if _, err := os.Lstat(old); os.IsNotExist(err) {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Errorf("%s is still there after the process stopped", old)
+}
+
+func TestCleanupOldRejectsAJunctionedOldDirectory(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "zakwas.exe")
+	write(t, exe, "old")
+	target := t.TempDir()
+	write(t, filepath.Join(target, "zakwas.exe"), "precious")
+	junction := filepath.Join(filepath.Dir(exe), oldDirPrefix+"junction")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, target).CombinedOutput(); err != nil {
+		t.Skipf("no junction: %v: %s", err, out)
+	}
+	w := Swapper{StatePath: filepath.Join(t.TempDir(), "selfupdate.json")}
+	if err := w.saveUpdateState(updateState{Old: []string{filepath.Join(junction, "zakwas.exe")}}); err != nil {
+		t.Fatal(err)
+	}
+
+	w.CleanupOld(exe)
+
+	if read(t, filepath.Join(target, "zakwas.exe")) != "precious" {
+		t.Errorf("cleanup followed a junction")
+	}
 }
 
 func TestManagedByIgnoresTheCaseOfAWindowsPath(t *testing.T) {

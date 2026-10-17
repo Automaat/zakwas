@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path"
@@ -234,10 +235,12 @@ func readZipFile(f *zip.File) ([]byte, error) {
 // Replace swaps exe for bin. A failed update leaves the old binary
 // working: on Unix through a temp file renamed over exe, on Windows, which
 // can't overwrite a running program but can rename it, through ReplaceRunning,
-// which records the old copy under home's zakwas state.
-func Replace(exe, home string, bin []byte) error {
+// which records the files it leaves under home's zakwas state. On Windows the
+// caller holds the run lock; warn gets the notes about a state file it had to
+// set aside and may be nil.
+func Replace(exe, home string, warn func(string), bin []byte) error {
 	if runtime.GOOS == "windows" {
-		return ReplaceRunning(exe, StatePath(home), bin)
+		return Swapper{StatePath: StatePath(home), Warn: warn}.ReplaceRunning(exe, bin)
 	}
 	return install.WriteAtomic(exe, bin, 0o755)
 }
@@ -247,80 +250,115 @@ func Replace(exe, home string, bin []byte) error {
 // guard that matches a path ending in zakwas.exe matches it too.
 const oldDirPrefix = ".zakwas-old-"
 
-// StatePath records the old copies updates left, for CleanupOld.
+// stagedPrefix starts the name of the file an update writes the new binary
+// to before it moves it into place; the name ends in the binary's name.
+const stagedPrefix = "new-"
+
+// StatePath records the files updates left, for CleanupOld.
 func StatePath(home string) string {
 	return filepath.Join(home, ".local", "state", "zakwas", "selfupdate.json")
 }
 
+// updateState lists the old copies of the binary and the staged new
+// binaries that updates created and may have left behind.
 type updateState struct {
-	Old []string `json:"old"`
+	Old    []string `json:"old,omitempty"`
+	Staged []string `json:"staged,omitempty"`
 }
 
-// stateMu keeps updates of one process from losing each other's records;
-// across processes the run lock does that.
+func (st updateState) empty() bool { return len(st.Old) == 0 && len(st.Staged) == 0 }
+
+// Swapper replaces a binary that may be running and removes what that
+// leaves behind. Both work on the state file at StatePath by load, change,
+// save, so the caller holds the run lock around each call: the lock keeps an
+// update and a cleanup, in this process or another, from interleaving.
+// stateMu only keeps the goroutines of one process apart.
+type Swapper struct {
+	StatePath string
+	// Warn gets a note when the state file was unreadable and has been set
+	// aside; nil drops it.
+	Warn func(string)
+}
+
+// stateMu keeps updates of one process from losing each other's records.
 var stateMu sync.Mutex
 
-// ReplaceRunning swaps exe for bin when exe may be running. It stages bin
-// under a unique name next to exe, moves exe into a new directory of its own
-// (oldDirPrefix) and the staged file into place, and moves the old binary
-// back if that fails. The old copy stays until CleanupOld removes it, since
-// Windows refuses to delete a running program. It is recorded in statePath
-// before it moves, so a crash between the two renames leaves a trail: exe is
-// missing then, and the copy is in the recorded directory.
-func ReplaceRunning(exe, statePath string, bin []byte) (err error) {
+func (w Swapper) warn(msg string) {
+	if w.Warn != nil {
+		w.Warn(msg)
+	}
+}
+
+// ReplaceRunning swaps exe for bin when exe may be running. It names a staged
+// file next to exe, records the name, writes bin there, moves exe into a new
+// directory of its own (oldDirPrefix) and the staged file into place, and
+// moves the old binary back if that fails. The old copy stays until CleanupOld
+// removes it, since Windows refuses to delete a running program. Both paths are
+// recorded before anything is written or moved, so a crash leaves a trail: a
+// staged file CleanupOld removes, or, between the two renames, no exe and the
+// old copy in the recorded directory.
+func (w Swapper) ReplaceRunning(exe string, bin []byte) (err error) {
 	dir, base := filepath.Dir(exe), filepath.Base(exe)
-	staged, err := stage(dir, base, bin)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			err = errors.Join(err, os.Remove(staged))
-		}
-	}()
-	oldDir, err := os.MkdirTemp(dir, oldDirPrefix+"*")
-	if err != nil {
-		return err
-	}
+	staged := filepath.Join(dir, fmt.Sprintf("%s%016x-%s", stagedPrefix, rand.Uint64(), base))
+	oldDir := filepath.Join(dir, fmt.Sprintf("%s%016x", oldDirPrefix, rand.Uint64()))
 	old := filepath.Join(oldDir, base)
-	if err := recordOld(statePath, old); err != nil {
-		return errors.Join(err, os.Remove(oldDir))
+	if err := w.record(func(st *updateState) { st.Staged = append(st.Staged, staged) }); err != nil {
+		return err
 	}
-	forget := func() error { return errors.Join(unrecordOld(statePath, old), os.Remove(oldDir)) }
+	forgetStaged := func() error {
+		return errors.Join(os.Remove(staged), w.record(func(st *updateState) {
+			st.Staged = slices.DeleteFunc(st.Staged, func(p string) bool { return p == staged })
+		}))
+	}
+	if err := writeStaged(staged, bin); err != nil {
+		return errors.Join(err, forgetStaged())
+	}
+	if err := os.Mkdir(oldDir, 0o755); err != nil {
+		return errors.Join(err, forgetStaged())
+	}
+	if err := w.record(func(st *updateState) { st.Old = append(st.Old, old) }); err != nil {
+		return errors.Join(err, os.Remove(oldDir), forgetStaged())
+	}
+	forgetOld := func() error {
+		return errors.Join(os.Remove(oldDir), w.record(func(st *updateState) { st.Old = slices.DeleteFunc(st.Old, func(p string) bool { return p == old }) }))
+	}
 	if err := rename(exe, old); err != nil {
-		return errors.Join(err, forget())
+		return errors.Join(err, forgetOld(), forgetStaged())
 	}
 	if err := rename(staged, exe); err != nil {
 		if back := rename(old, exe); back != nil {
-			return errors.Join(err, fmt.Errorf("the old binary is at %s, move it back by hand: %w", old, back))
+			return errors.Join(err, fmt.Errorf("the old binary is at %s, move it back by hand: %w", old, back), forgetStaged())
 		}
-		return errors.Join(err, forget())
+		return errors.Join(err, forgetOld(), forgetStaged())
 	}
+	// staged is exe now. Dropping its record is housekeeping: a record left
+	// behind names a file that no longer exists, which CleanupOld forgets.
+	_ = w.record(func(st *updateState) {
+		st.Staged = slices.DeleteFunc(st.Staged, func(p string) bool { return p == staged })
+	})
 	return nil
 }
 
-// stage writes bin to a unique file in dir whose name ends in base.
-func stage(dir, base string, bin []byte) (string, error) {
-	f, err := os.CreateTemp(dir, "new-*-"+base)
+// writeStaged creates path, which must not exist, with bin in it.
+func writeStaged(path string, bin []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
 	if err != nil {
-		return "", err
+		return err
 	}
 	_, err = f.Write(bin)
 	if err == nil {
 		err = f.Sync()
 	}
-	if err = errors.Join(err, f.Close()); err == nil {
-		err = os.Chmod(f.Name(), 0o755)
-	}
-	if err != nil {
-		return "", errors.Join(err, os.Remove(f.Name()))
-	}
-	return f.Name(), nil
+	return errors.Join(err, f.Close())
 }
 
-func loadUpdateState(path string) (updateState, error) {
+// loadUpdateState reads the state file. One that can't be parsed (corrupt,
+// empty, not an object of lists) is moved aside to path+".bad", replacing an
+// older one, and read as empty, so a damaged file never blocks an update; the
+// move is reported through warn.
+func (w Swapper) loadUpdateState() (updateState, error) {
 	var st updateState
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(w.StatePath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return st, nil
 	}
@@ -328,14 +366,19 @@ func loadUpdateState(path string) (updateState, error) {
 		return st, err
 	}
 	if err := json.Unmarshal(data, &st); err != nil {
-		return updateState{}, fmt.Errorf("%s: %w", path, err)
+		bad := w.StatePath + ".bad"
+		if mv := rename(w.StatePath, bad); mv != nil {
+			return updateState{}, fmt.Errorf("%s can't be read (%w) or set aside: %w", w.StatePath, err, mv)
+		}
+		w.warn(fmt.Sprintf("%s was not valid (%v); moved it to %s and started a new one", w.StatePath, err, bad))
+		return updateState{}, nil
 	}
 	return st, nil
 }
 
-func saveUpdateState(path string, st updateState) error {
-	if len(st.Old) == 0 {
-		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+func (w Swapper) saveUpdateState(st updateState) error {
+	if st.empty() {
+		if err := os.Remove(w.StatePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 		return nil
@@ -344,29 +387,19 @@ func saveUpdateState(path string, st updateState) error {
 	if err != nil {
 		return err
 	}
-	return install.WriteAtomic(path, append(data, '\n'), 0o644)
+	return install.WriteAtomic(w.StatePath, append(data, '\n'), 0o644)
 }
 
-func recordOld(path, old string) error {
+// record changes the state file by load, change, save.
+func (w Swapper) record(change func(*updateState)) error {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	st, err := loadUpdateState(path)
+	st, err := w.loadUpdateState()
 	if err != nil {
 		return err
 	}
-	st.Old = append(st.Old, old)
-	return saveUpdateState(path, st)
-}
-
-func unrecordOld(path, old string) error {
-	stateMu.Lock()
-	defer stateMu.Unlock()
-	st, err := loadUpdateState(path)
-	if err != nil {
-		return err
-	}
-	st.Old = slices.DeleteFunc(st.Old, func(have string) bool { return have == old })
-	return saveUpdateState(path, st)
+	change(&st)
+	return w.saveUpdateState(st)
 }
 
 // rename and removeFile are replaced in tests to fail a step.
@@ -375,58 +408,96 @@ var (
 	removeFile = os.Remove
 )
 
-// CleanupOld removes the old copies of the running binary that updates
-// recorded under home's state, once nothing runs from them; it does nothing
-// off Windows, where an update replaces the file in place. It deletes only a
-// recorded path that lies in a directory of ours (oldDirPrefix) next to the
-// running binary, under the binary's name, never a name it guesses. It is best
-// effort: a copy still in use stays recorded for the next start.
-func CleanupOld(home string) {
-	if runtime.GOOS != "windows" {
-		return
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	cleanupOld(StatePath(home), exe)
+// CleanupOld removes what updates of the binary exe left in home's state:
+// the old copies of the binary, once nothing runs from them, and the staged
+// binaries of updates that never finished. It deletes only a recorded path
+// that lies next to exe under the shape an update gives it, never a name it
+// guesses, and keeps what is still in use for the next time. It changes files,
+// so only commands that hold the run lock call it (apply, upgrade and
+// self-update), never plan or check. exe is the path Replace was given,
+// symlinks resolved, as Executable returns it.
+func CleanupOld(home, exe string, warn func(string)) {
+	Swapper{StatePath: StatePath(home), Warn: warn}.CleanupOld(exe)
 }
 
-func cleanupOld(statePath, exe string) {
+// CleanupOld is the package function CleanupOld for a state file at
+// w.StatePath.
+func (w Swapper) CleanupOld(exe string) {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	st, err := loadUpdateState(statePath)
-	if err != nil || len(st.Old) == 0 {
+	st, err := w.loadUpdateState()
+	if err != nil || st.empty() {
 		return
 	}
-	var keep []string
+	var keep updateState
 	for _, old := range st.Old {
 		if !leftBy(old, exe) {
-			keep = append(keep, old)
+			keep.Old = append(keep.Old, old)
 			continue
 		}
 		if err := removeFile(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			keep = append(keep, old)
+			keep.Old = append(keep.Old, old)
 			continue
 		}
 		_ = os.Remove(filepath.Dir(old))
 	}
-	if len(keep) != len(st.Old) {
-		_ = saveUpdateState(statePath, updateState{Old: keep})
+	for _, staged := range st.Staged {
+		if !stagedBy(staged, exe) {
+			keep.Staged = append(keep.Staged, staged)
+			continue
+		}
+		if err := removeFile(staged); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			keep.Staged = append(keep.Staged, staged)
+		}
+	}
+	if len(keep.Old) != len(st.Old) || len(keep.Staged) != len(st.Staged) {
+		_ = w.saveUpdateState(keep)
 	}
 }
 
-// leftBy reports whether old is where an update of exe puts its old copy:
-// <dir of exe>/<oldDirPrefix>*/<name of exe>, in a real directory.
-func leftBy(old, exe string) bool {
-	oldDir := filepath.Dir(old)
-	info, err := os.Lstat(oldDir)
-	if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+// sameDir reports whether a and b are the same directory, symlinks and
+// junctions resolved and, on Windows, case ignored: the recorded path was
+// built from Executable, but the running binary may be reached by another.
+func sameDir(a, b string) bool {
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			p = r
+		}
+		return filepath.Clean(p)
+	}
+	return sameName(resolve(a), resolve(b))
+}
+
+// plain reports whether path is a plain directory (dir) or a regular file:
+// not a symlink, and not a junction, which Go reports as irregular.
+func plain(path string, dir bool) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
 		return false
 	}
-	return sameName(filepath.Dir(oldDir), filepath.Dir(exe)) &&
+	if dir {
+		return info.Mode().Type() == fs.ModeDir
+	}
+	return info.Mode().Type() == 0
+}
+
+// leftBy reports whether old is where an update of exe puts its old copy:
+// <dir of exe>/<oldDirPrefix>*/<name of exe>, in a plain directory.
+func leftBy(old, exe string) bool {
+	oldDir := filepath.Dir(old)
+	return plain(oldDir, true) &&
+		sameDir(filepath.Dir(oldDir), filepath.Dir(exe)) &&
 		strings.HasPrefix(filepath.Base(oldDir), oldDirPrefix) &&
 		sameName(filepath.Base(old), filepath.Base(exe))
+}
+
+// stagedBy reports whether staged is a file an update of exe stages its
+// new binary in: <dir of exe>/new-*-<name of exe>, a regular file.
+func stagedBy(staged, exe string) bool {
+	base, want := filepath.Base(staged), "-"+filepath.Base(exe)
+	return strings.HasPrefix(base, stagedPrefix) && len(base) > len(stagedPrefix)+len(want) &&
+		strings.HasSuffix(strings.ToLower(base), strings.ToLower(want)) &&
+		sameDir(filepath.Dir(staged), filepath.Dir(exe)) && plain(staged, false)
 }
 
 // sameName compares paths as the system does: without regard to case on

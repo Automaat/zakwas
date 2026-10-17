@@ -238,6 +238,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return code
 		}
 		defer func() { _ = held.Release() }()
+		cleanSelfUpdateLeftovers(env, env.goos(), errOut)
 	}
 
 	if cmd == "upgrade" {
