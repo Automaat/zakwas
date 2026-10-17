@@ -303,6 +303,8 @@ defaults:
 		{"reports all errors", `
 links: [{src: a}]
 commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
+		{"unknown command shell", "commands: [{name: n, check: x, run: y, shell: fish}]", []string{`commands[0]: unknown shell "fish" (want sh, bash, cmd, powershell, pwsh)`}},
+		{"cmd takes one line", "commands: [{name: n, check: \"a\\nb\", run: y, shell: cmd}]", []string{"commands[0]: shell cmd runs a single line"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -954,6 +956,41 @@ system: {sudoTouchID: true}
 				if !strings.Contains(lines[i], w) || !strings.Contains(lines[i], platform.DocsAnchor) {
 					t.Errorf("line %d = %q, want %q pointing at %s", i, lines[i], w, platform.DocsAnchor)
 				}
+			}
+		})
+	}
+}
+
+func TestCommandShellsAreValidatedOnEveryOS(t *testing.T) {
+	ok := `commands:
+  - {name: a, check: x, run: y}
+  - {name: b, check: x, run: y, shell: sh}
+  - {name: c, check: x, run: y, shell: bash}
+  - {name: d, check: x, run: y, shell: pwsh}
+  - {name: e, check: x, run: y, shell: powershell}
+  - {name: f, check: x, run: y, shell: cmd}
+  - name: g
+    check: |
+      echo one
+    run: echo two
+    shell: cmd
+  - name: h
+    check: "echo one\n  \t\n\n"
+    run: "echo two   \n \n"
+    shell: cmd
+`
+	for _, goos := range []string{platform.Darwin, platform.Linux, platform.Windows} {
+		t.Run(goos, func(t *testing.T) {
+			cfg, err := LoadFor(writeConfig(t, ok), testutil.Abs("/h"), goos)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, c := range cfg.Commands {
+				got = append(got, c.Shell)
+			}
+			if want := []string{"", "sh", "bash", "pwsh", "powershell", "cmd", "cmd", "cmd"}; !slices.Equal(got, want) {
+				t.Errorf("shells = %q, want %q", got, want)
 			}
 		})
 	}

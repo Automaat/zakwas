@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,7 +60,7 @@ func invoke(env Env, stdin string, args ...string) result {
 }
 
 var linksOnly, linkModule = func() (string, string) {
-	if runtime.GOOS == "windows" {
+	if testutil.SymlinkDenied() != nil {
 		return "files: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "files"
 	}
 	return "links: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "links"
@@ -213,7 +212,7 @@ func TestPlanFailureDoesNotBlockOtherModules(t *testing.T) {
 }
 
 func TestCorruptStateFailsOnlyFileModules(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture needs the links module (symlinks) next to files")
+	testutil.RequireSymlinks(t)
 	env, home := setup(t, linksOnly+"files: [{src: dotfiles/zshrc, dst: ~/.zshenv}]\n")
 	statePath := filepath.Join(home, ".local/state/zakwas/files.json")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
@@ -482,7 +481,7 @@ func TestNoWaitOnlyWorksWithApplyAndUpgrade(t *testing.T) {
 }
 
 func TestConcurrentAppliesEndLikeSequentialOnes(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
+	testutil.RequireSymlinks(t)
 	env, home := setup(t, `commands:
   - name: once
     check: test -e marker
@@ -569,7 +568,7 @@ func TestNestedApplyFailsInsteadOfWaitingOnItsParent(t *testing.T) {
 }
 
 func TestCommandsSeeTheRunLockHolder(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
+	testutil.RequireSymlinks(t)
 	env, home := setup(t, `commands:
   - name: who
     check: test -e holder

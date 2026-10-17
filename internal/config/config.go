@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -122,11 +123,25 @@ type SSHKey struct {
 	Comment string `yaml:"comment" jsonschema_description:"Key comment ('ssh-keygen -C'), usually your email."`
 }
 
-// Command runs Run through sh whenever Check (also through sh) fails.
+// Shells a command can name. Unset means sh, or PowerShell on Windows.
+const (
+	ShellSh         = "sh"
+	ShellBash       = "bash"
+	ShellCmd        = "cmd"
+	ShellPowerShell = "powershell"
+	ShellPwsh       = "pwsh"
+)
+
+// Shells lists the values of Command.Shell.
+var Shells = []string{ShellSh, ShellBash, ShellCmd, ShellPowerShell, ShellPwsh}
+
+// Command runs Run through a shell whenever Check (through the same shell)
+// fails.
 type Command struct {
 	Name  string `yaml:"name" jsonschema:"required,minLength=1" jsonschema_description:"Label shown in plan and apply output."`
-	Check string `yaml:"check" jsonschema:"required,minLength=1" jsonschema_description:"Shell snippet (run with sh in your home directory) that exits 0 when the step is already done. Times out after 30s."`
-	Run   string `yaml:"run" jsonschema:"required,minLength=1" jsonschema_description:"Shell snippet (run with sh in your home directory) executed while 'check' fails. 'check' must pass afterwards, or apply fails."`
+	Check string `yaml:"check" jsonschema:"required,minLength=1" jsonschema_description:"Shell snippet (run in your home directory) that exits 0 when the step is already done. Times out after 30s."`
+	Run   string `yaml:"run" jsonschema:"required,minLength=1" jsonschema_description:"Shell snippet (run in your home directory) executed while 'check' fails. 'check' must pass afterwards, or apply fails."`
+	Shell string `yaml:"shell" jsonschema:"enum=sh,enum=bash,enum=cmd,enum=powershell,enum=pwsh" jsonschema_description:"Shell for 'check' and 'run': sh, bash, cmd, powershell (Windows PowerShell 5.1) or pwsh (PowerShell 7). Default: sh on macOS and Linux; on Windows pwsh when it is on PATH, else powershell. cmd runs a single line. The plan fails when the shell is not installed."`
 }
 
 // Load reads and validates the config at path; home expands "~" in
@@ -308,6 +323,12 @@ func (c *Config) Validate(home string) error {
 		if cmd.Name == "" || cmd.Check == "" || cmd.Run == "" {
 			errs = append(errs, fmt.Errorf("commands[%d]: name, check and run are required", i))
 		}
+		if cmd.Shell != "" && !slices.Contains(Shells, cmd.Shell) {
+			errs = append(errs, fmt.Errorf("commands[%d]: unknown shell %q (want %s)", i, cmd.Shell, strings.Join(Shells, ", ")))
+		}
+		if cmd.Shell == ShellCmd && (multiline(cmd.Check) || multiline(cmd.Run)) {
+			errs = append(errs, fmt.Errorf("commands[%d]: shell cmd runs a single line; put several steps in a .cmd file and call it", i))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -401,7 +422,7 @@ func KeysOverlap(a, b string) bool { return overlaps(a, b) }
 
 func resolvePath(path string) string {
 	resolved := resolveParents(path)
-	if info, err := os.Lstat(resolved); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+	if info, err := os.Lstat(resolved); err == nil && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
 		if target, err := os.Stat(resolved); err == nil && target.IsDir() {
 			if full, err := filepath.EvalSymlinks(resolved); err == nil {
 				return full
@@ -524,4 +545,8 @@ func cutPathPrefix(path, dir string, fold bool) (rest string, ok bool) {
 		return path[len(prefix):], true
 	}
 	return "", false
+}
+
+func multiline(script string) bool {
+	return strings.ContainsAny(strings.TrimRight(script, " \t\r\n"), "\r\n")
 }

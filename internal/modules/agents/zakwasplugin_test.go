@@ -111,7 +111,7 @@ func TestZakwasSkillTeachesTheProposalFlow(t *testing.T) {
 }
 
 func TestZakwasPluginLinksIntoOpencode(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	root := repoRoot(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"zakwas": {Source: root}},

@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -291,7 +290,7 @@ func (in *Installer) ownsPath(dst string) bool {
 			return false
 		}
 		info, err := os.Lstat(dir)
-		if err == nil && isLink(info) {
+		if err == nil && isLink(dir, info) {
 			return false
 		}
 	}
@@ -306,7 +305,7 @@ func CheckParents(paths config.Paths, dst string) error {
 	home := filepath.Clean(paths.Home)
 	for dir := filepath.Dir(filepath.Clean(dst)); ; dir = filepath.Dir(dir) {
 		info, err := os.Lstat(dir)
-		if err == nil && isLink(info) &&
+		if err == nil && isLink(dir, info) &&
 			(within(dir, home) || resolvesInto(dir, paths.Root)) {
 			return fmt.Errorf("parent %s of %s is a symlink; remove it", paths.Pretty(dir), paths.Pretty(dst))
 		}
@@ -314,12 +313,6 @@ func CheckParents(paths config.Paths, dst string) error {
 			return nil
 		}
 	}
-}
-
-// isLink reports a symlink, or on Windows a junction: Go reports a
-// directory junction as irregular, and it redirects a write like a symlink.
-func isLink(info fs.FileInfo) bool {
-	return info.Mode()&fs.ModeSymlink != 0 || runtime.GOOS == "windows" && info.Mode()&fs.ModeIrregular != 0
 }
 
 func within(path, dir string) bool {

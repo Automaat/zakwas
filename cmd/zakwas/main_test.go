@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -20,6 +21,15 @@ func TestMain(m *testing.M) {
 			os.Exit(run())
 		},
 	})
+}
+
+// windowsSessionVars are what every Windows session has and testscript's
+// near-empty environment drops. Windows PowerShell does not start properly
+// without them, as a user's shell always has them.
+var windowsSessionVars = []string{
+	"SystemRoot", "windir", "ComSpec", "PATHEXT", "ProgramData", "ProgramFiles", "ProgramFiles(x86)",
+	"ProgramW6432", "CommonProgramFiles", "ALLUSERSPROFILE", "APPDATA", "LOCALAPPDATA", "PSModulePath",
+	"COMPUTERNAME", "USERNAME", "USERDOMAIN", "OS", "PROCESSOR_ARCHITECTURE", "PUBLIC", "SystemDrive",
 }
 
 // Scripts put fake brew/mise/defaults/sudo binaries first on PATH so the
@@ -44,11 +54,25 @@ func TestScripts(t *testing.T) {
 			env.Setenv("USERPROFILE", home)
 			env.Setenv("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
 			env.Setenv("ZAKWAS_PAM_FILE", filepath.Join(env.WorkDir, "sudo_local"))
+			if runtime.GOOS == "windows" {
+				for _, name := range windowsSessionVars {
+					if v, ok := os.LookupEnv(name); ok {
+						env.Setenv(name, v)
+					}
+				}
+			}
 			return nil
 		},
 		Condition: func(cond string) (bool, error) {
-			if cond == "root" {
+			switch cond {
+			case "root":
 				return os.Geteuid() == 0, nil
+			case "symlink":
+				denied := testutil.SymlinkDenied()
+				if denied != nil && testutil.InCI() {
+					return false, fmt.Errorf("this CI runner can't create symlinks, which its scripts rely on: %w", denied)
+				}
+				return denied == nil, nil
 			}
 			return false, fmt.Errorf("unknown condition %q", cond)
 		},
@@ -58,15 +82,20 @@ func TestScripts(t *testing.T) {
 	})
 }
 
-// linkTo asserts that args[0] is a symlink pointing at args[1].
+// linkTo asserts that args[0] is a symlink, or on Windows a junction,
+// pointing at args[1].
 func linkTo(ts *testscript.TestScript, neg bool, args []string) {
 	if len(args) != 2 {
 		ts.Fatalf("usage: linkto link target")
 	}
-	got, err := os.Readlink(ts.MkAbs(args[0]))
-	ok := err == nil && got == ts.MkAbs(args[1])
+	link := ts.MkAbs(args[0])
+	ok, got := false, ""
+	if info, err := os.Lstat(link); err == nil {
+		target, isLink, err := install.LinkTarget(link, info)
+		got, ok = target, err == nil && isLink && install.SameTarget(link, target, ts.MkAbs(args[1]))
+	}
 	if ok == neg {
-		ts.Fatalf("%s → %q (err %v), want %s", args[0], got, err, ts.MkAbs(args[1]))
+		ts.Fatalf("%s → %q, want %s", args[0], got, ts.MkAbs(args[1]))
 	}
 }
 

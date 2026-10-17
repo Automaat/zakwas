@@ -1,4 +1,4 @@
-[windows] skip 'skills are symlinks, not supported on Windows yet'
+[windows] skip 'it remaps a file:// git URL with sh and golden paths use / (skills link on Windows in the agents unit tests)'
 env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex
 exec sh -c 'git config --global url."file://$WORK/repo".insteadOf https://github.com/owner/skills.git'

@@ -33,10 +33,25 @@ type Cmd struct {
 	// terminal (Exec.Detached): a background group is stopped when it
 	// reads /dev/tty, and without a terminal there is nothing to read.
 	Group bool
+	// Label stands for the command in messages, and in the key a
+	// runnertest.Fake matches, when its real arguments are long or noisy.
+	Label string
+	// CmdLine is, on Windows, the whole command line handed to the process
+	// as is, for programs like cmd.exe that don't parse it the way Go quotes
+	// it. Other systems ignore it.
+	CmdLine string
+	// ConsoleCP, when not zero, is the console output code page the command
+	// runs with, put back once it is done (a kill on timeout included). A
+	// child takes its output encoding from it when it starts. Only Windows
+	// has one, and only with a console attached.
+	ConsoleCP uint32
 }
 
 // String renders the command the way a user would type it.
 func (c Cmd) String() string {
+	if c.Label != "" {
+		return c.Label
+	}
 	return strings.Join(append([]string{c.Name}, c.Args...), " ")
 }
 
@@ -102,6 +117,10 @@ func (e *Exec) Installed(name string) bool {
 func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Cancel = func() error { return interrupt(cmd.Process) }
+	setCmdLine(cmd, c.CmdLine)
+	if c.ConsoleCP != 0 {
+		defer setConsoleCP(c.ConsoleCP)()
+	}
 	grace := cmp.Or(e.Grace, WaitDelay)
 	cmd.WaitDelay = grace
 	if c.Group && !c.Stream && e.Detached {
@@ -154,4 +173,22 @@ func Output(ctx context.Context, r Runner, c Cmd) (string, error) {
 func Check(ctx context.Context, r Runner, c Cmd) error {
 	_, err := Output(ctx, r, c)
 	return err
+}
+
+// switchCodePage sets the console code page to cp (0 from get means there is
+// no console, and nothing is touched) and returns a function that puts the
+// old one back.
+func switchCodePage(get func() uint32, set func(uint32), cp uint32) func() {
+	was := get()
+	if was == 0 {
+		return func() {}
+	}
+	if was != cp {
+		set(cp)
+	}
+	return func() {
+		if get() != was {
+			set(was)
+		}
+	}
 }

@@ -6,7 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"sync"
+	"syscall"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // interrupt kills the command and what it started. A Windows child can't be
@@ -18,6 +22,28 @@ func interrupt(p *os.Process) error {
 		return nil
 	}
 	return p.Kill()
+}
+
+func setCmdLine(cmd *exec.Cmd, line string) {
+	if line != "" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: line}
+	}
+}
+
+var consoleMu sync.Mutex
+
+// setConsoleCP serializes the commands that change the console code page, so
+// one's restore can't land in the middle of another's run.
+func setConsoleCP(cp uint32) func() {
+	consoleMu.Lock()
+	restore := switchCodePage(func() uint32 {
+		cur, _ := windows.GetConsoleOutputCP()
+		return cur
+	}, func(v uint32) { _ = windows.SetConsoleOutputCP(v) }, cp)
+	return func() {
+		restore()
+		consoleMu.Unlock()
+	}
 }
 
 func hasTerminal() bool { return false }

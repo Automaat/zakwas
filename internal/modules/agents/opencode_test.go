@@ -80,7 +80,7 @@ func assertConverged(t *testing.T, m *Module) {
 }
 
 func TestOpencodeLocalMarketplace(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	t.Setenv("OPENCODE_CONFIG_DIR", t.TempDir())
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
@@ -111,7 +111,7 @@ func TestOpencodeLocalMarketplace(t *testing.T) {
 }
 
 func TestOpencodeGitMarketplace(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "Owner/sai#v1"}},
 		Plugins:      []config.Plugin{{ID: "humanize@sai"}},
@@ -170,7 +170,7 @@ func TestOpencodeGitMarketplace(t *testing.T) {
 }
 
 func TestOpencodeFailedFetchKeepsCache(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "https://example.com/gone.git"}},
 		Plugins:      []config.Plugin{{ID: "x@sai"}},
@@ -189,7 +189,7 @@ func TestOpencodeFailedFetchKeepsCache(t *testing.T) {
 }
 
 func TestOpencodePrune(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	for _, prune := range []bool{false, true} {
 		m, _ := newOpencode(t, config.Agents{
 			Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
@@ -248,7 +248,7 @@ func TestOpencodePrune(t *testing.T) {
 }
 
 func TestOpencodeKeepsSkillsOfPendingFetch(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Prune:        true,
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
@@ -269,7 +269,7 @@ func TestOpencodeKeepsSkillsOfPendingFetch(t *testing.T) {
 }
 
 func TestOpencodeLeavesUsersMatchingLinkAlone(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Prune:        true,
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
@@ -293,7 +293,7 @@ func TestOpencodeLeavesUsersMatchingLinkAlone(t *testing.T) {
 }
 
 func TestOpencodePruneNeverDeletesThroughSymlinkedParent(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Prune:        true,
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
@@ -322,7 +322,7 @@ func TestOpencodePruneNeverDeletesThroughSymlinkedParent(t *testing.T) {
 }
 
 func TestOpencodeSkillsDir(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}},
@@ -364,7 +364,7 @@ func TestOpencodeSkillsDirDefaults(t *testing.T) {
 }
 
 func TestOpencodeManifests(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"cdx": {Source: "./cdx"}, "pr": {Source: "./pr"}},
 		Plugins:      []config.Plugin{{ID: "a@cdx"}, {ID: "b@pr"}, {ID: "r@pr"}},
@@ -383,7 +383,7 @@ func TestOpencodeManifests(t *testing.T) {
 }
 
 func TestOpencodePlanErrors(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	for _, tc := range []struct {
 		name, manifest, want string
 		plugins              []config.Plugin
@@ -419,7 +419,7 @@ func TestOpencodePlanErrors(t *testing.T) {
 			manifest: `{"name":"other","plugins":[]}`,
 		},
 		{
-			name: "no manifest", want: "has no .claude-plugin/marketplace.json",
+			name: "no manifest", want: "has no " + filepath.FromSlash(".claude-plugin/marketplace.json"),
 			setup: func(t *testing.T, m *Module, _ *cloneRunner) {
 				if err := os.RemoveAll(filepath.Join(m.Paths.Root, "mp", ".claude-plugin")); err != nil {
 					t.Fatal(err)
@@ -491,7 +491,7 @@ func TestOpencodeImplicitProviderSkippedWhenMissing(t *testing.T) {
 }
 
 func TestOpencodeRefetchConverges(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Prune:        true,
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}, "mp": {Source: "./mp"}},
@@ -528,7 +528,7 @@ func TestOpencodeRefetchConverges(t *testing.T) {
 }
 
 func TestOpencodeConflictAfterFetchLinksNothing(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}, "mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "p@sai"}, {ID: "a@mp"}},
@@ -545,7 +545,7 @@ func TestOpencodeConflictAfterFetchLinksNothing(t *testing.T) {
 }
 
 func TestOpencodePluginOnlyInCodexManifest(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}, {ID: "c@mp"}},
@@ -561,7 +561,7 @@ func TestOpencodePluginOnlyInCodexManifest(t *testing.T) {
 }
 
 func TestOpencodeImplicitProviderSkipsRemotePlugins(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}, {ID: "remote@mp"}},
@@ -585,7 +585,7 @@ func TestOpencodeImplicitProviderSkipsRemotePlugins(t *testing.T) {
 }
 
 func TestOpencodeSkillNamesDifferingInCase(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}, {ID: "b@mp"}},
@@ -610,7 +610,7 @@ func TestOpencodeFetchesOnlyUsedMarketplaces(t *testing.T) {
 }
 
 func TestOpencodePrunesLinksInOldSkillsDir(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Prune:        true,
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
@@ -640,7 +640,7 @@ func TestOpencodePrunesLinksInOldSkillsDir(t *testing.T) {
 }
 
 func TestOpencodeSkillRenamedInCase(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.SkipOnWindows(t, "link targets compare without regard to case there, so a case-only rename keeps the old link name")
 	probe := t.TempDir()
 	writeFile(t, filepath.Join(probe, "Case"), "")
 	if _, err := os.Stat(filepath.Join(probe, "case")); err != nil {
@@ -666,7 +666,7 @@ func TestOpencodeSkillRenamedInCase(t *testing.T) {
 }
 
 func TestOpencodeImplicitProviderSkipsConflicts(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}},
@@ -684,7 +684,7 @@ func TestOpencodeImplicitProviderSkipsConflicts(t *testing.T) {
 }
 
 func TestOpencodeDefaultTargetedPluginsAreBestEffort(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}, "named": {Source: "./named", Providers: []string{config.ProviderOpencode, config.ProviderClaude}}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}, {ID: "b@mp"}, {ID: "n@named"}},
@@ -709,7 +709,7 @@ func TestOpencodeDefaultTargetedPluginsAreBestEffort(t *testing.T) {
 }
 
 func TestOpencodeDeclaredSkillPaths(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}},
@@ -729,7 +729,7 @@ func TestOpencodeDeclaredSkillPaths(t *testing.T) {
 }
 
 func TestOpencodeDefaultTargetedFetchFailureSkips(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "owner/private.git"}, "mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "x@sai"}, {ID: "a@mp"}},
@@ -763,7 +763,7 @@ func TestOpencodeDefaultTargetedFetchFailureSkips(t *testing.T) {
 }
 
 func TestOpencodeKeepsCacheDeclaredAsLocalSource(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Prune:        true,
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
@@ -785,7 +785,7 @@ func TestOpencodeKeepsCacheDeclaredAsLocalSource(t *testing.T) {
 }
 
 func TestOpencodePluginsSharingARepo(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "docs@mp"}, {ID: "examples@mp"}},
@@ -804,7 +804,7 @@ func TestOpencodePluginsSharingARepo(t *testing.T) {
 }
 
 func TestOpencodeCacheWithoutGitIsRefetched(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
 		Plugins:      []config.Plugin{{ID: "p@sai"}},
@@ -873,7 +873,7 @@ func TestOpencodeRefusesSymlinkedDataDir(t *testing.T) {
 }
 
 func TestOpencodeRefreshFailureOfDefaultTargetedMarketplace(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	for _, named := range []bool{false, true} {
 		m, r := newOpencode(t, config.Agents{
 			Marketplaces: map[string]config.Marketplace{"sai": {Source: "o/sai"}},
@@ -905,7 +905,7 @@ func TestOpencodeRefreshFailureOfDefaultTargetedMarketplace(t *testing.T) {
 }
 
 func TestOpencodeIgnoresSkillsEscapingThroughSymlinks(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}, {ID: "out@mp"}},
@@ -952,7 +952,7 @@ func TestOpencodeRefusesSymlinkedCacheDir(t *testing.T) {
 }
 
 func TestOpencodePrunesWithoutOpencodeInstalled(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
 		Prune:        true,
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
@@ -1007,7 +1007,7 @@ func TestOpencodeFilesFollowXDGConfigHome(t *testing.T) {
 }
 
 func TestOpencodeSkillsMoveWhenSkillsDirChanges(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
 		Plugins:      []config.Plugin{{ID: "a@mp"}},

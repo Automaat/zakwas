@@ -124,22 +124,22 @@ zakwas runs on macOS, Linux and, in part, Windows. Each section below is support
 |---|---|---|---|---|
 | `system` | yes | yes | no | `dirs` and `sshKey` work on macOS and Linux; Windows has no file modes to set yet; see `system.sudoTouchID` below |
 | `files` | yes | yes | yes | |
-| `links` | yes | yes | no | symlinks need a privilege Windows users lack by default and have no fallback yet; use `files` there |
+| `links` | yes | yes | yes | symlinks; on Windows they need Developer Mode or an elevated account, and a directory link falls back to a junction; see [Links on Windows](#links-on-windows) |
 | `templates` | yes | yes | yes | |
 | `brew` | yes | no | no | bootstraps Homebrew for macOS and manages casks |
 | `mise` | yes | no | no | its bootstrap installs the macOS build of mise; on Linux install mise yourself and use `commands` or a `files` entry for its config; Windows has no bootstrap yet |
 | `agents` | yes | yes | yes | paths follow `$HOME` (`%USERPROFILE%` on Windows), `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$XDG_CONFIG_HOME` and the other variables the agents read |
-| `commands` | yes | yes | no | `sh -c` in your home directory; Windows has no `sh` |
+| `commands` | yes | yes | yes | `sh -c` in your home directory; on Windows PowerShell, or the `shell` you name |
 | `launchd` | yes | no | no | launchd is macOS's service manager |
 | `defaults` | yes | no | no | drives the macOS `defaults` tool |
 
 | Option | macOS | Linux | Windows | Why |
 |---|---|---|---|---|
 | `system.sudoTouchID` | yes | no | no | Touch ID and `pam_tid.so` are macOS only; rejected elsewhere |
-| `agents.skills` | yes | yes | no | skills are linked with symlinks, which Windows does not support yet |
+| `agents.skills` | yes | yes | yes | skills are linked; the Windows link rules apply |
 | `protect.immutable` | yes | fallback | fallback | the `uchg` flag is macOS only; elsewhere files stay read-only copies (`0444` on Linux, the read-only attribute on Windows, tracked by hash) and the plan warns once |
 
-On Windows, parts of `agents` also wait for symlinks or `sh` and fail the plan of just that provider or feature: the plugin skills opencode links, opencode's command hooks plugin and the Gemini extension link. See [agents.md](agents.md#windows).
+On Windows, the part of `agents` that runs `sh` (opencode's command hooks plugin) fails the plan of just that provider or feature. See [agents.md](agents.md#windows).
 
 `--only` with a module the system does not support fails with the same error. Shell completion offers only the modules that run on the current system. File name comparisons (overlapping destinations, skill names) stay case-insensitive on Linux, which is stricter than its file systems need: two names that differ only in case are rejected on both systems.
 
@@ -193,6 +193,16 @@ An existing file at `dst` is backed up before the link replaces it. zakwas refus
 links:
   - {src: dotfiles/ssh/config, dst: ~/.ssh/config}
 ```
+
+### Links on Windows
+
+Windows creates a symbolic link only for an account with the right to (Developer Mode on, an elevated shell, or `SeCreateSymbolicLinkPrivilege` granted). zakwas tries a symlink first. A link to a **directory** falls back to a junction, which needs no privilege. A link to a **file** has no such substitute (a hard link or a copy would drift from the repo), so without the right the plan of a new file link fails with one line that says how to turn it on:
+
+```text
+cannot create symbolic links on Windows: turn on Developer Mode, run zakwas as administrator, or grant your account SeCreateSymbolicLinkPrivilege (directory links also try a junction, file links have no substitute)
+```
+
+The same rule covers `agents.skills`, the skills opencode links from plugins, the Gemini extension link (a directory link) and anything else zakwas links. zakwas asks once per run, by creating a probe link in a temporary directory, and only when a plan needs a new or changed link; links that are already right keep `plan` and `check` clean on an account without the right. Junctions and symlinks are both recognized as links when zakwas looks at `dst`, compared without regard to case, drive-letter spelling or `\\?\` prefixes. 8.3 short names (`C:\PROGRA~1`) are not expanded, so a link written with one compares unequal to the long path and is relinked once. A junction must point at a directory on a local drive. Other reparse points, such as OneDrive placeholders, are not links. Link destinations on a drive other than the temporary directory's are not probed separately: a refusal there shows up when the link is created.
 
 ## templates
 
@@ -795,14 +805,39 @@ Guarded one-off setup steps. Entries run in order; the first failing one stops t
 | `name` | string | yes | Label shown in plan and apply output. |
 | `check` | string | yes | Shell snippet that exits 0 when the step is already done. |
 | `run` | string | yes | Shell snippet executed while `check` fails. |
+| `shell` | string | no | `sh`, `bash`, `cmd`, `powershell` or `pwsh`. Default: `sh`; on Windows `pwsh` when it is on `PATH`, else `powershell`. |
 
-Both run with `sh -c` in your home directory. `check` runs during `plan` and `check` too, so it must not change anything; it times out after 30 seconds. After `run`, `check` runs again and must pass, or apply fails. `--diff` shows the scripts in the plan.
+Both run in your home directory with the entry's shell: `sh -c` unless `shell` says otherwise, PowerShell by default on Windows. `check` runs during `plan` and `check` too, so it must not change anything; it times out after 30 seconds. After `run`, `check` runs again and must pass, or apply fails. `--diff` shows the scripts in the plan.
 
 ```yaml
 commands:
   - name: rosetta
     check: /usr/bin/pgrep -q oahd
     run: softwareupdate --install-rosetta --agree-to-license
+```
+
+zakwas does not translate scripts between shells: the text of `check` and `run` is yours, so a config shared between macOS and Windows keeps separate entries (or separate files) for each. A shell that is not installed fails the plan with a one-line message naming it. `bash` on Windows needs a `bash` on `PATH`, such as Git for Windows (the `bash.exe` in `System32` starts WSL, a different machine); `cmd` is Windows only.
+
+### Shells on Windows
+
+- **PowerShell** (`pwsh` for PowerShell 7, `powershell` for Windows PowerShell 5.1) gets your snippet as is, as the text of `-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command` (the policy flag on Windows only), so no profile is read, nothing prompts (a `Read-Host` fails instead of waiting) and the script policy does not matter. Nothing is added to the text, so it parses and runs exactly as in a plain `pwsh -Command`: `param()`, named blocks, `using` and `#requires` behave as there. What zakwas does differently is the environment only: `POWERSHELL_TELEMETRY_OPTOUT=1` (it never turns telemetry on for you), `NO_COLOR=1` (PowerShell 7.2+ then writes output and errors without ANSI colour codes; 5.1 has none), and, on Windows with a console, the console's output code page set to UTF-8 for the step and put back when it ends, also after `exit`, `throw` or a kill on timeout. PowerShell takes its output encoding from that code page when it starts, so with no console (a service, some CI runners) the output keeps the system code page. `$OutputEncoding`, which PowerShell uses when it pipes text to a native program, is not touched, and it is ASCII in Windows PowerShell 5.1: set it in the snippet if you pipe non-ASCII text. PowerShell keeps its usual cache under `~/.cache/powershell` and `~/.local/share/powershell` (the profile folders on Windows).
+- **Exit code of a PowerShell step** is the one plain `pwsh -Command` gives, nothing more: `exit N` gives N; `throw` and a syntax error give 1; otherwise 0 when `$?` is true after the last statement and 1 when it is false. So a failing last native command gives 1, not its own code, and an expression that merely prints `False`, or a function call whose inner cmdlet failed, gives 0. A native command's code travels only when the snippet says so: `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`. Write a check as a condition: `if (-not (Test-Path ~/.tool)) { exit 1 }`.
+- **cmd** runs as `cmd /d /s /c "<line>"`: no `AutoRun` commands and the line exactly as written inside the outer quotes. It runs one line (trailing blank lines are ignored), so a multi-line `check` or `run` is rejected when the config loads; put several steps in a `.cmd` file managed by `files` and call it. Its exit code is the last command's. The rules that bite: `%NAME%` is always expanded, and a variable that is not set stays as `%NAME%`, with no way to escape a percent sign on a command line; `& | < > ( ) ^` are cmd's own, so escape one you mean literally with `^` (`echo a^&b`); `&` chains commands, `&&` runs the next only after success; quotes stay part of what `echo` prints, and a program path with spaces needs its own quotes (`"%USERPROFILE%\my tools\x.cmd" arg`).
+- Length: on Windows a command line holds at most 32,766 characters (counted as Windows will quote it) and `cmd.exe` itself stops at 8,191; on Linux one argument holds at most 131,071 bytes, so a long snippet fails the plan with one line instead of the system's "argument list too long". Put a long script in a file that `files` manages and call it (`& ./script.ps1`, or a `.cmd` file for `cmd`).
+- Cancelling a run (a timeout, Ctrl+C) kills the shell and everything it started.
+
+```yaml
+commands:
+  - name: scoop
+    shell: pwsh
+    check: if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) { exit 1 }
+    run: |
+      Invoke-RestMethod https://get.scoop.sh | Invoke-Expression
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  - name: marker
+    shell: cmd
+    check: if exist "%USERPROFILE%\.zakwas-marker" (exit /b 0) else (exit /b 1)
+    run: echo done > "%USERPROFILE%\.zakwas-marker"
 ```
 
 ## launchd

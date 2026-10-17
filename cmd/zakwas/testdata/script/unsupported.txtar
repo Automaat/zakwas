@@ -1,4 +1,4 @@
-[windows] skip 'its valid config uses links, which need symlinks'
+[!symlink] skip 'its valid config links a file, which needs symlink rights on Windows'
 env ZAKWAS_TEST_GOOS=linux
 
 ! zakwas plan

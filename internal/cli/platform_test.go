@@ -42,7 +42,7 @@ func TestModulesBuiltPerPlatform(t *testing.T) {
 	}{
 		{platform.Darwin, []string{"system", "files", "links", "templates", "brew", "mise", "agents", "commands", "launchd", "defaults"}},
 		{platform.Linux, []string{"system", "files", "links", "templates", "agents", "commands"}},
-		{platform.Windows, []string{"files", "templates", "agents"}},
+		{platform.Windows, []string{"files", "links", "templates", "agents", "commands"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {
@@ -119,7 +119,7 @@ func TestLinuxOnlyNamesAnUnsupportedModule(t *testing.T) {
 }
 
 func TestLinuxImmutableWarnsOnceAndStaysClean(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture needs the links module (symlinks) next to files")
+	testutil.RequireSymlinks(t)
 	env := linuxSetup(t, "protect: {immutable: true}\n"+linksOnly+"files: [{src: dotfiles/zshrc, dst: ~/.config/rc}]\n")
 	plan := invoke(env, "", "plan")
 	if plan.code != ExitOK || strings.Count(plan.stdout, "protect.immutable is macOS-only; files are read-only copies") != 1 {
@@ -282,10 +282,10 @@ func TestWindowsRejectsWhatItCannotRun(t *testing.T) {
 	}{
 		{"brew", "brew: {file: Brewfile}\n", "brew: not supported on Windows"},
 		{"mise", "mise: {config: m.toml}\n", "mise: not supported on Windows"},
-		{"commands", "commands: [{name: n, check: 'true', run: 'true'}]\n", "commands: not supported on Windows (its checks and steps run with sh"},
-		{"links", "links: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "links: not supported on Windows"},
 		{"system dirs", "system: {dirs: [{path: ~/.ssh}]}\n", "system: not supported on Windows"},
-		{"skills", "agents: {skills: [{path: skills/mine}]}\n", "agents.skills: not supported on Windows"},
+		{"launchd", "launchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]\n", "launchd: not supported on Windows"},
+		{"defaults", "defaults: [{domain: d, key: k, value: true}]\n", "defaults: not supported on Windows"},
+		{"touch id", "system: {sudoTouchID: true}\n", "system.sudoTouchID: not supported on Windows"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -319,7 +319,7 @@ func TestOfflineNotCheckedSkipsWhatThePlatformDoesNotHave(t *testing.T) {
 	}{
 		{platform.Darwin, []string{"system", "brew", "mise", "agents", "commands", "launchd", "defaults"}},
 		{platform.Linux, []string{"system", "agents", "commands"}},
-		{platform.Windows, []string{"agents"}},
+		{platform.Windows, []string{"agents", "commands"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {

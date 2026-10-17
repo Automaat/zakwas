@@ -1,6 +1,8 @@
 // Package commands runs guarded shell snippets: `run` executes only while
 // `check` fails. It is the escape hatch for setup no other module covers.
 // Both run from Home, so relative paths don't depend on where zakwas started.
+// A snippet runs with sh, or with PowerShell on Windows, unless the entry
+// names a shell.
 package commands
 
 import (
@@ -11,6 +13,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
@@ -21,10 +24,29 @@ type Module struct {
 	Commands []config.Command
 	Home     string
 	Runner   runner.Runner
+	// GOOS is the operating system the commands run on; empty means this one.
+	GOOS string
 }
 
-func (m *Module) sh(script string) runner.Cmd {
-	return runner.Cmd{Name: "sh", Args: []string{"-c", script}, Dir: m.Home}
+// shellFor is the shell c runs with: its own, else sh, else on Windows
+// pwsh when installed and Windows PowerShell if not.
+func (m *Module) shellFor(c config.Command) string {
+	switch {
+	case c.Shell != "":
+		return c.Shell
+	case m.goos() != platform.Windows:
+		return config.ShellSh
+	case m.Runner.Installed("pwsh"):
+		return config.ShellPwsh
+	}
+	return config.ShellPowerShell
+}
+
+func (m *Module) goos() string {
+	if m.GOOS != "" {
+		return m.GOOS
+	}
+	return platform.Current()
 }
 
 func (m *Module) Name() string { return "commands" }
@@ -47,7 +69,10 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 func (m *Module) satisfied(ctx context.Context, c config.Command) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, CheckTimeout)
 	defer cancel()
-	check := m.sh(c.Check)
+	check, err := m.cmd(c, c.Check)
+	if err != nil {
+		return false, err
+	}
 	check.Group = true
 	res, err := m.Runner.Run(ctx, check)
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -67,7 +92,10 @@ func (m *Module) apply(c config.Command) func(context.Context) error {
 		if err != nil || ok {
 			return err
 		}
-		run := m.sh(c.Run)
+		run, err := m.cmd(c, c.Run)
+		if err != nil {
+			return err
+		}
 		run.Stream = true
 		if err := runner.Check(ctx, m.Runner, run); err != nil {
 			return err

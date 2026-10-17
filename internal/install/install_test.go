@@ -682,7 +682,7 @@ func TestIsLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if isLink(info) {
+	if isLink(dir, info) {
 		t.Error("a plain directory is not a link")
 	}
 }

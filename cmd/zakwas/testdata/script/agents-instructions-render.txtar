@@ -1,4 +1,4 @@
-[windows] skip 'needs symlinks'
+[windows] skip 'the goldens hold / in the paths it renders'
 mkdir claude
 env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex
