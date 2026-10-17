@@ -20,11 +20,11 @@ The checksum alone catches a corrupted or truncated download. It can't catch a t
 
 ### What `install.ps1` checks
 
-Downloads the Windows zip and `checksums.txt` and stops if the zip's SHA256 doesn't match. It does not verify the attestation, so on Windows the checksum only catches a corrupted download, not a tampered release. Verify by hand with `gh attestation verify` as below before you trust a download from a mirror or a release you did not expect.
+The same steps as `install.sh`, for the Windows zip: the SHA256 against `checksums.txt`, then `gh attestation verify` with the same `--repo`, `--signer-workflow` and `--source-ref` when `gh` is installed, logged in and supports `--source-ref`. A failed verification stops the install before anything is copied. Without such a `gh` it prints `Skipped attestation check` with the command to verify by hand (separated by `;`, since Windows PowerShell 5.1 has no `&&`), and a version before 0.4.0 skips the check. Without `gh`, the checksum only catches a corrupted download, not a tampered release. `-BaseUrl` is checked like `ZAKWAS_RELEASE_URL`.
 
 ### What `zakwas self-update` checks
 
-The same steps: SHA256 against `checksums.txt`, then `gh attestation verify` with the same `--repo`, `--signer-workflow` and `--source-ref` when a logged-in `gh` that supports `--source-ref` is installed (skipped, with the manual command printed, otherwise; skipped for versions before 0.4.0). A failed verification leaves the installed binary untouched.
+The same steps: SHA256 against `checksums.txt`, then `gh attestation verify` with the same `--repo`, `--signer-workflow` and `--source-ref` when a logged-in `gh` that supports `--source-ref` is installed (skipped, with the manual command printed, otherwise; skipped for versions before 0.4.0). A failed verification leaves the installed binary untouched. On Windows the attestation is checked on the zip.
 
 ### Verify by hand
 
@@ -73,7 +73,25 @@ The deny rules are the boundary, because the agent's own runtime enforces them. 
 
 Codex, Gemini CLI and Copilot CLI are guarded only when `agents.providers`, a marketplace's or a plugin's `providers` names them. Naming one only in an `mcp`, `skills`, `profiles`, `permissions` or `hooks` entry converges it but leaves it unguarded. A guard that can't cover a managed provider is a warning in `plan`, not a change, so `check` stays clean.
 
-On Windows the Claude and Codex rules deny `zakwas apply` as a Bash command only, and name `zakwas`, not `zakwas.exe`. An agent can run the same command from PowerShell or `cmd`, or as `zakwas.exe`, and no rule stops it; the refusal inside zakwas, which looks for the agent's environment variables, is the only barrier there. Treat the guard as incomplete on Windows until the PowerShell and `cmd` rules land.
+#### Windows
+
+On a Windows host the deny rules also name `zakwas.exe`, and Claude Code gets them for its PowerShell tool as well as for Bash. Claude's Bash tool runs in Git Bash, its PowerShell tool in PowerShell, and a rule for one doesn't reach the other. The rules are:
+
+| Agent | Rules on Windows |
+|---|---|
+| Claude Code | the `Bash(…)` rules, plus the same patterns as `PowerShell(…)` rules, plus `PowerShell(& zakwas …)`; the names are `zakwas`, `*/zakwas`, `*zakwas.exe`, `*zakwas.exe"` and `*zakwas.exe'`, each bare and after a flag. The `Edit(…)` rule for a repo on another drive is `Edit(//d/repo/**)` |
+| Codex | `forbidden` rules for `zakwas` and for `zakwas.exe` |
+| opencode | the same patterns as Claude's `Bash(…)` rules, through `agentPermissions` |
+| Gemini CLI | the regex reads `zakwas.exe`, forward and back slashes in the path, a path quoted as a whole, and PowerShell's `&` |
+| Copilot CLI | none, as everywhere |
+
+What the docs of the agents confirm, and what they leave open. None of it has been run on a Windows machine with the agents; zakwas's tests plan the rules as Windows on any host and check their text, and the `windows` CI job runs the unit tests there.
+
+- Confirmed by [Claude Code's documentation](https://code.claude.com/docs/en/permissions): `PowerShell(…)` rules have the shape of `Bash(…)` rules, match case-insensitively, canonicalize aliases and check each subcommand of a compound command; Windows paths are normalized to POSIX form before a path rule is matched (`C:\Users\alice` becomes `/c/Users/alice`, so a rule for `D:\repo` is `//d/repo/**`); and when Git Bash is installed, deny rules for `Bash` alone switch the PowerShell tool off, while a scoped `PowerShell(…)` rule keeps it on. The second point means the PowerShell rules are now what stands between an agent and `zakwas.exe apply` in that tool: if one fails to match, the tool that used to be off is on.
+- Not confirmed, so the rules hedge: whether `PowerShell(zakwas apply)` matches `zakwas.exe apply`, and how the matcher spells a call with `&`, a quoted path or a path (the docs don't say), which is why the rules also carry `*zakwas.exe` patterns that match the text however it is normalized; whether `\` in a rule is an escape (the patterns avoid it, so `C:\bin\zakwas apply`, a backslash path without `.exe`, is not matched by Claude, Codex or opencode); whether `Bash` rules compare case-sensitively on Windows (`ZAKWAS.EXE apply` may get through there); how Codex and opencode read a path-qualified or quoted command on Windows (Codex matches the first word exactly, so `C:\bin\zakwas.exe apply` is not denied); and which shell opencode and Gemini CLI run on Windows.
+- Not covered anywhere, as on macOS and Linux: a wrapper (`cmd /c`, `powershell -Command "zakwas apply"`, `Start-Process`, a `.bat` or `.ps1` script, a PTY), an alias or a copy of the binary under another name. The rules over-deny a command that merely contains `zakwas.exe apply …` after other words, such as a commit message.
+
+The refusal inside zakwas looks for the agent's environment variables on every system, and doesn't depend on any of this.
 
 ### Proposals and who may approve
 
