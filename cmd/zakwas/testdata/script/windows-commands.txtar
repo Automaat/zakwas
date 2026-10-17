@@ -8,7 +8,7 @@ stdout 'Windows PowerShell'
 
 zakwas apply -y --only commands
 exists home/marker.txt
-exists home/cmd marker.txt
+exists 'home/cmd marker.txt'
 exists home/legacy.txt
 
 zakwas check --only commands
