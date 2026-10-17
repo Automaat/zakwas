@@ -20,7 +20,7 @@ What it manages:
 
 On Linux, the agents module, files, links, templates, commands and system `dirs`/`sshKey` work; the rest is macOS only. See [Linux](#linux).
 
-![zakwas plan, apply, and a protected dotfile](docs/demo/demo.gif)
+![zakwas plan and apply, a tampered dotfile caught by check, and an agent proposal a person approves](docs/demo/demo.gif)
 
 *Zakwas* is Polish for sourdough starter: keep it, feed it, and every new loaf comes out the same.
 

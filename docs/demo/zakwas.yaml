@@ -9,6 +9,19 @@ templates:
     email: you@example.com
   files:
     - {src: dotfiles/gituser.tmpl, dst: ~/.config/git/user}
+agents:
+  providers: [claude, codex]
+  instructions: agents/AGENTS.md
+  mcp:
+    docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
+  skills:
+    - agents/skills/review
+  profiles:
+    review:
+      description: Read-only change review
+      prompt: agents/review.md
+      edit: deny
+      shell: ask
 commands:
   - name: projects dir
     check: test -d Projects
