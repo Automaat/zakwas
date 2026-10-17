@@ -52,33 +52,31 @@ func runPowerShell(t *testing.T, shell, script string) runner.Result {
 	return res
 }
 
+// TestPowerShellExitCodes pins what docs/config.md promises: the exit code
+// of a plain pwsh -Command, where a failing last statement is 1 and a native
+// command's own code only travels when the script says so.
 func TestPowerShellExitCodes(t *testing.T) {
+	passOn := "\nif ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
 	tests := []struct {
 		name, script string
 		want         int
 	}{
 		{"success", "Write-Output ok", 0},
 		{"a native failure, then a cmdlet that works", nativeExit(5) + "\nWrite-Output done", 0},
-		{"a native failure as the last statement", "Write-Output start\n" + nativeExit(5), 5},
-		{"a native failure after a cmdlet failure", missingPath + " -ErrorAction SilentlyContinue\n" + nativeExit(6), 6},
+		{"a native failure as the last statement is 1", "Write-Output start\n" + nativeExit(5), 1},
+		{"a native failure passed on", nativeExit(5) + passOn, 5},
+		{"a native success passed on", nativeExit(0) + passOn, 0},
 		{"a cmdlet failure after a native failure", nativeExit(5) + "\n" + missingPath, 1},
-		{"a cmdlet failure after a native success", nativeExit(0) + "\n" + missingPath, 1},
-		{"a cmdlet failure alone", missingPath, 1},
-		{"a failure inside an if, after a native failure", nativeExit(5) + "\nif ($true) { " + missingPath + " }", 1},
-		{"a native failure behind a pipeline stage that works", nativeExit(7) + " | Out-Null", 7},
-		{"an expression error after a native failure", nativeExit(5) + "\n1/0", 1},
+		{"a cmdlet failure", missingPath, 1},
 		{"exit", "exit 7", 7},
-		{"exit after a native failure", nativeExit(5) + "\nexit 0", 0},
 		{"throw", "throw 'boom'", 1},
-		{"throw after a native failure", nativeExit(5) + "\nthrow 'boom'", 1},
 		{"a syntax error", "if (", 1},
 		{"false as the last statement", "$false", 0},
-		{"a native failure, then false", nativeExit(5) + "\n$false", 0},
 		{"return", "return", 0},
-		{"a trailing comment", nativeExit(5) + " # fails", 5},
-		{"the old code stays readable", nativeExit(3) + "\nWrite-Output x\nif ($LASTEXITCODE -eq 3) { exit 0 } else { exit 9 }", 0},
-		{"a script that reads LASTEXITCODE as null first", "if ($null -eq $LASTEXITCODE -or $LASTEXITCODE -eq 0) { exit 0 } else { exit 9 }", 0},
-		{"a function that fails leaves $? true, as in plain pwsh", nativeExit(5) + "\nfunction f { " + missingPath + " }\nf", 0},
+		{"LASTEXITCODE reset by the script", "$LASTEXITCODE = 0\n" + nativeExit(2) + "\nif ($LASTEXITCODE -ne 0) { exit 1 }", 1},
+		{"LASTEXITCODE set to null under Stop", "$ErrorActionPreference = 'Stop'\n$LASTEXITCODE = $null\nWrite-Output ok", 0},
+		{"Stop with strict mode and no native command", "$ErrorActionPreference = 'Stop'\nSet-StrictMode -Version Latest\nWrite-Output ok", 0},
+		{"a runtime-built break", "Invoke-Command { iex ('br' + 'eak') }", 1},
 	}
 	eachPowerShell(t, func(t *testing.T, shell string) {
 		for _, tt := range tests {
@@ -121,16 +119,6 @@ func TestPowerShellNeverPrompts(t *testing.T) {
 
 		if res.ExitCode == 0 {
 			t.Errorf("exit 0; a prompt must fail, not wait")
-		}
-	})
-}
-
-func TestPowerShellRunsTheScriptInTheCallersScope(t *testing.T) {
-	eachPowerShell(t, func(t *testing.T, shell string) {
-		res := runPowerShell(t, shell, "$x = 41\nfunction f { $x + 1 }\nWrite-Output (f)")
-
-		if strings.TrimSpace(res.Stdout) != "42" {
-			t.Errorf("stdout = %q", res.Stdout)
 		}
 	})
 }

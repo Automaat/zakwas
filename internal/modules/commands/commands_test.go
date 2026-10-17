@@ -162,27 +162,41 @@ func TestShellChoice(t *testing.T) {
 
 func TestPowerShellInvocation(t *testing.T) {
 	m := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Windows}
-	script := "using namespace System.Text\nWrite-Output 'a \"b\"'\n} ; exit 0 ; . {"
+	script := "Write-Output 'a \"b\"'\n} ; exit 0 ; . {"
 
 	got, err := m.cmd(config.Command{Name: "n"}, script)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psWrapper}
+	want := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psSettings + ";" + script}
 	if !slices.Equal(got.Args, want) {
-		t.Fatalf("args = %q, want %q: the script travels as data, never inside the command line", got.Args, want)
+		t.Fatalf("args = %q, want %q: the script is the command's own text, after one line of settings", got.Args, want)
 	}
-	if strings.Contains(psWrapper, "using namespace") || strings.Contains(strings.Join(got.Args, " "), "exit 0 ; .") {
-		t.Error("the user's text is spliced into the wrapper")
+	if !slices.Contains(got.Env, "POWERSHELL_TELEMETRY_OPTOUT=1") {
+		t.Errorf("env = %q; want the telemetry opt-out", got.Env)
 	}
-	if !slices.Contains(got.Env, psScriptVar+"="+script) || !slices.Contains(got.Env, "POWERSHELL_TELEMETRY_OPTOUT=1") {
-		t.Errorf("env = %q; want the script and the telemetry opt-out", got.Env)
-	}
-	if got.Label != "pwsh -Command using namespace System.Text…" {
+	if got.Label != "pwsh -Command Write-Output 'a \"b\"'…" {
 		t.Errorf("label = %q", got.Label)
 	}
 	if got.CmdLine != "" || !got.KeepConsoleCP {
 		t.Errorf("CmdLine = %q, KeepConsoleCP = %v", got.CmdLine, got.KeepConsoleCP)
+	}
+}
+
+func TestPowerShellScriptWithUsingRunsUntouched(t *testing.T) {
+	tests := []string{
+		"using namespace System.Text\nGet-Date",
+		"<# a note #>\nusing namespace System.Text",
+		"# note\n\nUSING\tmodule Foo",
+		"using namespace X; Get-Date",
+	}
+	for _, script := range tests {
+		if got := psScript(script); got != script {
+			t.Errorf("psScript(%q) = %q; a using statement must stay first", script, got)
+		}
+	}
+	if got := psScript("Get-Date"); got != psSettings+";Get-Date" {
+		t.Errorf("psScript = %q", got)
 	}
 }
 
@@ -318,7 +332,8 @@ func TestShNotInstalled(t *testing.T) {
 
 func TestLongScriptsFailThePlanWithOneLine(t *testing.T) {
 	win := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Windows}
-	unix := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Linux}
+	linux := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Linux}
+	mac := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Darwin}
 	tests := []struct {
 		name   string
 		m      *Module
@@ -326,16 +341,16 @@ func TestLongScriptsFailThePlanWithOneLine(t *testing.T) {
 		script string
 		want   string
 	}{
-		{"pwsh at the Windows limit", win, "pwsh", strings.Repeat("a", maxWindowsEnvVar-len(psScriptVar+"=")), ""},
-		{"pwsh over the Windows limit", win, "pwsh", strings.Repeat("a", maxWindowsEnvVar-len(psScriptVar+"=")+1), "big: the pwsh script is 32767 characters, over the 32766 one environment variable holds"},
-		{"pwsh counts UTF-16 units", win, "powershell", strings.Repeat("😀", 16400), "big: the powershell script is "},
-		{"pwsh on Linux", unix, "pwsh", strings.Repeat("a", maxUnixEnvVar+1), "big: the pwsh script is 131072 bytes"},
-		{"pwsh on Linux is fine well past the Windows limit", unix, "pwsh", strings.Repeat("a", 100000), ""},
+		{"pwsh over the Windows limit", win, "pwsh", strings.Repeat("a", 33000), "big: the pwsh command line is "},
+		{"pwsh within the Windows limit", win, "pwsh", strings.Repeat("a", 30000), ""},
 		{"cmd over 8191", win, "cmd", strings.Repeat("a", 8200), "big: the cmd line is "},
 		{"cmd at the limit", win, "cmd", strings.Repeat("a", maxCmdLine-len(`cmd.exe /d /s /c ""`)), ""},
 		{"bash over the arguments limit", win, "bash", strings.Repeat("a b ", 9000), "big: the bash command line is "},
 		{"bash with many backslashes is not counted twice", win, "bash", strings.Repeat(`\`, 17000), ""},
-		{"sh on Linux has no such limit", unix, "sh", strings.Repeat("a b ", 90000), ""},
+		{"pwsh on Linux at the limit", linux, "pwsh", strings.Repeat("a", maxLinuxArg-len(psSettings+";")), ""},
+		{"pwsh on Linux over the limit", linux, "pwsh", strings.Repeat("a", maxLinuxArg-len(psSettings+";")+1), "big: the pwsh script is 131072 bytes, over the 131071 Linux allows in one argument"},
+		{"sh on Linux over the limit", linux, "sh", strings.Repeat("a", maxLinuxArg+1), "big: the sh script is 131072 bytes"},
+		{"sh on macOS has no such limit", mac, "sh", strings.Repeat("a b ", 90000), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
