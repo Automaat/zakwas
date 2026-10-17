@@ -419,7 +419,7 @@ func TestOpencodePlanErrors(t *testing.T) {
 			manifest: `{"name":"other","plugins":[]}`,
 		},
 		{
-			name: "no manifest", want: "has no .claude-plugin/marketplace.json",
+			name: "no manifest", want: "has no " + filepath.FromSlash(".claude-plugin/marketplace.json"),
 			setup: func(t *testing.T, m *Module, _ *cloneRunner) {
 				if err := os.RemoveAll(filepath.Join(m.Paths.Root, "mp", ".claude-plugin")); err != nil {
 					t.Fatal(err)
@@ -640,7 +640,7 @@ func TestOpencodePrunesLinksInOldSkillsDir(t *testing.T) {
 }
 
 func TestOpencodeSkillRenamedInCase(t *testing.T) {
-	testutil.RequireSymlinks(t)
+	testutil.SkipOnWindows(t, "link targets compare without regard to case there, so a case-only rename keeps the old link name")
 	probe := t.TempDir()
 	writeFile(t, filepath.Join(probe, "Case"), "")
 	if _, err := os.Stat(filepath.Join(probe, "case")); err != nil {

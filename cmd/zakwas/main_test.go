@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -20,6 +21,15 @@ func TestMain(m *testing.M) {
 			os.Exit(run())
 		},
 	})
+}
+
+// windowsSessionVars are what every Windows session has and testscript's
+// near-empty environment drops. Windows PowerShell does not start properly
+// without them, as a user's shell always has them.
+var windowsSessionVars = []string{
+	"SystemRoot", "windir", "ComSpec", "PATHEXT", "ProgramData", "ProgramFiles", "ProgramFiles(x86)",
+	"ProgramW6432", "CommonProgramFiles", "ALLUSERSPROFILE", "APPDATA", "LOCALAPPDATA", "PSModulePath",
+	"COMPUTERNAME", "USERNAME", "USERDOMAIN", "OS", "PROCESSOR_ARCHITECTURE", "PUBLIC", "SystemDrive",
 }
 
 // Scripts put fake brew/mise/defaults/sudo binaries first on PATH so the
@@ -44,6 +54,13 @@ func TestScripts(t *testing.T) {
 			env.Setenv("USERPROFILE", home)
 			env.Setenv("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
 			env.Setenv("ZAKWAS_PAM_FILE", filepath.Join(env.WorkDir, "sudo_local"))
+			if runtime.GOOS == "windows" {
+				for _, name := range windowsSessionVars {
+					if v, ok := os.LookupEnv(name); ok {
+						env.Setenv(name, v)
+					}
+				}
+			}
 			return nil
 		},
 		Condition: func(cond string) (bool, error) {

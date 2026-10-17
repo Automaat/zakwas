@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,7 +60,7 @@ func invoke(env Env, stdin string, args ...string) result {
 }
 
 var linksOnly, linkModule = func() (string, string) {
-	if runtime.GOOS == "windows" {
+	if testutil.SymlinkDenied() != nil {
 		return "files: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "files"
 	}
 	return "links: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "links"

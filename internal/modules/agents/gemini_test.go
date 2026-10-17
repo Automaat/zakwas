@@ -321,7 +321,7 @@ func TestGeminiGuardOffWritesNoGuardRules(t *testing.T) {
 }
 
 func TestGeminiIsOptIn(t *testing.T) {
-	testutil.RequireSymlinks(t)
+	testutil.SkipOnWindows(t, "the default providers include opencode, whose command hooks plugin runs /bin/sh")
 	for _, providers := range [][]string{nil, {config.ProviderClaude, config.ProviderCodex, config.ProviderOpencode}} {
 		a := geminiConfig(t)
 		m, r := newGemini(t, a)

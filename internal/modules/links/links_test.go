@@ -89,7 +89,7 @@ func TestLinks(t *testing.T) {
 				}
 			},
 			wantAction: engine.Update,
-			wantDetail: "relink /nix/store/abc-home-manager-files/.zshrc",
+			wantDetail: "relink " + filepath.FromSlash("/nix/store/abc-home-manager-files/.zshrc"),
 		},
 		{
 			name:       "regular file is backed up",
