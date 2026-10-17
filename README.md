@@ -18,7 +18,7 @@ What it manages:
 - **commands**: guarded one-off steps (`run` only while `check` fails)
 - **launchd**: scheduled jobs as user agents
 
-![zakwas plan, apply, and a protected dotfile](docs/demo/demo.gif)
+![zakwas plan and apply, a tampered dotfile caught by check, and an agent proposal a person approves](docs/demo/demo.gif)
 
 *Zakwas* is Polish for sourdough starter: keep it, feed it, and every new loaf comes out the same.
 
