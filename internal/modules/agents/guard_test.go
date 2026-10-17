@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -119,7 +120,10 @@ func TestGuardOutsideGitDeniesTheConfigDir(t *testing.T) {
 	m.Paths.Root = t.TempDir()
 	apply(t, plan(t, m))
 	deny := settingsDeny(t, filepath.Join(m.Paths.Home, ".claude", "settings.json"))
-	want := "Edit(/" + filepath.ToSlash(realPath(m.Paths.Root)) + "/**)"
+	want := "Edit(" + claudeAbsPath(filepath.ToSlash(realPath(m.Paths.Root))) + "/**)"
+	if runtime.GOOS == "windows" && !strings.HasPrefix(want, "Edit(//") {
+		t.Errorf("rule %q is not in the //<drive>/ form", want)
+	}
 	if !slices.Contains(deny, want) {
 		t.Errorf("deny lacks %q: %q", want, deny)
 	}

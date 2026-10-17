@@ -135,6 +135,9 @@ func TestAssetName(t *testing.T) {
 
 func TestAssetDefaultsToThisMachine(t *testing.T) {
 	want := "zakwas_1.2.3_" + runtime.GOOS + "_" + runtime.GOARCH + ".tar.gz"
+	if runtime.GOOS == "windows" {
+		want = "zakwas_1.2.3_windows_" + runtime.GOARCH + ".zip"
+	}
 	if got := (&Updater{}).Asset("1.2.3"); got != want {
 		t.Errorf("Asset = %q, want %q", got, want)
 	}
@@ -257,8 +260,12 @@ func TestReplace(t *testing.T) {
 		t.Errorf("content = %q", data)
 	}
 	entries, _ := os.ReadDir(filepath.Dir(exe))
-	if len(entries) != 1 {
-		t.Errorf("temp files left: %v", entries)
+	want := 1
+	if runtime.GOOS == "windows" {
+		want = 2 // the old binary stays until the next start removes it
+	}
+	if len(entries) != want {
+		t.Errorf("files left: %v, want %d", entries, want)
 	}
 }
 
