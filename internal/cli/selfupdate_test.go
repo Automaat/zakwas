@@ -248,3 +248,30 @@ func TestSelfUpdateRefusesMiseOnWindows(t *testing.T) {
 		t.Errorf("binary replaced: %q", got)
 	}
 }
+
+func TestSelfUpdateOnWindowsTakesTheRunLock(t *testing.T) {
+	for _, tt := range []struct {
+		goos string
+		want int
+	}{{"windows", ExitErr}, {"linux", ExitOK}} {
+		t.Run(tt.goos, func(t *testing.T) {
+			selfUpdateAs(t, tt.goos)
+			base := selfupdatetest.ServeFor(t, "1.2.3", tt.goos, runtime.GOARCH, "new binary")
+			exe := filepath.Join(t.TempDir(), "zakwas.exe")
+			if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			env := Env{Home: t.TempDir(), Runner: runnertest.New().Missing("gh"), Version: "1.0.0", Executable: exe, ReleaseURL: base, LockHeldBy: "4242"}
+
+			r := invoke(env, "", "self-update")
+
+			if r.code != tt.want {
+				t.Errorf("exit %d, want %d\nstdout: %s\nstderr: %s", r.code, tt.want, r.stdout, r.stderr)
+			}
+			held := strings.Contains(r.stderr, "can't run self-update inside a zakwas run")
+			if held != (tt.goos == "windows") {
+				t.Errorf("lock refused = %v\nstderr: %s", held, r.stderr)
+			}
+		})
+	}
+}

@@ -46,7 +46,7 @@ func run() int {
 	}
 	extendPath(home)
 	if runtime.GOOS == "windows" {
-		selfupdate.CleanupOld()
+		selfupdate.CleanupOld(home)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

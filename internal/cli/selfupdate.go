@@ -50,6 +50,15 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 		errOut.print("zakwas: " + msg + "\n")
 		return ExitUsage
 	}
+	if selfUpdateGOOS == "windows" {
+		// Two updates would share the files of the swap, and a run of apply
+		// may be executing the binary; Unix replaces the file in one rename.
+		held, ok := takeLock(ctx, env, "self-update", false, errOut)
+		if !ok {
+			return ExitErr
+		}
+		defer func() { _ = held.Release() }()
+	}
 	u := &selfupdate.Updater{BaseURL: env.ReleaseURL, OS: selfUpdateGOOS}
 	var version string
 	if *want == "" {
@@ -68,7 +77,7 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 	}
 	bin, err := fetchVerified(ctx, env, u, version, out)
 	if err == nil {
-		err = selfupdate.Replace(exe, bin)
+		err = selfupdate.Replace(exe, env.Home, bin)
 	}
 	if err != nil {
 		errOut.fail(err)

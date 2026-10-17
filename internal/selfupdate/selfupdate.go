@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/Automaat/zakwas/internal/fsutil"
 	"github.com/Automaat/zakwas/internal/install"
@@ -231,55 +233,210 @@ func readZipFile(f *zip.File) ([]byte, error) {
 
 // Replace swaps exe for bin. A failed update leaves the old binary
 // working: on Unix through a temp file renamed over exe, on Windows, which
-// can't overwrite a running program but can rename it, through ReplaceRunning.
-func Replace(exe string, bin []byte) error {
+// can't overwrite a running program but can rename it, through ReplaceRunning,
+// which records the old copy under home's zakwas state.
+func Replace(exe, home string, bin []byte) error {
 	if runtime.GOOS == "windows" {
-		return ReplaceRunning(exe, bin)
+		return ReplaceRunning(exe, StatePath(home), bin)
 	}
 	return install.WriteAtomic(exe, bin, 0o755)
 }
 
-// OldSuffix is appended to the name of the binary an update moved aside.
-const OldSuffix = ".old"
+// oldDirPrefix starts the name of the directory an update moves the old
+// binary into. The copy keeps the name of the binary, so every rule of the
+// guard that matches a path ending in zakwas.exe matches it too.
+const oldDirPrefix = ".zakwas-old-"
 
-// ReplaceRunning swaps exe for bin when exe may be running: it stages bin
-// next to exe, renames exe to exe+OldSuffix, then renames the staged file
-// into place, and moves the old binary back if that fails. The old file stays
-// until CleanupOld removes it, since Windows refuses to delete a running
-// program.
-func ReplaceRunning(exe string, bin []byte) error {
-	old, staged := exe+OldSuffix, exe+".new"
-	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("the previous update's %s is still in use; close the zakwas that runs from it and retry: %w", old, err)
-	}
-	if err := install.WriteAtomic(staged, bin, 0o755); err != nil {
+// StatePath records the old copies updates left, for CleanupOld.
+func StatePath(home string) string {
+	return filepath.Join(home, ".local", "state", "zakwas", "selfupdate.json")
+}
+
+type updateState struct {
+	Old []string `json:"old"`
+}
+
+// stateMu keeps updates of one process from losing each other's records;
+// across processes the run lock does that.
+var stateMu sync.Mutex
+
+// ReplaceRunning swaps exe for bin when exe may be running. It stages bin
+// under a unique name next to exe, moves exe into a new directory of its own
+// (oldDirPrefix) and the staged file into place, and moves the old binary
+// back if that fails. The old copy stays until CleanupOld removes it, since
+// Windows refuses to delete a running program. It is recorded in statePath
+// before it moves, so a crash between the two renames leaves a trail: exe is
+// missing then, and the copy is in the recorded directory.
+func ReplaceRunning(exe, statePath string, bin []byte) (err error) {
+	dir, base := filepath.Dir(exe), filepath.Base(exe)
+	staged, err := stage(dir, base, bin)
+	if err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, os.Remove(staged))
+		}
+	}()
+	oldDir, err := os.MkdirTemp(dir, oldDirPrefix+"*")
+	if err != nil {
+		return err
+	}
+	old := filepath.Join(oldDir, base)
+	if err := recordOld(statePath, old); err != nil {
+		return errors.Join(err, os.Remove(oldDir))
+	}
+	forget := func() error { return errors.Join(unrecordOld(statePath, old), os.Remove(oldDir)) }
 	if err := rename(exe, old); err != nil {
-		return errors.Join(err, os.Remove(staged))
+		return errors.Join(err, forget())
 	}
 	if err := rename(staged, exe); err != nil {
-		err = errors.Join(err, os.Remove(staged))
 		if back := rename(old, exe); back != nil {
-			err = errors.Join(err, fmt.Errorf("the old binary is at %s, move it back by hand: %w", old, back))
+			return errors.Join(err, fmt.Errorf("the old binary is at %s, move it back by hand: %w", old, back))
 		}
-		return err
+		return errors.Join(err, forget())
 	}
 	return nil
 }
 
-// rename is fsutil.Rename, replaced in tests to fail a step.
-var rename = fsutil.Rename
+// stage writes bin to a unique file in dir whose name ends in base.
+func stage(dir, base string, bin []byte) (string, error) {
+	f, err := os.CreateTemp(dir, "new-*-"+base)
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(bin)
+	if err == nil {
+		err = f.Sync()
+	}
+	if err = errors.Join(err, f.Close()); err == nil {
+		err = os.Chmod(f.Name(), 0o755)
+	}
+	if err != nil {
+		return "", errors.Join(err, os.Remove(f.Name()))
+	}
+	return f.Name(), nil
+}
 
-// CleanupOld removes the binary the last update moved aside, once nothing
-// runs from it. It is best effort: a file still in use stays for the next
-// start.
-func CleanupOld() {
+func loadUpdateState(path string) (updateState, error) {
+	var st updateState
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	if err := json.Unmarshal(data, &st); err != nil {
+		return updateState{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return st, nil
+}
+
+func saveUpdateState(path string, st updateState) error {
+	if len(st.Old) == 0 {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	return install.WriteAtomic(path, append(data, '\n'), 0o644)
+}
+
+func recordOld(path, old string) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	st, err := loadUpdateState(path)
+	if err != nil {
+		return err
+	}
+	st.Old = append(st.Old, old)
+	return saveUpdateState(path, st)
+}
+
+func unrecordOld(path, old string) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	st, err := loadUpdateState(path)
+	if err != nil {
+		return err
+	}
+	st.Old = slices.DeleteFunc(st.Old, func(have string) bool { return have == old })
+	return saveUpdateState(path, st)
+}
+
+// rename and removeFile are replaced in tests to fail a step.
+var (
+	rename     = fsutil.Rename
+	removeFile = os.Remove
+)
+
+// CleanupOld removes the old copies of the running binary that updates
+// recorded under home's state, once nothing runs from them; it does nothing
+// off Windows, where an update replaces the file in place. It deletes only a
+// recorded path that lies in a directory of ours (oldDirPrefix) next to the
+// running binary, under the binary's name, never a name it guesses. It is best
+// effort: a copy still in use stays recorded for the next start.
+func CleanupOld(home string) {
+	if runtime.GOOS != "windows" {
+		return
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return
 	}
-	_ = os.Remove(exe + OldSuffix)
+	cleanupOld(StatePath(home), exe)
+}
+
+func cleanupOld(statePath, exe string) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	st, err := loadUpdateState(statePath)
+	if err != nil || len(st.Old) == 0 {
+		return
+	}
+	var keep []string
+	for _, old := range st.Old {
+		if !leftBy(old, exe) {
+			keep = append(keep, old)
+			continue
+		}
+		if err := removeFile(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			keep = append(keep, old)
+			continue
+		}
+		_ = os.Remove(filepath.Dir(old))
+	}
+	if len(keep) != len(st.Old) {
+		_ = saveUpdateState(statePath, updateState{Old: keep})
+	}
+}
+
+// leftBy reports whether old is where an update of exe puts its old copy:
+// <dir of exe>/<oldDirPrefix>*/<name of exe>, in a real directory.
+func leftBy(old, exe string) bool {
+	oldDir := filepath.Dir(old)
+	info, err := os.Lstat(oldDir)
+	if err != nil || !info.IsDir() || info.Mode()&fs.ModeSymlink != 0 {
+		return false
+	}
+	return sameName(filepath.Dir(oldDir), filepath.Dir(exe)) &&
+		strings.HasPrefix(filepath.Base(oldDir), oldDirPrefix) &&
+		sameName(filepath.Base(old), filepath.Base(exe))
+}
+
+// sameName compares paths as the system does: without regard to case on
+// Windows.
+func sameName(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // Executable returns the running binary's path with symlinks resolved, so a

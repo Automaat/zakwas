@@ -3,12 +3,14 @@ package selfupdate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/selfupdate/selfupdatetest"
@@ -249,7 +251,7 @@ func TestReplace(t *testing.T) {
 	if err := os.WriteFile(exe, []byte("old"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := Replace(exe, []byte("new")); err != nil {
+	if err := Replace(exe, t.TempDir(), []byte("new")); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(exe)
@@ -262,48 +264,84 @@ func TestReplace(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Dir(exe))
 	want := 1
 	if runtime.GOOS == "windows" {
-		want = 2 // the old binary stays until the next start removes it
+		want = 2 // the old binary stays in a directory of its own until the next start
 	}
 	if len(entries) != want {
 		t.Errorf("files left: %v, want %d", entries, want)
 	}
 }
 
-func TestReplaceRunning(t *testing.T) {
-	dir := t.TempDir()
-	exe := filepath.Join(dir, "zakwas.exe")
+// swapDir is a directory with a binary called zakwas.exe in it, and the path
+// of a state file outside it.
+func swapDir(t *testing.T) (exe, state string) {
+	t.Helper()
+	exe = filepath.Join(t.TempDir(), "zakwas.exe")
 	write(t, exe, "old")
+	return exe, filepath.Join(t.TempDir(), "state", "selfupdate.json")
+}
 
-	if err := ReplaceRunning(exe, []byte("new")); err != nil {
+func names(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+func recorded(t *testing.T, state string) []string {
+	t.Helper()
+	st, err := loadUpdateState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.Old
+}
+
+func TestReplaceRunning(t *testing.T) {
+	exe, state := swapDir(t)
+
+	if err := ReplaceRunning(exe, state, []byte("new")); err != nil {
 		t.Fatal(err)
 	}
 
 	if got := read(t, exe); got != "new" {
 		t.Errorf("exe = %q, want new", got)
 	}
-	if got := read(t, exe+OldSuffix); got != "old" {
-		t.Errorf("the old binary = %q, want it kept as %s", got, OldSuffix)
+	old := recorded(t, state)
+	if len(old) != 1 {
+		t.Fatalf("recorded %q, want the old copy", old)
 	}
-	if _, err := os.Lstat(exe + ".new"); !os.IsNotExist(err) {
-		t.Errorf("the staged file is left behind: %v", err)
+	if got := read(t, old[0]); got != "old" {
+		t.Errorf("the old copy = %q", got)
 	}
-	entries, _ := os.ReadDir(dir)
-	if len(entries) != 2 {
-		t.Errorf("files left in %s: %v", dir, entries)
+	if filepath.Base(old[0]) != "zakwas.exe" || !strings.HasPrefix(filepath.Base(filepath.Dir(old[0])), oldDirPrefix) || filepath.Dir(filepath.Dir(old[0])) != filepath.Dir(exe) {
+		t.Errorf("the old copy is at %s, want <dir>/%s*/zakwas.exe, a name the guard's patterns match", old[0], oldDirPrefix)
+	}
+	if got := names(t, filepath.Dir(exe)); len(got) != 2 {
+		t.Errorf("files next to exe: %q, want zakwas.exe and the old copy's directory", got)
 	}
 }
 
-func TestReplaceRunningReplacesTheOldBinaryOfTheLastUpdate(t *testing.T) {
-	exe := filepath.Join(t.TempDir(), "zakwas.exe")
-	write(t, exe, "v2")
-	write(t, exe+OldSuffix, "v1")
+func TestReplaceRunningKeepsEveryOldCopy(t *testing.T) {
+	exe, state := swapDir(t)
 
-	if err := ReplaceRunning(exe, []byte("v3")); err != nil {
-		t.Fatal(err)
+	for _, v := range []string{"v2", "v3"} {
+		if err := ReplaceRunning(exe, state, []byte(v)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	if read(t, exe) != "v3" || read(t, exe+OldSuffix) != "v2" {
-		t.Errorf("exe = %q, old = %q", read(t, exe), read(t, exe+OldSuffix))
+	old := recorded(t, state)
+	if len(old) != 2 || read(t, exe) != "v3" {
+		t.Fatalf("exe = %q, recorded %q", read(t, exe), old)
+	}
+	if read(t, old[0]) != "old" || read(t, old[1]) != "v2" {
+		t.Errorf("old copies = %q, %q", read(t, old[0]), read(t, old[1]))
 	}
 }
 
@@ -313,14 +351,12 @@ func TestReplaceRunningRollsBack(t *testing.T) {
 		fail func(from, to string) bool
 		want string
 	}{
-		{"moving the binary aside", func(_, to string) bool { return strings.HasSuffix(to, OldSuffix) }, "move aside"},
-		{"moving the new binary in", func(from, _ string) bool { return strings.HasSuffix(from, ".new") }, "move in"},
+		{"moving the binary aside", func(_, to string) bool { return strings.Contains(to, oldDirPrefix) }, "move aside"},
+		{"moving the new binary in", func(from, _ string) bool { return strings.HasPrefix(filepath.Base(from), "new-") }, "move in"},
 	}
 	for _, tt := range steps {
 		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			exe := filepath.Join(dir, "zakwas.exe")
-			write(t, exe, "old")
+			exe, state := swapDir(t)
 			saved := rename
 			rename = func(from, to string) error {
 				if tt.fail(from, to) {
@@ -330,7 +366,7 @@ func TestReplaceRunningRollsBack(t *testing.T) {
 			}
 			t.Cleanup(func() { rename = saved })
 
-			err := ReplaceRunning(exe, []byte("new"))
+			err := ReplaceRunning(exe, state, []byte("new"))
 
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
@@ -338,52 +374,190 @@ func TestReplaceRunningRollsBack(t *testing.T) {
 			if got := read(t, exe); got != "old" {
 				t.Errorf("exe = %q, want the old binary back", got)
 			}
-			entries, _ := os.ReadDir(dir)
-			if len(entries) != 1 {
-				t.Errorf("files left in %s: %v", dir, entries)
+			if got := names(t, filepath.Dir(exe)); len(got) != 1 {
+				t.Errorf("files left next to exe: %q", got)
+			}
+			if _, err := os.Lstat(state); !os.IsNotExist(err) {
+				t.Errorf("the failed update is still recorded: %q", recorded(t, state))
 			}
 		})
 	}
 }
 
 func TestReplaceRunningSaysWhereTheOldBinaryIsWhenRollbackFails(t *testing.T) {
-	dir := t.TempDir()
-	exe := filepath.Join(dir, "zakwas.exe")
-	write(t, exe, "old")
+	exe, state := swapDir(t)
 	saved := rename
 	rename = func(from, to string) error {
-		if strings.HasSuffix(from, ".new") || to == exe {
+		if strings.HasPrefix(filepath.Base(from), "new-") || to == exe {
 			return errors.New("blocked")
 		}
 		return saved(from, to)
 	}
 	t.Cleanup(func() { rename = saved })
 
-	err := ReplaceRunning(exe, []byte("new"))
+	err := ReplaceRunning(exe, state, []byte("new"))
 
-	if err == nil || !strings.Contains(err.Error(), "the old binary is at "+exe+OldSuffix) {
-		t.Errorf("err = %v", err)
+	old := recorded(t, state)
+	if len(old) != 1 || err == nil || !strings.Contains(err.Error(), "the old binary is at "+old[0]+", move it back by hand") {
+		t.Fatalf("err = %v, recorded %q", err, old)
 	}
-	if read(t, exe+OldSuffix) != "old" {
+	if read(t, old[0]) != "old" {
 		t.Errorf("the old binary was lost")
 	}
 }
 
-func TestCleanupOld(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
+func TestReplaceRunningConcurrentlyNeverLeavesNoBinary(t *testing.T) {
+	for range 5 {
+		exe, state := swapDir(t)
+		var wg sync.WaitGroup
+		for g := range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range 5 {
+					// A swap that loses the race may fail; what matters is the result.
+					_ = ReplaceRunning(exe, state, fmt.Appendf(nil, "g%d-%d", g, i))
+				}
+			}()
+		}
+		wg.Wait()
+
+		got, err := os.ReadFile(exe)
+		if err != nil {
+			t.Fatalf("no zakwas.exe left: %v", err)
+		}
+		if !strings.HasPrefix(string(got), "g") && string(got) != "old" {
+			t.Fatalf("zakwas.exe = %q", got)
+		}
+		for _, name := range names(t, filepath.Dir(exe)) {
+			if strings.HasPrefix(name, "new-") {
+				t.Fatalf("a staged file is left: %s", name)
+			}
+		}
+	}
+}
+
+func TestCleanupOldRemovesOnlyWhatAnUpdateLeft(t *testing.T) {
+	exe, state := swapDir(t)
+	backup := exe + ".old"
+	write(t, backup, "my own backup")
+	if err := ReplaceRunning(exe, state, []byte("new")); err != nil {
 		t.Fatal(err)
 	}
-	old := exe + OldSuffix
-	write(t, old, "old")
-	t.Cleanup(func() { _ = os.Remove(old) })
+	old := recorded(t, state)[0]
 
-	CleanupOld()
+	cleanupOld(state, exe)
 
 	if _, err := os.Lstat(old); !os.IsNotExist(err) {
-		t.Errorf("%s is still there: %v", old, err)
+		t.Errorf("the old copy is still there: %v", err)
 	}
-	CleanupOld()
+	if _, err := os.Lstat(filepath.Dir(old)); !os.IsNotExist(err) {
+		t.Errorf("its directory is still there: %v", err)
+	}
+	if _, err := os.Lstat(state); !os.IsNotExist(err) {
+		t.Errorf("the state file is still there")
+	}
+	if read(t, backup) != "my own backup" || read(t, exe) != "new" {
+		t.Errorf("cleanup touched %s or %s", backup, exe)
+	}
+}
+
+func TestCleanupOldIgnoresAnythingItDidNotLeave(t *testing.T) {
+	exe, state := swapDir(t)
+	dir := filepath.Dir(exe)
+	if err := os.MkdirAll(filepath.Join(dir, oldDirPrefix+"x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(elsewhere, oldDirPrefix+"y"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, p := range []string{
+		filepath.Join(dir, oldDirPrefix+"x", "other.exe"),
+		filepath.Join(dir, "other", "zakwas.exe"),
+		filepath.Join(elsewhere, oldDirPrefix+"y", "zakwas.exe"),
+		exe,
+		exe + ".old",
+	} {
+		write(t, p, "keep")
+		kept = append(kept, p)
+	}
+	if err := saveUpdateState(state, updateState{Old: kept}); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupOld(state, exe)
+
+	for _, p := range kept {
+		if read(t, p) != "keep" {
+			t.Errorf("%s changed", p)
+		}
+	}
+	if got := recorded(t, state); len(got) != len(kept) {
+		t.Errorf("records = %q, want all %d kept for the installs they belong to", got, len(kept))
+	}
+}
+
+func TestCleanupOldDoesNotFollowASymlinkedDirectory(t *testing.T) {
+	exe, state := swapDir(t)
+	target := t.TempDir()
+	write(t, filepath.Join(target, "zakwas.exe"), "precious")
+	link := filepath.Join(filepath.Dir(exe), oldDirPrefix+"link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	if err := saveUpdateState(state, updateState{Old: []string{filepath.Join(link, "zakwas.exe")}}); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupOld(state, exe)
+
+	if read(t, filepath.Join(target, "zakwas.exe")) != "precious" {
+		t.Errorf("cleanup followed the symlink")
+	}
+}
+
+func TestCleanupOldKeepsACopyThatIsStillInUse(t *testing.T) {
+	exe, state := swapDir(t)
+	if err := ReplaceRunning(exe, state, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	old := recorded(t, state)[0]
+	saved := removeFile
+	removeFile = func(p string) error {
+		if p == old {
+			return errors.New("in use")
+		}
+		return saved(p)
+	}
+	t.Cleanup(func() { removeFile = saved })
+
+	cleanupOld(state, exe)
+
+	if read(t, old) != "old" || len(recorded(t, state)) != 1 {
+		t.Errorf("the copy in use was forgotten")
+	}
+}
+
+func TestCleanupOldDoesNothingOffWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("this is the Windows behavior")
+	}
+	home := t.TempDir()
+	state := StatePath(home)
+	if err := saveUpdateState(state, updateState{Old: []string{"x"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	CleanupOld(home)
+
+	if got := recorded(t, state); len(got) != 1 {
+		t.Errorf("records = %q", got)
+	}
 }
 
 func write(t *testing.T, path, content string) {

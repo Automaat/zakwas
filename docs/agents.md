@@ -62,7 +62,7 @@ What does not work yet, and fails the plan of just that provider or feature with
 - opencode command hooks, whose plugin runs through `/bin/sh`
 - the Gemini CLI provider's extension link
 
-The guard works on Windows: its deny rules also name `zakwas.exe`, and Claude Code gets them for its PowerShell tool too. Nothing has been run against the agents on a real Windows machine, so read [what is and isn't confirmed](security.md#windows) before you rely on it. A `cmd` or script wrapper is not matched, as on other systems.
+The guard works on Windows: its deny rules also name `zakwas.exe`, and Claude Code gets them for its PowerShell tool too. Nothing has been run against the agents on a real Windows machine, so read [what is and isn't confirmed](security.md#windows) before you rely on it. No rule matches a wrapper or a spelling it can't see: `cmd /c`, `powershell -Command`, `iex` and `Invoke-Expression`, `Start-Process`, `& $var apply`, `& { zakwas apply }`, `Invoke-Command`, scripts, aliases, and `.\zakwas apply` or `C:\bin\zakwas apply` without `.exe` (Gemini CLI matches those two). Patterns for them would deny harmless commands, so the backstop is the refusal inside zakwas, which stops `apply`, `upgrade` and `approve` in an agent session whichever way the command was spelled.
 
 zakwas keeps the line endings of the files it edits: a `config.toml` or `settings.json` saved with CRLF stays CRLF, and files it creates use LF.
 
