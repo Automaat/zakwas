@@ -125,6 +125,7 @@ func TestGuardOutsideGitDeniesTheConfigDir(t *testing.T) {
 }
 
 func TestGuardCantDenyARepoHoldingHome(t *testing.T) {
+	asHost(t, "linux")
 	m := guardedModule(t, config.ProviderClaude)
 	if err := os.Mkdir(filepath.Join(m.Paths.Home, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -188,6 +189,7 @@ func TestGuardOffLeavesTheAgentsAlone(t *testing.T) {
 }
 
 func TestGuardWarnsAboutOpencodeWithoutAnAgentPermissionsTemplate(t *testing.T) {
+	asHost(t, "linux")
 	tests := []struct {
 		name      string
 		providers []string
@@ -220,6 +222,7 @@ func TestGuardWarnsAboutOpencodeWithoutAnAgentPermissionsTemplate(t *testing.T) 
 }
 
 func TestGuardCantDenyAConfigAtHomeWithoutARepo(t *testing.T) {
+	asHost(t, "linux")
 	m := guardedModule(t, config.ProviderClaude)
 	m.Paths.Root = m.Paths.Home
 	if err := os.RemoveAll(filepath.Join(m.Paths.Home, "dotfiles")); err != nil {
@@ -311,4 +314,11 @@ func TestGuardWarnsOnWindowsThatItIsNotEnforced(t *testing.T) {
 			}
 		})
 	}
+}
+
+func asHost(t *testing.T, goos string) {
+	t.Helper()
+	saved := hostOS
+	hostOS = goos
+	t.Cleanup(func() { hostOS = saved })
 }
