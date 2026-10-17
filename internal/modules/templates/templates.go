@@ -4,6 +4,7 @@ package templates
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 const defaultMode fs.FileMode = 0o444
@@ -35,6 +37,8 @@ type Module struct {
 	Agents    *config.Agents
 	Paths     config.Paths
 	Installer *install.Installer
+	// GOOS is the operating system the plan is for; empty means this one.
+	GOOS string
 }
 
 func (m *Module) Name() string { return "templates" }
@@ -47,7 +51,7 @@ func (m *Module) Plan(_ context.Context) ([]engine.Change, error) {
 		if mode == 0 {
 			mode = defaultMode
 		}
-		want, err := Render(m.Paths.Src(f.Src), data, Funcs(m.Agents, m.Paths.Home))
+		want, err := Render(m.Paths.Src(f.Src), data, Funcs(m.Agents, m.Paths.Home, cmp.Or(m.GOOS, platform.Current())))
 		if err != nil {
 			return nil, err
 		}
@@ -85,11 +89,12 @@ func RenderText(name, text string, data any, funcs template.FuncMap) ([]byte, er
 	return buf.Bytes(), nil
 }
 
-// Funcs are the functions templates can call; agents may be nil.
-func Funcs(agents *config.Agents, home string) template.FuncMap {
+// Funcs are the functions templates can call; agents may be nil. goos is
+// the operating system the guard rules are written for.
+func Funcs(agents *config.Agents, home, goos string) template.FuncMap {
 	return template.FuncMap{
 		"agentPermissions": func(provider string, catchAll ...string) (string, error) {
-			return agentPermissions(agents, provider, catchAll...)
+			return agentPermissions(agents, goos, provider, catchAll...)
 		},
 		"agentMCP": func(provider string) (string, error) {
 			return agentMCP(agents, provider, home)
@@ -109,11 +114,11 @@ var opencodeActions = map[string]string{
 // comes first and deny entries last; each prefix gets a bare pattern and
 // one with " *" for its arguments. With the guard on, the commands that
 // apply the config are denied last, also after a flag (zakwas * apply) and run by path (*/zakwas apply).
-func agentPermissions(agents *config.Agents, provider string, catchAll ...string) (string, error) {
+func agentPermissions(agents *config.Agents, goos, provider string, catchAll ...string) (string, error) {
 	if provider != config.ProviderOpencode {
 		return "", fmt.Errorf("agentPermissions: provider %q is not supported, only %s", provider, config.ProviderOpencode)
 	}
-	rules, err := OpencodeBashRules(agents, catchAll...)
+	rules, err := OpencodeBashRules(agents, goos, catchAll...)
 	if err != nil {
 		return "", err
 	}
@@ -142,8 +147,9 @@ func agentPermissions(agents *config.Agents, provider string, catchAll ...string
 // BashRule is one pattern of opencode's permission.bash object.
 type BashRule struct{ Pattern, Action string }
 
-// OpencodeBashRules are the rules agentPermissions renders, in order.
-func OpencodeBashRules(agents *config.Agents, catchAll ...string) ([]BashRule, error) {
+// OpencodeBashRules are the rules agentPermissions renders, in order, for
+// the operating system goos.
+func OpencodeBashRules(agents *config.Agents, goos string, catchAll ...string) ([]BashRule, error) {
 	if len(catchAll) > 1 {
 		return nil, fmt.Errorf("agentPermissions: want at most one default action, got %d", len(catchAll))
 	}
@@ -164,8 +170,8 @@ func OpencodeBashRules(agents *config.Agents, catchAll ...string) ([]BashRule, e
 		add(p.Command()+" *", action)
 	}
 	for _, p := range agents.GuardPermissions(config.ProviderOpencode) {
-		first, rest := p.Words[0], strings.Join(p.Words[1:], " ")
-		for _, name := range []string{first, "*/" + first} {
+		rest := strings.Join(p.Words[1:], " ")
+		for _, name := range config.GuardShellNames(goos) {
 			for _, pattern := range []string{name + " " + rest, name + " " + rest + " *", name + " * " + rest, name + " * " + rest + " *"} {
 				add(pattern, opencodeActions[p.Decision])
 			}

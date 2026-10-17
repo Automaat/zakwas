@@ -382,3 +382,119 @@ jobs:
             Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
           }
           exit 0
+
+      # The runner's own gh is hidden from PATH so each case controls what
+      # install.ps1 finds. A tiny Go program stands in for gh.
+      - name: install.ps1 checks build attestations like install.sh
+        shell: pwsh
+        run: |
+          $arch = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'amd64' }
+          $site = Join-Path $env:RUNNER_TEMP 'site-attest'
+          $exe = Join-Path $env:RUNNER_TEMP 'zakwas-attest.exe'
+          go build -o $exe ./cmd/zakwas
+          Copy-Item $exe (Join-Path $env:RUNNER_TEMP 'zakwas.exe') -Force
+          foreach ($version in '9.9.9', '0.3.9') {
+            $release = Join-Path $site "download/v$version"
+            New-Item -ItemType Directory -Force -Path $release | Out-Null
+            $asset = "zakwas_${version}_windows_$arch.zip"
+            Compress-Archive -Path (Join-Path $env:RUNNER_TEMP 'zakwas.exe') -DestinationPath (Join-Path $release $asset)
+            $hash = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $release $asset)).Hash.ToLowerInvariant()
+            "$hash  $asset" | Set-Content -Encoding ascii -Path (Join-Path $release 'checksums.txt')
+          }
+
+          $src = Join-Path $env:RUNNER_TEMP 'fakegh-src'
+          New-Item -ItemType Directory -Force -Path $src | Out-Null
+          @'
+          package main
+
+          import (
+          	"fmt"
+          	"os"
+          	"strings"
+          )
+
+          func main() {
+          	a := os.Args[1:]
+          	mode := os.Getenv("FAKE_GH_MODE")
+          	switch {
+          	case len(a) >= 2 && a[0] == "auth" && a[1] == "status":
+          		if mode == "loggedout" {
+          			fmt.Fprintln(os.Stderr, "You are not logged into any GitHub hosts.")
+          			os.Exit(1)
+          		}
+          		fmt.Fprintln(os.Stderr, "github.com: Logged in")
+          	case len(a) >= 3 && a[0] == "attestation" && a[1] == "verify" && a[2] == "--help":
+          		fmt.Println("Flags:\n  --repo string")
+          		if mode != "old" {
+          			fmt.Println("  --source-ref string")
+          		}
+          	case len(a) >= 3 && a[0] == "attestation" && a[1] == "verify":
+          		if _, err := os.Stat(a[2]); err != nil {
+          			fmt.Fprintln(os.Stderr, err)
+          			os.Exit(2)
+          		}
+          		if log := os.Getenv("FAKE_GH_LOG"); log != "" {
+          			f, _ := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+          			fmt.Fprintln(f, strings.Join(a[3:], " "))
+          			f.Close()
+          		}
+          		if mode == "fail" {
+          			fmt.Fprintln(os.Stderr, "no attestations found")
+          			os.Exit(1)
+          		}
+          		fmt.Fprintln(os.Stderr, "Loaded digest")
+          		fmt.Println("Verification succeeded")
+          	default:
+          		os.Exit(2)
+          	}
+          }
+          '@ | Set-Content -Encoding ascii -Path (Join-Path $src 'main.go')
+          $fakebin = Join-Path $env:RUNNER_TEMP 'fakegh-bin'
+          Push-Location $src
+          try { go build -o (Join-Path $fakebin 'gh.exe') main.go } finally { Pop-Location }
+
+          $realPath = $env:Path
+          $noGh = ($env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'gh.exe')) }) -join ';'
+          $log = Join-Path $env:RUNNER_TEMP 'fakegh.log'
+          $server = Start-Process -PassThru -WindowStyle Hidden -FilePath python -ArgumentList '-m', 'http.server', '8766', '--bind', '127.0.0.1', '--directory', $site
+          try {
+            Start-Sleep -Seconds 3
+            foreach ($shell in 'pwsh', 'powershell') {
+              $n = 0
+              foreach ($case in @(
+                @{ gh = 'none';   version = '9.9.9'; ok = $true;  say = 'Skipped attestation check \(needs a recent gh, logged in\); to verify: gh release download v9\.9\.9 -R Automaat/zakwas -p zakwas_9\.9\.9_windows_\w+\.zip; gh attestation verify zakwas_9\.9\.9_windows_\w+\.zip --repo Automaat/zakwas --signer-workflow Automaat/zakwas/\.github/workflows/release\.yml --source-ref refs/tags/v9\.9\.9'; calls = 0 },
+                @{ gh = 'ok';     version = '9.9.9'; ok = $true;  say = 'Verifying build provenance of zakwas_9\.9\.9_windows_\w+\.zip'; calls = 1 },
+                @{ gh = 'fail';   version = '9.9.9'; ok = $false; say = 'attestation verification failed for zakwas_9\.9\.9_windows_\w+\.zip'; calls = 1 },
+                @{ gh = 'loggedout'; version = '9.9.9'; ok = $true; say = 'Skipped attestation check'; calls = 0 },
+                @{ gh = 'old';    version = '9.9.9'; ok = $true;  say = 'Skipped attestation check'; calls = 0 },
+                @{ gh = 'ok';     version = '0.3.9'; ok = $true;  say = 'zakwas 0\.3\.9 predates build attestations; skipping provenance check'; calls = 0 }
+              )) {
+                $n++
+                $dir = Join-Path $env:RUNNER_TEMP "bin-attest-$shell-$n"
+                Remove-Item -Force -ErrorAction SilentlyContinue -Path $log
+                $env:FAKE_GH_MODE = $case.gh
+                $env:FAKE_GH_LOG = $log
+                $env:Path = if ($case.gh -eq 'none') { $noGh } else { "$fakebin;$noGh" }
+                try {
+                  $out = & $shell -NoProfile -File ./install.ps1 -Version $case.version -BaseUrl http://127.0.0.1:8766 -Dir $dir 2>&1 | Out-String
+                  $code = $LASTEXITCODE
+                } finally {
+                  $env:Path = $realPath
+                }
+                $label = "$shell gh=$($case.gh) v$($case.version)"
+                if ($case.ok -and $code -ne 0) { throw "${label}: install failed: $out" }
+                if (-not $case.ok -and $code -eq 0) { throw "${label}: install went on after a failed verification: $out" }
+                if ($out -notmatch $case.say) { throw "${label}: output lacks '$($case.say)': $out" }
+                if ((Test-Path (Join-Path $dir 'zakwas.exe')) -ne $case.ok) { throw "${label}: zakwas.exe installed = $(-not $case.ok)" }
+                $calls = @(if (Test-Path $log) { Get-Content $log })
+                if ($calls.Count -ne $case.calls) { throw "${label}: $($calls.Count) verify calls, want $($case.calls)" }
+                if ($case.calls -eq 1 -and $calls[0] -ne '--repo Automaat/zakwas --signer-workflow Automaat/zakwas/.github/workflows/release.yml --source-ref refs/tags/v9.9.9') {
+                  throw "${label}: verify options were '$($calls[0])'"
+                }
+              }
+            }
+          } finally {
+            Remove-Item Env:FAKE_GH_MODE, Env:FAKE_GH_LOG -ErrorAction SilentlyContinue
+            Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          }
+          exit 0

@@ -349,7 +349,7 @@ func (m *Module) opencodeProfile(p config.NamedProfile) profileFile {
 		perm.set("edit", p.Edit)
 	}
 	if (p.Shell == config.PermissionAllow || p.Shell == "ask") && slices.Contains(kept, "shell") {
-		if rules, err := templates.OpencodeBashRules(&m.Agents, p.Shell); err == nil {
+		if rules, err := templates.OpencodeBashRules(&m.Agents, m.goos(), p.Shell); err == nil {
 			bash := &ordered{}
 			for _, r := range rules {
 				bash.set(r.Pattern, r.Action)

@@ -143,10 +143,13 @@ func (m *Module) codexPermissions() []config.Permission {
 		return perms
 	}
 	for _, g := range m.Agents.GuardPermissions(config.ProviderCodex) {
-		if !slices.ContainsFunc(perms, func(p config.Permission) bool {
-			return p.Decision == g.Decision && slices.Equal(p.Words, g.Words)
-		}) {
-			perms = append(perms, g)
+		for _, binary := range config.GuardBinaries(m.goos()) {
+			g.Words = append([]string{binary}, g.Words[1:]...)
+			if !slices.ContainsFunc(perms, func(p config.Permission) bool {
+				return p.Decision == g.Decision && slices.Equal(p.Words, g.Words)
+			}) {
+				perms = append(perms, g)
+			}
 		}
 	}
 	return perms

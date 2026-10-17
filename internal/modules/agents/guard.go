@@ -1,11 +1,13 @@
 package agents
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Automaat/zakwas/internal/config"
@@ -17,22 +19,36 @@ import (
 // `~/.local/bin/zakwas apply`, and no edits to the config repo or to
 // zakwas state. Claude Code applies deny rules in every permission mode.
 // Edit rules reach Claude's own file tools, not what a shell command does,
-// so the command rules are the ones that stop an apply.
+// so the command rules are the ones that stop an apply. On Windows the
+// same rules are written for the PowerShell tool as well, and name
+// zakwas.exe.
 func (m *Module) claudeGuardRules() []string {
 	if !m.Guard || !m.Agents.GuardsProvider(config.ProviderClaude) {
 		return nil
 	}
-	var rules []string
-	for _, c := range config.GuardedCommands {
-		for _, name := range []string{"zakwas", "*/zakwas"} {
-			for _, form := range []string{"", " *"} {
-				rules = append(rules, "Bash("+name+" "+c+form+")", "Bash("+name+" * "+c+form+")")
-			}
-		}
+	names := config.GuardShellNames(m.goos())
+	rules := claudeShellRules("Bash", names)
+	if m.goos() == "windows" {
+		// PowerShell calls a program with &, which a rule sees as text.
+		rules = append(rules, claudeShellRules("PowerShell", append(slices.Clone(names), "& zakwas"))...)
 	}
 	dirs, _ := m.guardedDirs()
 	for _, dir := range append(dirs, filepath.Join(realPath(m.Paths.Home), ".local", "state", "zakwas")) {
 		rules = append(rules, "Edit("+m.claudePath(dir)+"/**)")
+	}
+	return rules
+}
+
+// claudeShellRules denies each guarded command for each spelling of the
+// binary, bare or followed by flags and arguments, in tool's rule syntax.
+func claudeShellRules(tool string, names []string) []string {
+	var rules []string
+	for _, c := range config.GuardedCommands {
+		for _, name := range names {
+			for _, form := range []string{"", " *"} {
+				rules = append(rules, tool+"("+name+" "+c+form+")", tool+"("+name+" * "+c+form+")")
+			}
+		}
 	}
 	return rules
 }
@@ -43,7 +59,17 @@ func (m *Module) claudePath(dir string) string {
 	if rel, err := filepath.Rel(realPath(m.Paths.Home), dir); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 		return "~/" + filepath.ToSlash(rel)
 	}
-	return "/" + filepath.ToSlash(dir)
+	return claudeAbsPath(filepath.ToSlash(dir))
+}
+
+// claudeAbsPath is the rule spelling of an absolute path in slash form. On
+// Windows Claude Code turns C:\Users\alice into /c/Users/alice before it
+// matches, so the rule for D:/repo is //d/repo.
+func claudeAbsPath(slashed string) string {
+	if len(slashed) >= 2 && slashed[1] == ':' && (slashed[0]|0x20 >= 'a' && slashed[0]|0x20 <= 'z') {
+		return "//" + strings.ToLower(slashed[:1]) + slashed[2:]
+	}
+	return "/" + slashed
 }
 
 // guardedDirs are the directories Claude is denied edits to: the config
@@ -71,6 +97,9 @@ func (m *Module) guardedDirs() (dirs []string, warning string) {
 	}
 	return dirs, warning
 }
+
+// goos is the operating system the guard is planned for.
+func (m *Module) goos() string { return cmp.Or(m.GOOS, hostOS) }
 
 func hasDir(dirs []string, d string) bool {
 	for _, o := range dirs {
@@ -153,9 +182,6 @@ func (m *Module) Warnings(context.Context) []string {
 	out = append(out, m.copilotWarnings()...)
 	if !m.Guard {
 		return out
-	}
-	if hostOS == "windows" {
-		out = append(out, "agents.guard: not enforced on Windows yet (deny rules do not cover zakwas.exe); agent sessions are still refused by apply, upgrade and approve through environment markers")
 	}
 	if m.Agents.GuardsProvider(config.ProviderClaude) {
 		if _, warning := m.guardedDirs(); warning != "" {

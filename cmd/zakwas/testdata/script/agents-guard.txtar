@@ -1,3 +1,4 @@
+env ZAKWAS_TEST_GOOS=darwin
 env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex
 
