@@ -38,7 +38,7 @@ cp zakwas-conflict.yaml zakwas.yaml
 cp claude-other-client.json claude/.claude.json
 rm home/.local/state/zakwas/agent-mcp.json
 ! zakwas plan --only agents
-stdout 'claude: mcp: server "slack" is already in .*/claude/.claude.json and differs from zakwas.yaml in oauth'
+stdout 'claude: mcp: server "slack" is already in .*[/\\]claude[/\\]\.claude\.json and differs from zakwas.yaml in oauth'
 ! stdout 0oa9otherEXAMPLE
 ! stderr 0oa9otherEXAMPLE
 

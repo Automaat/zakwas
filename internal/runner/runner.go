@@ -13,8 +13,6 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
-	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -89,17 +87,9 @@ func NewExec() *Exec {
 	return &Exec{Stdout: os.Stdout, Stderr: os.Stderr, Detached: !hasTerminal()}
 }
 
-func hasTerminal() bool {
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		return false
-	}
-	_ = tty.Close()
-	return true
-}
-
 // WaitDelay is how long a cancelled command gets to exit after SIGINT
-// before it is killed.
+// before it is killed. Windows can't deliver SIGINT to a child, so it is
+// killed at once.
 const WaitDelay = 30 * time.Second
 
 func (e *Exec) Installed(name string) bool {
@@ -111,26 +101,11 @@ func (e *Exec) Installed(name string) bool {
 // SIGKILL would leave brew or mise mid-install with locks and partial kegs.
 func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.Cancel = func() error { return interrupt(cmd.Process) }
 	grace := cmp.Or(e.Grace, WaitDelay)
 	cmd.WaitDelay = grace
 	if c.Group && !c.Stream && e.Detached {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		var killer atomic.Pointer[time.Timer]
-		cmd.Cancel = func() error {
-			pid := cmd.Process.Pid
-			killer.Store(time.AfterFunc(grace, func() { _ = syscall.Kill(-pid, syscall.SIGKILL) }))
-			if err := syscall.Kill(-pid, syscall.SIGINT); err != nil && !errors.Is(err, syscall.ESRCH) {
-				return err
-			}
-			return nil
-		}
-		defer func() {
-			if t := killer.Load(); t != nil {
-				t.Stop()
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			}
-		}()
+		defer ownGroup(cmd, grace)()
 	}
 	cmd.Dir = c.Dir
 	cmd.Env = slices.Concat(os.Environ(), e.Env, c.Env)

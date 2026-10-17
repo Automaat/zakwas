@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 	"github.com/Automaat/zakwas/schema"
 )
 
@@ -51,11 +53,19 @@ func setup(t *testing.T, cfg string) (Env, string) {
 func invoke(env Env, stdin string, args ...string) result {
 	var stdout, stderr bytes.Buffer
 	env.Args, env.Stdin, env.Stdout, env.Stderr = args, strings.NewReader(stdin), &stdout, &stderr
+	if env.GOOS == "" {
+		env.GOOS = "darwin"
+	}
 	code := Main(context.Background(), env)
 	return result{code, stdout.String(), stderr.String()}
 }
 
-const linksOnly = "links: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n"
+var linksOnly, linkModule = func() (string, string) {
+	if runtime.GOOS == "windows" {
+		return "files: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "files"
+	}
+	return "links: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "links"
+}()
 
 func TestExitCodes(t *testing.T) {
 	tests := []struct {
@@ -68,12 +78,12 @@ func TestExitCodes(t *testing.T) {
 		{"no command", linksOnly, nil, ExitUsage, "Usage"},
 		{"unknown command", linksOnly, []string{"destroy"}, ExitUsage, `unknown command "destroy"`},
 		{"extra args", linksOnly, []string{"plan", "extra"}, ExitUsage, "Usage"},
-		{"unknown module", linksOnly, []string{"--only", "links,nope", "plan"}, ExitUsage, `module "nope"`},
+		{"unknown module", linksOnly, []string{"--only", linkModule + ",nope", "plan"}, ExitUsage, `module "nope"`},
 		{"unconfigured module", linksOnly, []string{"--only", "brew", "plan"}, ExitUsage, `module "brew"`},
 		{"invalid config", "links: [{src: x}]", []string{"plan"}, ExitErr, "src and dst are required"},
 		{"plan with drift", linksOnly, []string{"plan"}, ExitOK, "+ ~/.zshrc"},
 		{"check with drift", linksOnly, []string{"check"}, ExitDrift, "+ ~/.zshrc"},
-		{"flags after command", linksOnly, []string{"check", "--only", "links"}, ExitDrift, "Plan: 1 to add"},
+		{"flags after command", linksOnly, []string{"check", "--only", linkModule}, ExitDrift, "Plan: 1 to add"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,6 +123,8 @@ func TestApplyConfirmation(t *testing.T) {
 		{"answer no", true, "n\n", []string{"apply"}, ExitErr, false, "aborted"},
 		{"no answer", true, "", []string{"apply"}, ExitErr, false, "aborted"},
 		{"answer yes", true, "yes\n", []string{"apply"}, ExitOK, true, "Apply 1 step(s)? [y/N]"},
+		{"answer yes with a Windows line ending", true, "y\r\n", []string{"apply"}, ExitOK, true, "Apply 1 step(s)? [y/N]"},
+		{"answer no with a Windows line ending", true, "n\r\n", []string{"apply"}, ExitErr, false, "aborted"},
 		{"no terminal", false, "yes\n", []string{"apply"}, ExitUsage, false, "stdin is not a terminal"},
 		{"no terminal with -y", false, "", []string{"apply", "-y"}, ExitOK, true, "Applied 1 of 1 steps"},
 	}
@@ -174,7 +186,7 @@ func TestOutputFailureFailsTheRun(t *testing.T) {
 	}
 }
 
-const linksAndBrew = linksOnly + "brew: {file: Brewfile}\n"
+var linksAndBrew = linksOnly + "brew: {file: Brewfile}\n"
 
 func TestPlanFailureDoesNotBlockOtherModules(t *testing.T) {
 	env, home := setup(t, linksAndBrew)
@@ -201,6 +213,7 @@ func TestPlanFailureDoesNotBlockOtherModules(t *testing.T) {
 }
 
 func TestCorruptStateFailsOnlyFileModules(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture needs the links module (symlinks) next to files")
 	env, home := setup(t, linksOnly+"files: [{src: dotfiles/zshrc, dst: ~/.zshenv}]\n")
 	statePath := filepath.Join(home, ".local/state/zakwas/files.json")
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
@@ -239,7 +252,7 @@ func TestApplyRecordsHistory(t *testing.T) {
 	}
 	c := entry.Changes
 	if !entry.Time.Equal(env.Now()) || entry.FormatVersion != "1" || len(c) != 1 ||
-		c[0].Module != "links" || c[0].Action != "create" || c[0].Target != "~/.zshrc" ||
+		c[0].Module != linkModule || c[0].Action != "create" || c[0].Target != "~/.zshrc" ||
 		entry.Result == nil || entry.Result.Applied != 1 {
 		t.Errorf("entry = %+v", entry)
 	}
@@ -382,10 +395,10 @@ func TestHelpPrintsUsageOnce(t *testing.T) {
 func TestAbsFromCwd(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"", ""},
-		{"/abs/claude", "/abs/claude"},
-		{"rel/claude", "/work/rel/claude"},
+		{testutil.Abs("/abs/claude"), testutil.Abs("/abs/claude")},
+		{"rel/claude", filepath.Join(testutil.Abs("/work"), "rel", "claude")},
 	} {
-		if got := absFromCwd(Env{Cwd: "/work"}, tc.in); got != tc.want {
+		if got := absFromCwd(Env{Cwd: testutil.Abs("/work")}, tc.in); got != tc.want {
 			t.Errorf("absFromCwd(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
@@ -469,6 +482,7 @@ func TestNoWaitOnlyWorksWithApplyAndUpgrade(t *testing.T) {
 }
 
 func TestConcurrentAppliesEndLikeSequentialOnes(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
 	env, home := setup(t, `commands:
   - name: once
     check: test -e marker
@@ -555,6 +569,7 @@ func TestNestedApplyFailsInsteadOfWaitingOnItsParent(t *testing.T) {
 }
 
 func TestCommandsSeeTheRunLockHolder(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
 	env, home := setup(t, `commands:
   - name: who
     check: test -e holder

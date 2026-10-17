@@ -3,11 +3,13 @@ package proposal
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/platform"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const baseConfig = `# my setup
@@ -349,7 +351,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestSensitiveTouches(t *testing.T) {
-	s := Sensitive{Home: "/Users/me", Extra: []string{"/work/claude"}}
+	s := Sensitive{Home: testutil.Abs("/Users/me"), Extra: []string{testutil.Abs("/work/claude")}}
 	tests := []struct {
 		text string
 		want bool
@@ -372,8 +374,16 @@ func TestSensitiveTouches(t *testing.T) {
 		{"brew bundle install", false},
 	}
 	for _, tt := range tests {
-		if _, got := s.Touches(tt.text); got != tt.want {
-			t.Errorf("Touches(%q) = %v, want %v", tt.text, got, tt.want)
+		text := tt.text
+		if strings.HasPrefix(strings.ToLower(text), "/etc") {
+			if runtime.GOOS == "windows" {
+				continue
+			}
+		} else {
+			text = testutil.Abs(text)
+		}
+		if _, got := s.Touches(text); got != tt.want {
+			t.Errorf("Touches(%q) = %v, want %v", text, got, tt.want)
 		}
 	}
 }

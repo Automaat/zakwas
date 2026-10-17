@@ -10,7 +10,7 @@ import (
 	"github.com/Automaat/zakwas/internal/platform"
 )
 
-type platformRow struct{ name, macOS, linux string }
+type platformRow struct{ name, macOS, linux, windows string }
 
 func platformTables(t *testing.T) (modules, options []platformRow) {
 	t.Helper()
@@ -36,10 +36,10 @@ func platformTables(t *testing.T) (modules, options []platformRow) {
 		case cells[0] == "Option":
 			current = &options
 		case strings.HasPrefix(cells[0], "---"):
-		case current == nil || len(cells) < 3:
+		case current == nil || len(cells) < 4:
 			t.Fatalf("unexpected row %q", line)
 		default:
-			*current = append(*current, platformRow{strings.Trim(cells[0], "`"), cells[1], cells[2]})
+			*current = append(*current, platformRow{strings.Trim(cells[0], "`"), cells[1], cells[2], cells[3]})
 		}
 	}
 	return modules, options
@@ -51,7 +51,7 @@ func TestPlatformTableMatchesTheSourceOfTruth(t *testing.T) {
 	var documented []string
 	for _, row := range modules {
 		documented = append(documented, row.name)
-		for goos, cell := range map[string]string{platform.Darwin: row.macOS, platform.Linux: row.linux} {
+		for goos, cell := range map[string]string{platform.Darwin: row.macOS, platform.Linux: row.linux, platform.Windows: row.windows} {
 			want := "no"
 			if platform.Supported(row.name, goos) {
 				want = "yes"
@@ -78,7 +78,7 @@ func TestPlatformTableMatchesTheSourceOfTruth(t *testing.T) {
 			t.Errorf("option %s is documented but not in platform.Features", row.name)
 			continue
 		}
-		for goos, cell := range map[string]string{platform.Darwin: row.macOS, platform.Linux: row.linux} {
+		for goos, cell := range map[string]string{platform.Darwin: row.macOS, platform.Linux: row.linux, platform.Windows: row.windows} {
 			want := "no"
 			switch {
 			case platform.FeatureSupported(row.name, goos):

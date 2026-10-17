@@ -165,7 +165,7 @@ func absFrom(cwd, home, path string) string {
 	if path == "~" {
 		return home
 	}
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+	if rest, ok := config.CutHome(path); ok {
 		return filepath.Join(home, rest)
 	}
 	if filepath.IsAbs(path) {
@@ -217,8 +217,8 @@ func (p *initPlan) check(adds []string, cwd string) error {
 }
 
 func overlapsPath(a, b string) bool {
-	sep := string(filepath.Separator)
-	return a == b || strings.HasPrefix(a, b+sep) || strings.HasPrefix(b, a+sep)
+	a, b = filepath.ToSlash(a), filepath.ToSlash(b)
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 func (p *initPlan) addition(path string) (addition, error) {
@@ -476,6 +476,18 @@ func (p *initPlan) summary() string {
 		fmt.Fprintf(&b, "\nWarning: zakwas already manages %d other file(s) on this %s from another config;\n`zakwas plan` in the new repo lists them as no longer managed, and apply deletes them.\n", p.orphans, platform.Machine(p.goos))
 	}
 	machine := platform.Machine(p.goos)
+	if p.goos == platform.Windows {
+		fmt.Fprintf(&b, `
+Next steps:
+  1. cd %s && zakwas plan
+     Files that already match are adopted; others are backed up to *.zakwas-bak on apply.
+  2. Create an empty GitHub repo, then:
+     git add -A && git commit -m "Initial config" && git remote add origin URL && git push -u origin main
+  3. On a new machine, install zakwas with install.ps1 (see the Windows section of the README), then:
+     git clone URL dotfiles; zakwas -c dotfiles\zakwas.yaml apply
+`, shellQuote(dir))
+		return b.String()
+	}
 	fmt.Fprintf(&b, `
 Next steps:
   1. cd %s && zakwas plan

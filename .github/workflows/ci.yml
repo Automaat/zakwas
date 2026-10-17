@@ -267,3 +267,118 @@ jobs:
         run: |
           ~/.local/bin/mise --version
           "$RUNNER_TEMP/zakwas" -c examples/zakwas.yaml check --only files,mise
+
+  windows:
+    name: windows
+    # Windows support is early: the agent features and the portable core are
+    # built and tested here. The macOS-only modules and tests that need sh,
+    # POSIX file modes or symlinks are skipped with a reason.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: build
+        run: go build ./...
+
+      - name: build for arm64
+        env:
+          GOARCH: arm64
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: vet for arm64
+        env:
+          GOARCH: arm64
+        run: go vet ./...
+
+      - name: test
+        run: go test ./...
+
+      - name: install.ps1 passes PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Write-Warning 'PSScriptAnalyzer is not on this runner; only the syntax was checked'
+            exit 0
+          }
+          $findings = Invoke-ScriptAnalyzer -Path install.ps1 -Severity Warning, Error
+          $findings | Format-Table
+          if ($findings) { exit 1 }
+
+      # A local server stands in for GitHub, so the test makes no outside call.
+      - name: install.ps1 installs a release and rejects a bad checksum
+        shell: pwsh
+        run: |
+          $version = '9.9.9'
+          $arch = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'arm64' } else { 'amd64' }
+          $asset = "zakwas_${version}_windows_$arch.zip"
+          $site = Join-Path $env:RUNNER_TEMP 'site'
+          $release = Join-Path $site "download/v$version"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          $exe = Join-Path $env:RUNNER_TEMP 'zakwas.exe'
+          go build -ldflags "-X main.version=$version" -o $exe ./cmd/zakwas
+          Compress-Archive -Path $exe -DestinationPath (Join-Path $release $asset)
+          $hash = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $release $asset)).Hash.ToLowerInvariant()
+          $sums = Join-Path $release 'checksums.txt'
+          "$hash  $asset" | Set-Content -Encoding ascii -Path $sums
+          $server = Start-Process -PassThru -WindowStyle Hidden -FilePath python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $site
+          try {
+            Start-Sleep -Seconds 3
+            foreach ($shell in 'pwsh', 'powershell') {
+              $dir = Join-Path $env:RUNNER_TEMP "bin-$shell"
+              & $shell -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $dir
+              if ($LASTEXITCODE -ne 0) { throw "$shell install failed" }
+              $got = & (Join-Path $dir 'zakwas.exe') version
+              if ($got -ne "zakwas $version") { throw "$shell installed '$got'" }
+            }
+            ('0' * 64) + "  $asset" | Set-Content -Encoding ascii -Path $sums
+            $dir = Join-Path $env:RUNNER_TEMP 'bin-bad'
+            & pwsh -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $dir
+            if ($LASTEXITCODE -eq 0) { throw 'install.ps1 accepted a bad checksum' }
+            if (Test-Path (Join-Path $dir 'zakwas.exe')) { throw 'a bad download was installed' }
+            ((Get-FileHash -Algorithm SHA256 -Path (Join-Path $release $asset)).Hash.ToLowerInvariant() + "  $asset") | Set-Content -Encoding ascii -Path $sums
+            foreach ($bad in 'ftp://127.0.0.1:8765', 'file:///C:/x', 'http://example.com', 'http://user:pw@127.0.0.1:8765', 'not a url') {
+              $dir = Join-Path $env:RUNNER_TEMP 'bin-badurl'
+              $out = & pwsh -NoProfile -File ./install.ps1 -Version $version -BaseUrl $bad -Dir $dir 2>&1 | Out-String
+              if ($LASTEXITCODE -eq 0) { throw "install.ps1 accepted -BaseUrl $bad" }
+              if ($out -notmatch 'BaseUrl') { throw "no clear error for -BaseUrl ${bad}: $out" }
+              if (Test-Path $dir) { throw "a rejected -BaseUrl $bad created the install directory" }
+            }
+            $dir = Join-Path $env:RUNNER_TEMP 'bin-path'
+            & pwsh -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $dir -AddToPath
+            if ($LASTEXITCODE -ne 0) { throw 'install -AddToPath failed' }
+            $upper = $dir.ToUpperInvariant()
+            & pwsh -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $upper -AddToPath
+            if ($LASTEXITCODE -ne 0) { throw 'a second install -AddToPath failed' }
+            $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+            $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $key.Close()
+            $mine = @($raw -split ';' | Where-Object { $_.Trim().TrimEnd('\') -ieq $dir })
+            if ($mine.Count -ne 1) { throw "PATH holds the install directory $($mine.Count) times: $raw" }
+            if ($raw -match ';;' -or $raw.StartsWith(';') -or $raw.EndsWith(';')) { throw "PATH has empty entries: $raw" }
+            $dir = Join-Path $env:RUNNER_TEMP 'bin-running'
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Copy-Item -Path (Join-Path $env:SystemRoot 'System32\ping.exe') -Destination (Join-Path $dir 'zakwas.exe')
+            $busy = Start-Process -PassThru -WindowStyle Hidden -FilePath (Join-Path $dir 'zakwas.exe') -ArgumentList '-n', '60', '127.0.0.1'
+            try {
+              $out = & pwsh -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $dir 2>&1 | Out-String
+              if ($LASTEXITCODE -eq 0) { throw 'install.ps1 replaced a running zakwas.exe' }
+              if ($out -notmatch 'is zakwas running') { throw "no clear error for a running zakwas.exe: $out" }
+              if (Get-ChildItem -Path $dir -Filter 'zakwas.exe.new-*') { throw 'a staged copy was left behind' }
+            } finally {
+              Stop-Process -Id $busy.Id -ErrorAction SilentlyContinue
+            }
+          } finally {
+            Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          }
+          exit 0

@@ -26,7 +26,7 @@ const forceExitAfter = 2 * time.Second
 // SIGTERM and SIGHUP by itself and exits 0.
 func stopSignals(args []string, ignored func(os.Signal) bool) []os.Signal {
 	sigs := []os.Signal{os.Interrupt}
-	if len(args) > 0 && args[0] == "mcp" {
+	if len(args) > 0 && args[0] == "mcp" || !hasSIGTERMAndHUP {
 		return sigs
 	}
 	sigs = append(sigs, syscall.SIGTERM)
@@ -82,7 +82,7 @@ func watchSignals(parent context.Context, die func(os.Signal), sigs ...os.Signal
 func dieOf(sig os.Signal) {
 	signal.Reset(sig)
 	if s, ok := sig.(syscall.Signal); ok {
-		_ = syscall.Kill(os.Getpid(), s)
+		killSelf(s)
 	}
 	time.Sleep(time.Second)
 	os.Exit(exitCodeFor(sig))

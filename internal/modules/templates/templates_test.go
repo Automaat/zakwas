@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func setup(t *testing.T, tmpl string, mode os.FileMode) (*Module, string) {
@@ -69,7 +71,7 @@ func TestRenderAndConverge(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("rendered %q, want %q", got, want)
 	}
-	if info, _ := os.Stat(dst); info.Mode().Perm() != 0o400 {
+	if info, _ := os.Stat(dst); !testutil.SamePerm(info.Mode(), 0o400) {
 		t.Errorf("mode = %o", info.Mode().Perm())
 	}
 	if again := plan(t, m); len(again) != 0 {
@@ -95,7 +97,7 @@ func TestDrift(t *testing.T) {
 			if err := os.Chmod(dst, 0o644); err != nil {
 				t.Fatal(err)
 			}
-		}, "mode 644 → 444"},
+		}, "mode " + writableMode + " → 444"},
 		{"home-manager symlink", func(t *testing.T, dst string) {
 			if err := os.Remove(dst); err != nil {
 				t.Fatal(err)
@@ -365,12 +367,14 @@ func TestAgentMCPExpandsHome(t *testing.T) {
 		},
 		"web": {URL: "https://example.com/~/mcp", Headers: map[string]string{"X-Path": "~/h"}},
 	}}
-	got, err := agentMCP(agents, config.ProviderOpencode, "/Users/zażółć me")
+	home := testutil.Abs("/Users/zażółć me")
+	got, err := agentMCP(agents, config.ProviderOpencode, home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"tool": {"type":"local","command":["/Users/zażółć me/.local/bin/tool","/Users/zażółć me/cfg","--dir=~/keep","~other/x","/Users/zażółć me"],` +
-		`"environment":{"DATA":"/Users/zażółć me/data","LITERAL":"a~/b"},"enabled":true}, ` +
+	esc := testutil.Esc(home)
+	want := `{"tool": {"type":"local","command":["` + esc + `/.local/bin/tool","` + esc + `/cfg","--dir=~/keep","~other/x","` + esc + `"],` +
+		`"environment":{"DATA":"` + esc + `/data","LITERAL":"a~/b"},"enabled":true}, ` +
 		`"web": {"type":"remote","url":"https://example.com/~/mcp","headers":{"X-Path":"~/h"},"oauth":false,"enabled":true}}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
@@ -379,3 +383,10 @@ func TestAgentMCPExpandsHome(t *testing.T) {
 		t.Error("agentMCP changed the declared server")
 	}
 }
+
+var writableMode = func() string {
+	if runtime.GOOS == "windows" {
+		return "666"
+	}
+	return "644"
+}()

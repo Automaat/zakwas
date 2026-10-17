@@ -526,7 +526,8 @@ func printable(s string) string {
 // opencodeConfigDir is opencode's config home when $XDG_CONFIG_HOME moves it
 // out of ~/.config, which the sensitive list already covers.
 func opencodeConfigDir(env Env) string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); env.Home == os.Getenv("HOME") && filepath.IsAbs(xdg) {
+	home, _ := os.UserHomeDir()
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); env.Home == home && filepath.IsAbs(xdg) {
 		return filepath.Join(xdg, "opencode")
 	}
 	return ""

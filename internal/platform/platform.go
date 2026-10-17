@@ -9,33 +9,46 @@ import (
 )
 
 const (
-	Darwin = "darwin"
-	Linux  = "linux"
+	Darwin  = "darwin"
+	Linux   = "linux"
+	Windows = "windows"
 )
 
 const DocsAnchor = "docs/config.md#platform-support"
 
 var (
-	allOS      = []string{Darwin, Linux}
+	allOS      = []string{Darwin, Linux, Windows}
+	unixOnly   = []string{Darwin, Linux}
 	darwinOnly = []string{Darwin}
 )
 
+// Module is a zakwas module and the operating systems it runs on. Why says
+// why it is missing elsewhere; WhyOS overrides it for one OS.
 type Module struct {
-	Name string
-	OS   []string
-	Why  string
+	Name  string
+	OS    []string
+	Why   string
+	WhyOS map[string]string
+}
+
+// Reason is why the module is not supported on goos.
+func (m Module) Reason(goos string) string {
+	if why, ok := m.WhyOS[goos]; ok {
+		return why
+	}
+	return m.Why
 }
 
 // Modules lists every module in apply order.
 var Modules = []Module{
-	{Name: "system", OS: allOS},
+	{Name: "system", OS: unixOnly, Why: "its directory modes and ssh-keygen setup are not ported to Windows yet"},
 	{Name: "files", OS: allOS},
-	{Name: "links", OS: allOS},
+	{Name: "links", OS: unixOnly, Why: "symlinks need a privilege Windows users lack by default and have no fallback yet"},
 	{Name: "templates", OS: allOS},
 	{Name: "brew", OS: darwinOnly, Why: "it bootstraps Homebrew for macOS and manages casks"},
-	{Name: "mise", OS: darwinOnly, Why: "its bootstrap installs the macOS build of mise"},
+	{Name: "mise", OS: darwinOnly, Why: "its bootstrap installs the macOS build of mise", WhyOS: map[string]string{Windows: "it has no Windows bootstrap yet"}},
 	{Name: "agents", OS: allOS},
-	{Name: "commands", OS: allOS},
+	{Name: "commands", OS: unixOnly, Why: "its checks and steps run with sh, which Windows lacks"},
 	{Name: "launchd", OS: darwinOnly, Why: "launchd is macOS's service manager"},
 	{Name: "defaults", OS: darwinOnly, Why: "it drives the macOS 'defaults' tool"},
 }
@@ -52,6 +65,7 @@ type Feature struct {
 
 var Features = []Feature{
 	{Name: "system.sudoTouchID", OS: darwinOnly, Why: "Touch ID and pam_tid.so are macOS only"},
+	{Name: "agents.skills", OS: unixOnly, Why: "skills are linked with symlinks, which Windows does not support yet"},
 	{Name: "protect.immutable", OS: darwinOnly, Why: "the uchg flag is macOS only", Fallback: "files are read-only copies"},
 }
 
@@ -65,6 +79,8 @@ func Name(goos string) string {
 		return "macOS"
 	case Linux:
 		return "Linux"
+	case Windows:
+		return "Windows"
 	}
 	return goos
 }
@@ -136,7 +152,7 @@ func ModuleError(module, goos string) error {
 		if m.Name != module || slices.Contains(m.OS, goos) {
 			continue
 		}
-		return fmt.Errorf("%s: not supported on %s (%s); see %s", module, Name(goos), m.Why, DocsAnchor)
+		return fmt.Errorf("%s: not supported on %s (%s); see %s", module, Name(goos), m.Reason(goos), DocsAnchor)
 	}
 	return nil
 }

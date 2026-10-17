@@ -87,7 +87,7 @@ func run() int {
 func extendPath(home string) {
 	dirs := filepath.SplitList(os.Getenv("PATH"))
 	for _, d := range extraPathDirs(runtime.GOOS, home) {
-		if !slices.Contains(dirs, d) {
+		if !slices.ContainsFunc(dirs, func(have string) bool { return samePathEntry(have, d, runtime.GOOS) }) {
 			dirs = append(dirs, d)
 		}
 	}
@@ -95,14 +95,25 @@ func extendPath(home string) {
 }
 
 // extraPathDirs are Homebrew's prefix on macOS, the dir both OSes put
-// user-installed tools in, and ~/.local/bin, where mise and the agent CLIs'
+// user-installed tools in (not on Windows), and ~/.local/bin, where mise and the agent CLIs'
 // own installers put binaries.
 func extraPathDirs(goos, home string) []string {
-	dirs := []string{"/usr/local/bin", filepath.Join(home, ".local", "bin")}
+	userBin := filepath.Join(home, ".local", "bin")
+	if goos == "windows" {
+		return []string{userBin}
+	}
+	dirs := []string{"/usr/local/bin", userBin}
 	if goos == platform.Darwin {
 		dirs = append([]string{"/opt/homebrew/bin"}, dirs...)
 	}
 	return dirs
+}
+
+func samePathEntry(a, b, goos string) bool {
+	if goos == "windows" {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return a == b
 }
 
 // colorOutput follows no-color.org: colors only on a terminal, never when
@@ -111,7 +122,7 @@ func colorOutput() bool {
 	if _, set := os.LookupEnv("NO_COLOR"); set || os.Getenv("TERM") == "dumb" {
 		return false
 	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
+	return term.IsTerminal(int(os.Stdout.Fd())) && enableANSI(os.Stdout) && enableANSI(os.Stderr)
 }
 
 func hostname() string {

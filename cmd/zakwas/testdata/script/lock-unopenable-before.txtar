@@ -1,3 +1,4 @@
+[windows] skip 'file modes (chmod 0000) have no Windows equivalent'
 [root] skip 'root ignores file modes'
 
 chmod 0000 home/.local/state/zakwas/lock

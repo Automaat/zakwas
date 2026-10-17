@@ -1,6 +1,6 @@
 # zakwas
 
-Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, links, templates, brew, mise, agents, defaults, system, commands, launchd). Linux runs the agents, files, links, templates, commands and system (dirs, sshKey) modules. Users keep the config in their own repo; see `examples/`.
+Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, links, templates, brew, mise, agents, defaults, system, commands, launchd). Linux runs the agents, files, links, templates, commands and system (dirs, sshKey) modules. Windows (early) runs agents, files and templates. Users keep the config in their own repo; see `examples/`.
 
 ## Layout
 
@@ -10,7 +10,8 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `internal/cli/` | flag parsing, module wiring, exit codes, apply history |
 | `internal/config/` | `zakwas.yaml` schema, `Validate`, config discovery |
 | `internal/platform/` | which module and option runs on which OS (`Supported`, `ModuleError`); the one source for validation, wiring and the `docs/config.md` tables |
-| `internal/testutil/` | `RequireDarwin`/`RequireLinux` skip helpers for OS-bound tests |
+| `internal/testutil/` | `RequireDarwin`/`RequireLinux`/`SkipOnWindows` skip helpers for OS-bound tests, `Abs`, `SamePerm`, `Esc` for portable fixtures |
+| `internal/fsutil/` | `Rename` (replaces read-only files, retries on Windows) and `SyncDir`; every file replace goes through it |
 | `internal/engine/` | `Module` interface, plan/apply |
 | `internal/modules/<name>/` | one package per module |
 | `internal/proposal/` | typed config edits (byte-splicing), proposal store, risk tiers |
@@ -76,3 +77,4 @@ system → files → links → templates → brew → mise → agents → comman
 - The plugin version (`plugins/zakwas/.claude-plugin/plugin.json`, nowhere else) must equal the release tag: bump it in a PR before tagging; `release.yml` fails a tag that differs. Change the skill together with the `zakwas mcp` tools and `propose` operations it names.
 - Nothing user-specific in code or `examples/`: no personal paths, taps, or keys.
 - `install.sh` passes `shellcheck`, workflows pass `actionlint` (both in CI).
+- Windows (`windows` CI job on `windows-latest`, the only real Windows run): `platform.Windows` supports `files`, `templates` and `agents`; `system`, `links`, `mise`, `brew`, `commands`, `launchd`, `defaults`, `system.sudoTouchID` and `agents.skills` are config errors like on Linux, and opencode hooks, opencode plugin skills and the Gemini extension link fail their own plan. Build-tagged files (`*_windows.go`) hold the lock (`LockFileEx` on a byte past the holder record, so the record stays readable), kill-on-cancel, console ANSI and signals (`os.Interrupt` only); never call `syscall.Kill`, `Setpgid` or `Flock` outside `!windows` files. Edits keep a file's CRLF; zakwas-written files use LF. Tests skip with `testutil.SkipOnWindows(t, reason)`; e2e scripts with `[windows] skip 'reason'`. The guard's rules do not cover PowerShell, `cmd` or `zakwas.exe` yet (phase 2).

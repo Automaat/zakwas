@@ -1,3 +1,4 @@
+[windows] skip 'the immutable flag is macOS only'
 [!darwin] skip 'uchg is macOS only'
 
 zakwas apply -y

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 // offlineCfg has a module of every kind, so an offline check that started
@@ -53,6 +54,7 @@ func applyOwned(t *testing.T, env Env) {
 }
 
 func TestOfflineCheckExitCodes(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
 	env, home := setupOffline(t)
 	fake := runnertest.New()
 	env.Runner = fake
@@ -90,6 +92,7 @@ func TestOfflineCheckExitCodes(t *testing.T) {
 }
 
 func TestOfflineCheckStartsNoCommand(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
 	env, _ := setupOffline(t)
 	fake := runnertest.New()
 	env.Runner = fake
@@ -117,6 +120,7 @@ func TestOfflineSplitCoversEveryModule(t *testing.T) {
 }
 
 func TestOfflineCheckJSON(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
 	env, _ := setupOffline(t)
 	r := invoke(env, "", "check", "--offline", "--json")
 	if r.code != ExitDrift {
@@ -163,6 +167,7 @@ func TestOfflineFlagConflicts(t *testing.T) {
 }
 
 func TestOfflineCheckWithOnlyNamesTheUnselectedModules(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
 	env, _ := setupOffline(t)
 	r := invoke(env, "", "check", "--offline", "--only", "links")
 	if r.code != ExitDrift || strings.Contains(r.stdout, ".greeting") {

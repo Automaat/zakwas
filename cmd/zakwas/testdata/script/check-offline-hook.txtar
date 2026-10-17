@@ -1,3 +1,4 @@
+[windows] skip 'runs a hook script with sh'
 mkdir other
 cd other
 

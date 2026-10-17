@@ -6,7 +6,7 @@ zakwas runs as your user and changes what your config declares. Your config repo
 
 ## Release artifacts
 
-Releases are built by GoReleaser in GitHub Actions (`.github/workflows/release.yml`). From 0.4.0 on, a follow-up `attest` job signs [build provenance attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) for every `zakwas_*_darwin_*.tar.gz` and `zakwas_*_linux_*.tar.gz` archive and for `checksums.txt`. An attestation ties the file to the repo, workflow, and tag that built it. The release is public a minute or two before that job finishes, and stays unattested until it's re-run if it fails; in either window `install.sh` refuses it when a logged-in `gh` new enough to verify is present (older or logged-out `gh` skips the check). Re-run only the `attest` job; it re-attests the uploaded `dist` artifact, which GitHub keeps for 90 days.
+Releases are built by GoReleaser in GitHub Actions (`.github/workflows/release.yml`). From 0.4.0 on, a follow-up `attest` job signs [build provenance attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) for every `zakwas_*_darwin_*.tar.gz`, `zakwas_*_linux_*.tar.gz` and `zakwas_*_windows_*.zip` archive and for `checksums.txt`. An attestation ties the file to the repo, workflow, and tag that built it. The release is public a minute or two before that job finishes, and stays unattested until it's re-run if it fails; in either window `install.sh` refuses it when a logged-in `gh` new enough to verify is present (older or logged-out `gh` skips the check). Re-run only the `attest` job; it re-attests the uploaded `dist` artifact, which GitHub keeps for 90 days.
 
 ### What `install.sh` checks
 
@@ -17,6 +17,10 @@ Releases are built by GoReleaser in GitHub Actions (`.github/workflows/release.y
 5. `ZAKWAS_RELEASE_URL` points the installer at a release mirror. It must be `https`, or `http` on `localhost` or `127.0.0.1`, and may not contain credentials (`@`). With an `https` URL, redirects to plain `http` are refused. The mirror supplies the archive and its checksums, so it is trusted like GitHub; use it only for a mirror you run.
 
 The checksum alone catches a corrupted or truncated download. It can't catch a tampered release, because `checksums.txt` comes from the same place as the archive. The attestation can: it is signed through GitHub's OIDC identity for the release workflow, which a modified asset can't reproduce.
+
+### What `install.ps1` checks
+
+Downloads the Windows zip and `checksums.txt` and stops if the zip's SHA256 doesn't match. It does not verify the attestation, so on Windows the checksum only catches a corrupted download, not a tampered release. Verify by hand with `gh attestation verify` as below before you trust a download from a mirror or a release you did not expect.
 
 ### What `zakwas self-update` checks
 
@@ -31,7 +35,7 @@ gh attestation verify zakwas_0.4.0_darwin_arm64.tar.gz --repo Automaat/zakwas \
   --source-ref refs/tags/v0.4.0
 ```
 
-Use `darwin_amd64` on an Intel Mac, `linux_amd64` or `linux_arm64` on Linux. `checksums.txt` verifies the same way.
+Use `darwin_amd64` on an Intel Mac, `linux_amd64` or `linux_arm64` on Linux, and the `windows_amd64.zip` or `windows_arm64.zip` name on Windows. `checksums.txt` verifies the same way.
 
 ## Tools zakwas bootstraps
 
@@ -68,6 +72,8 @@ The deny rules are the boundary, because the agent's own runtime enforces them. 
 | Copilot CLI | none | Copilot keeps user-level deny rules only in root-owned managed settings, so only the refusal covers it, and an agent that unsets its marker variable gets past it. The plan warns. |
 
 Codex, Gemini CLI and Copilot CLI are guarded only when `agents.providers`, a marketplace's or a plugin's `providers` names them. Naming one only in an `mcp`, `skills`, `profiles`, `permissions` or `hooks` entry converges it but leaves it unguarded. A guard that can't cover a managed provider is a warning in `plan`, not a change, so `check` stays clean.
+
+On Windows the Claude and Codex rules deny `zakwas apply` as a Bash command only, and name `zakwas`, not `zakwas.exe`. An agent can run the same command from PowerShell or `cmd`, or as `zakwas.exe`, and no rule stops it; the refusal inside zakwas, which looks for the agent's environment variables, is the only barrier there. Treat the guard as incomplete on Windows until the PowerShell and `cmd` rules land.
 
 ### Proposals and who may approve
 

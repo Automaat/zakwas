@@ -10,6 +10,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 type installingHooksRunner struct {
@@ -31,11 +32,11 @@ func TestKlaudiushHooksConverge(t *testing.T) {
 	writeHookTestFile(t, binary, "klaudiush test binary")
 	codexPath := filepath.Join(home, "custom", "codex-hooks.json")
 	pluginPath := filepath.Join(home, "custom", "klaudiush.ts")
-	writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = true\n[providers.codex]\nenabled = true\nexperimental = true\nhooks_config_path = \""+codexPath+"\"\n[providers.opencode]\nenabled = true\nplugin_path = \""+pluginPath+"\"\n")
-	writeHookTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse --trace"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUseFailure"}]}]}}`)
-	fullCodex := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event SessionStart"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event PreToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"` + binary + ` --provider codex --event Stop"}]}]}}`
+	writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = true\n[providers.codex]\nenabled = true\nexperimental = true\nhooks_config_path = \""+testutil.Esc(codexPath)+"\"\n[providers.opencode]\nenabled = true\nplugin_path = \""+testutil.Esc(pluginPath)+"\"\n")
+	writeHookTestFile(t, filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --hook-type PreToolUse --trace"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --hook-type PostToolUseFailure"}]}]}}`)
+	fullCodex := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + testutil.Esc(binary) + ` --provider codex --event SessionStart"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"` + testutil.Esc(binary) + ` --provider codex --event PreToolUse"}]}],"Stop":[{"hooks":[{"type":"command","command":"` + testutil.Esc(binary) + ` --provider codex --event Stop"}]}]}}`
 	writeHookTestFile(t, codexPath, fullCodex)
-	writeHookTestFile(t, pluginPath, `const BINARY = "`+binary+`"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`)
+	writeHookTestFile(t, pluginPath, `const BINARY = "`+testutil.Esc(binary)+`"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`)
 	installer := &installingHooksRunner{Fake: runnertest.New().OnOK("klaudiush init --install-hooks --global", ""), install: func() error { return nil }}
 	m := &Module{Agents: config.Agents{Hooks: &config.AgentHooks{Klaudiush: true}}, Paths: config.Paths{Home: home}, Runner: installer, klaudiushPath: binary}
 	changes, err := m.Plan(context.Background())
@@ -49,7 +50,7 @@ func TestKlaudiushHooksConverge(t *testing.T) {
 	if err != nil || len(changes) != 0 {
 		t.Fatalf("second plan = %v, %v", changes, err)
 	}
-	writeHookTestFile(t, codexPath, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"`+binary+` --provider codex --event SessionStart"}]}]}}`)
+	writeHookTestFile(t, codexPath, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --provider codex --event SessionStart"}]}]}}`)
 	changes, err = m.Plan(context.Background())
 	if err != nil || len(changes) != 1 || !strings.Contains(changes[0].Detail, "codex") {
 		t.Fatalf("drift plan = %v, %v", changes, err)
@@ -99,7 +100,7 @@ func TestKlaudiushFingerprintAfterSharedHookWrite(t *testing.T) {
 			writeHookTestFile(t, binary, "klaudiush binary")
 			writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = true\n")
 			settings := filepath.Join(home, ".claude", "settings.json")
-			writeHookTestFile(t, settings, `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PreToolUse"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+binary+` --hook-type PostToolUseFailure"}]}]}}`)
+			writeHookTestFile(t, settings, `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --hook-type PreToolUse"}]}],"PostToolUse":[{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --hook-type PostToolUse"}]}],"PostToolUseFailure":[{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --hook-type PostToolUseFailure"}]}]}}`)
 			m := &Module{
 				Agents: config.Agents{Providers: []string{"claude"}, Hooks: &config.AgentHooks{Klaudiush: true, Commands: []config.AgentCommandHook{{Event: "beforeTool", Command: "/bin/check"}}}},
 				Paths:  config.Paths{Home: home}, Runner: runnertest.New().OnOK("klaudiush init --install-hooks --global", ""), klaudiushPath: binary,
@@ -209,11 +210,11 @@ func TestKlaudiushGeminiEvidenceEvents(t *testing.T) {
 			binary := filepath.Join(home, "bin", "klaudiush")
 			settings := filepath.Join(home, "gemini.json")
 			writeHookTestFile(t, binary, "binary")
-			writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = false\n[providers.gemini]\nenabled = true\nsettings_path = \""+settings+"\"\n[evidence.tool_phase]\nenabled = true\n"+tt.filter)
+			writeHookTestFile(t, filepath.Join(home, ".config", "klaudiush", "config.toml"), "[providers.claude]\nenabled = false\n[providers.gemini]\nenabled = true\nsettings_path = \""+testutil.Esc(settings)+"\"\n[evidence.tool_phase]\nenabled = true\n"+tt.filter)
 			events := []string{"BeforeTool", "AfterTool", "AfterAgent", "SessionStart", "SessionEnd", "Notification", "PreCompress"}
 			var groups []string
 			for _, event := range events {
-				groups = append(groups, `"`+event+`": [{"hooks":[{"type":"command","command":"`+binary+` --provider gemini --event `+event+`"}]}]`)
+				groups = append(groups, `"`+event+`": [{"hooks":[{"type":"command","command":"`+testutil.Esc(binary)+` --provider gemini --event `+event+`"}]}]`)
 			}
 			writeHookTestFile(t, settings, `{"hooks":{`+strings.Join(groups, ",")+`}}`)
 			m := &Module{Agents: config.Agents{Hooks: &config.AgentHooks{Klaudiush: true}}, Paths: config.Paths{Home: home}, Runner: runnertest.New(), klaudiushPath: binary}
@@ -236,11 +237,11 @@ func TestKlaudiushOpencodeHookVersions(t *testing.T) {
 		source string
 		want   bool
 	}{
-		{"v1", `const BINARY = "` + binary + `"; "tool.execute.before": async () => {}; case "session.idle":`, true},
-		{"v2", `const BINARY = "` + binary + `"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`, true},
-		{"missing before", `const BINARY = "` + binary + `"; case "session.execution.succeeded":`, false},
-		{"missing idle", `const BINARY = "` + binary + `"; ctx.tool.hook("execute.before", () => {});`, false},
-		{"mixed versions", `const BINARY = "` + binary + `"; "tool.execute.before": async () => {}; case "session.execution.succeeded":`, false},
+		{"v1", `const BINARY = "` + testutil.Esc(binary) + `"; "tool.execute.before": async () => {}; case "session.idle":`, true},
+		{"v2", `const BINARY = "` + testutil.Esc(binary) + `"; ctx.tool.hook("execute.before", () => {}); case "session.execution.succeeded":`, true},
+		{"missing before", `const BINARY = "` + testutil.Esc(binary) + `"; case "session.execution.succeeded":`, false},
+		{"missing idle", `const BINARY = "` + testutil.Esc(binary) + `"; ctx.tool.hook("execute.before", () => {});`, false},
+		{"mixed versions", `const BINARY = "` + testutil.Esc(binary) + `"; "tool.execute.before": async () => {}; case "session.execution.succeeded":`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

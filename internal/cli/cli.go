@@ -601,12 +601,15 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	paths := config.Paths{Home: env.Home, Root: cfg.Root}
 	immutable := cfg.Protect.Immutable && platform.FeatureSupported("protect.immutable", goos)
 	installer := &install.Installer{Paths: paths, StatePath: install.StatePath(env.Home), Immutable: immutable}
-	mods := []engine.Module{
-		&system.Module{System: cfg.System, Paths: paths, Runner: env.Runner, PAMFile: env.PAMFile},
-		&files.Module{Files: cfg.Files, Keep: templateDsts(cfg, paths), Paths: paths, Installer: installer, Immutable: cfg.Protect.Immutable, GOOS: goos},
-		&links.Module{Links: cfg.Links, Paths: paths},
-		&templates.Module{Templates: cfg.Templates, Agents: cfg.Agents, Paths: paths, Installer: installer},
+	var mods []engine.Module
+	if here("system") {
+		mods = append(mods, &system.Module{System: cfg.System, Paths: paths, Runner: env.Runner, PAMFile: env.PAMFile})
 	}
+	mods = append(mods, &files.Module{Files: cfg.Files, Keep: templateDsts(cfg, paths), Paths: paths, Installer: installer, Immutable: cfg.Protect.Immutable, GOOS: goos})
+	if here("links") {
+		mods = append(mods, &links.Module{Links: cfg.Links, Paths: paths})
+	}
+	mods = append(mods, &templates.Module{Templates: cfg.Templates, Agents: cfg.Agents, Paths: paths, Installer: installer})
 	if cfg.Brew != nil && here("brew") {
 		mods = append(mods, &brew.Module{Brew: *cfg.Brew, Paths: paths, Runner: env.Runner})
 	}
@@ -650,7 +653,9 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 			GeminiHome: absFromCwd(env, env.GeminiHome), CopilotHome: absFromCwd(env, env.CopilotHome),
 		})
 	}
-	mods = append(mods, &commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner})
+	if here("commands") {
+		mods = append(mods, &commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner})
+	}
 	if _, err := os.Lstat(launchd.StatePath(env.Home)); here("launchd") && (len(cfg.Launchd) > 0 || err == nil) {
 		mods = append(mods, &launchd.Module{Jobs: cfg.Launchd, Paths: paths, Runner: env.Runner, UID: env.UID})
 	}

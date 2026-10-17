@@ -1,3 +1,4 @@
+[windows] skip 'builds its fixtures with sh'
 env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex
 mkdir claude codex

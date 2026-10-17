@@ -14,6 +14,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/fsutil"
 	"github.com/Automaat/zakwas/internal/install"
 	"github.com/Automaat/zakwas/internal/modules/agents"
 	"github.com/Automaat/zakwas/internal/proposal"
@@ -407,7 +408,7 @@ func replaceFile(path string, want, data []byte) error {
 		_ = os.Remove(tmp.Name())
 		return err
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := fsutil.Rename(tmp.Name(), path); err != nil {
 		_ = os.Remove(tmp.Name())
 		return err
 	}

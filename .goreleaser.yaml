@@ -19,6 +19,15 @@ builds:
     flags: [-trimpath]
     ldflags:
       - -s -w -X main.version={{.Version}}
+  - id: windows
+    main: ./cmd/zakwas
+    env:
+      - CGO_ENABLED=0
+    goos: [windows]
+    goarch: [arm64, amd64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
 
 archives:
   - id: darwin
@@ -28,6 +37,10 @@ archives:
   - id: linux
     ids: [linux]
     formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: windows
+    ids: [windows]
+    formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

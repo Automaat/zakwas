@@ -14,6 +14,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/runner"
 )
@@ -77,8 +78,8 @@ func (m *Module) klaudiushBinary() (string, error) {
 }
 
 func (m *Module) hookPath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(m.Paths.Home, path[2:])
+	if rest, ok := config.CutHome(path); ok {
+		return filepath.Join(m.Paths.Home, rest)
 	}
 	if !filepath.IsAbs(path) {
 		return filepath.Join("/", path)
@@ -380,10 +381,17 @@ func opencodeHookRegistered(path, binary string) (bool, error) {
 // xdgConfigHome is where XDG-style tools look for their config: $XDG_CONFIG_HOME
 // when it is absolute and zakwas runs against the real home, else ~/.config.
 func (m *Module) xdgConfigHome() string {
-	if m.Paths.Home == os.Getenv("HOME") {
+	if m.Paths.Home == envHome() {
 		if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
 			return xdg
 		}
 	}
 	return filepath.Join(m.Paths.Home, ".config")
+}
+
+// envHome is the home directory the process runs with ($HOME, or the user
+// profile on Windows), which is where XDG_CONFIG_HOME applies.
+func envHome() string {
+	home, _ := os.UserHomeDir()
+	return home
 }

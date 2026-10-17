@@ -11,6 +11,7 @@ What a new user runs into first, and what to do. Every message below is what zak
 - [`agents: plan failed: ... is not installed`](#agents-plan-failed--is-not-installed)
 - [`refusing to apply from a ... session`](#refusing-to-apply-from-a--session)
 - [Where zakwas keeps its state](#where-zakwas-keeps-its-state)
+- [Windows](#windows)
 - [Stop managing a file, or remove zakwas](#stop-managing-a-file-or-remove-zakwas)
 
 ## `zakwas.yaml not found`
@@ -114,6 +115,22 @@ zakwas: refusing to apply from a Claude Code session: an agent that can apply th
 With an `agents` section the guard is on. `apply`, `upgrade` and `approve` exit 1 before they change anything when a coding agent started the shell they run in; `plan`, `check`, `capture` and `propose` still work. Run the command in a terminal window you opened yourself, outside the agent.
 
 zakwas recognizes an agent session by environment variables the agents set (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, `COPILOT_AGENT_SESSION_ID` and a few more). A terminal that was opened from inside an agent inherits them: check with `env | grep -E 'CLAUDE|CODEX|OPENCODE|GEMINI|COPILOT'` and open a fresh window. To turn the guard off, set `agents.guard: false`; read [security.md](security.md#coding-agents) first.
+
+## Windows
+
+Windows support is early; the agent features and the portable core run, see [agents.md](agents.md#windows). The messages you meet:
+
+- `brew: not supported on Windows (...); see docs/config.md#platform-support`, and the same for `system`, `links`, `mise`, `commands`, `launchd`, `defaults` and the options `system.sudoTouchID` and `agents.skills`: Windows rejects a config that uses them, like Linux does for the macOS sections. Remove them from the config you use on Windows, or keep a separate `zakwas.yaml` for it. Use `files` where you had `links`. [Platform support](config.md#platform-support) lists what runs where.
+- `zakwas: self-update is not supported on Windows yet`: download the newer zip or run `install.ps1` again.
+- `claude: command not found` while it works in your terminal: zakwas starts agent CLIs without a shell, so they must be on `PATH` as `.exe` or `.cmd`. npm's `claude.cmd` and `codex.cmd` are found; a `.ps1` alone is not. Open a new terminal after installing an agent so the process sees the new `PATH`.
+- `stdin is not a terminal, so approve can't ask for confirmation` in Git Bash: mintty hands programs a pipe, not a console. Run `zakwas approve` from PowerShell or Windows Terminal, or prefix it with `winpty`.
+- `Access is denied` replacing a file: another program holds it open, such as an editor or the agent itself. zakwas retries briefly, then fails; close the program and apply again.
+- A managed file is read-only because zakwas set the read-only attribute. `protect.immutable` has no effect on Windows and `plan` says so. Clear it with `attrib -r <file>` only for a quick experiment.
+- Paths in `zakwas.yaml` keep `~/` and `/`; `~\` and `C:\...` also work. A template that writes `{{ .Home }}` into JSON gets backslashes: use `{{ .Home | printf "%q" }}` or write the path with forward slashes.
+- A destination under a OneDrive folder, or any other directory that is a reparse point but not a symlink, can be refused with "is a symlink; remove it": the parent checks treat every reparse point as a link, because Go reports junctions the same way. Unverified for OneDrive placeholders; move the destination out of the synced folder.
+- The guard's `Edit(...)` deny rule for a config repo outside your home on another drive is written as `/D:/repo`. It is not confirmed against Claude Code on Windows (it may want `//d/repo`), so that edit denial may never match; a repo under your home uses `~/` and is fine. Phase 2.
+- When a command is cancelled, zakwas kills the command and what it started (`taskkill /T`), so an npm `.cmd` shim does not keep the output pipes open.
+- Long paths: zakwas does not add the `\\?\` prefix. Turn on long path support in Windows if a state or cache path fails with a file name error.
 
 ## Where zakwas keeps its state
 

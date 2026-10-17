@@ -11,6 +11,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const (
@@ -78,7 +79,7 @@ func TestCopilotConvergeFromScratch(t *testing.T) {
 	writeFile(t, filepath.Join(m.CopilotHome, "settings.json"), `{"extraKnownMarketplaces":{"sai":{"source":{"source":"github","repo":"o/sai","ref":"v1"}}}}`)
 	fake = runnertest.New()
 	m.Runner = fake
-	fake.OnOK(copilotMarketList, `[{"name":"sai","source":"GitHub: o/sai","isDefault":false},{"name":"local","source":"Local: `+localDir+`","isDefault":false},`+copilotDefaults+`]`)
+	fake.OnOK(copilotMarketList, `[{"name":"sai","source":"GitHub: o/sai","isDefault":false},{"name":"local","source":"Local: `+testutil.Esc(localDir)+`","isDefault":false},`+copilotDefaults+`]`)
 	fake.OnOK(copilotPluginList, `[{"name":"humanize","marketplace":"sai","enabled":true,"source":"installed"}]`)
 	if again := plan(t, m); len(again) != 0 {
 		t.Errorf("second plan not empty: %v", targets(again))
@@ -641,6 +642,7 @@ func TestCopilotNullMCPEntryKeepsThePluginsPlanning(t *testing.T) {
 }
 
 func TestCopilotSkillsDir(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newSkills(t, config.Agents{Providers: []string{config.ProviderCopilot}, Skills: []config.Skill{{Path: "skills/mine"}}})
 	mine := localSkill(t, m, "skills/mine", "mine")
 	if got, want := targets(plan(t, m)), []string{"+ ~/.agents/skills/mine (→ " + mine + ")"}; !slices.Equal(got, want) {

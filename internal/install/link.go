@@ -12,10 +12,21 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 )
 
+// ErrSymlinksUnsupported is returned in place of a symlink that Windows
+// can't create without extra privileges; zakwas has no fallback for it yet.
+var ErrSymlinksUnsupported = errors.New("symlinks are not supported on Windows yet")
+
+// SymlinksSupported reports whether zakwas can manage symlinks on this
+// platform.
+const SymlinksSupported = symlinksSupported
+
 // PlanLink returns the change that makes dst a symlink to src, or nil when
 // it already is one. Another symlink at dst is replaced; a file is backed up
 // first; a directory fails the plan.
 func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
+	if !SymlinksSupported {
+		return nil, ErrSymlinksUnsupported
+	}
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return nil, fmt.Errorf("source %s: %w", src, err)
@@ -74,6 +85,9 @@ func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
 
 // Symlink links dst to src, creating dst's parent directories.
 func Symlink(src, dst string) error {
+	if !SymlinksSupported {
+		return ErrSymlinksUnsupported
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}

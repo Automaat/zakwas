@@ -118,25 +118,28 @@ Other editors (Helix, JetBrains, Sublime) that run yaml-language-server honor th
 
 ## Platform support
 
-zakwas runs on macOS and Linux. Each section below is supported on the systems marked here. A config that uses a section its system does not support fails validation with a one-line error that names the section and the system, for `plan`, `check`, `apply` and the other commands alike; no module is skipped silently. Options of a supported section are listed after the modules.
+zakwas runs on macOS, Linux and, in part, Windows. Each section below is supported on the systems marked here. A config that uses a section its system does not support fails validation with a one-line error that names the section and the system, for `plan`, `check`, `apply` and the other commands alike; no module is skipped silently. Options of a supported section are listed after the modules.
 
-| Module | macOS | Linux | Why |
-|---|---|---|---|
-| `system` | yes | yes | `dirs` and `sshKey` work everywhere; see `system.sudoTouchID` below |
-| `files` | yes | yes | |
-| `links` | yes | yes | |
-| `templates` | yes | yes | |
-| `brew` | yes | no | bootstraps Homebrew for macOS and manages casks |
-| `mise` | yes | no | its bootstrap installs the macOS build of mise; on Linux install mise yourself and use `commands` or a `files` entry for its config |
-| `agents` | yes | yes | paths follow `$HOME`, `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$XDG_CONFIG_HOME` and the other variables the agents read |
-| `commands` | yes | yes | `sh -c` in your home directory |
-| `launchd` | yes | no | launchd is macOS's service manager |
-| `defaults` | yes | no | drives the macOS `defaults` tool |
+| Module | macOS | Linux | Windows | Why |
+|---|---|---|---|---|
+| `system` | yes | yes | no | `dirs` and `sshKey` work on macOS and Linux; Windows has no file modes to set yet; see `system.sudoTouchID` below |
+| `files` | yes | yes | yes | |
+| `links` | yes | yes | no | symlinks need a privilege Windows users lack by default and have no fallback yet; use `files` there |
+| `templates` | yes | yes | yes | |
+| `brew` | yes | no | no | bootstraps Homebrew for macOS and manages casks |
+| `mise` | yes | no | no | its bootstrap installs the macOS build of mise; on Linux install mise yourself and use `commands` or a `files` entry for its config; Windows has no bootstrap yet |
+| `agents` | yes | yes | yes | paths follow `$HOME` (`%USERPROFILE%` on Windows), `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$XDG_CONFIG_HOME` and the other variables the agents read |
+| `commands` | yes | yes | no | `sh -c` in your home directory; Windows has no `sh` |
+| `launchd` | yes | no | no | launchd is macOS's service manager |
+| `defaults` | yes | no | no | drives the macOS `defaults` tool |
 
-| Option | macOS | Linux | Why |
-|---|---|---|---|
-| `system.sudoTouchID` | yes | no | Touch ID and `pam_tid.so` are macOS only; rejected on Linux |
-| `protect.immutable` | yes | fallback | the `uchg` flag is macOS only; on Linux files stay read-only copies (`0444`, tracked by hash) and the plan warns once |
+| Option | macOS | Linux | Windows | Why |
+|---|---|---|---|---|
+| `system.sudoTouchID` | yes | no | no | Touch ID and `pam_tid.so` are macOS only; rejected elsewhere |
+| `agents.skills` | yes | yes | no | skills are linked with symlinks, which Windows does not support yet |
+| `protect.immutable` | yes | fallback | fallback | the `uchg` flag is macOS only; elsewhere files stay read-only copies (`0444` on Linux, the read-only attribute on Windows, tracked by hash) and the plan warns once |
+
+On Windows, parts of `agents` also wait for symlinks or `sh` and fail the plan of just that provider or feature: the plugin skills opencode links, opencode's command hooks plugin and the Gemini extension link. See [agents.md](agents.md#windows).
 
 `--only` with a module the system does not support fails with the same error. Shell completion offers only the modules that run on the current system. File name comparisons (overlapping destinations, skill names) stay case-insensitive on Linux, which is stricter than its file systems need: two names that differ only in case are rejected on both systems.
 

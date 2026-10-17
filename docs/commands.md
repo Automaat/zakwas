@@ -367,6 +367,8 @@ If zakwas already manages files on this Mac from another config, init warns: `pl
 zakwas self-update [--version X.Y.Z]
 ```
 
+On Windows `self-update` exits 64 with "not supported on Windows yet": download the newer zip from the releases page or run `install.ps1` again.
+
 | Flag | Meaning |
 |---|---|
 | `--version X.Y.Z` | release to install (a leading `v` is fine); default: latest |

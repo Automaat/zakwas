@@ -42,7 +42,7 @@ grep '"zakwas \* apply": "deny"' home/.config/opencode/opencode.json
 cp zakwas-off.yaml zakwas.yaml
 zakwas plan --only agents
 stdout 'permissions -41 deny'
-stdout '- .*/codex/rules/zakwas.rules'
+stdout '- .*[/\\]codex[/\\]rules[/\\]zakwas\.rules'
 zakwas apply -y --only agents
 ! exists codex/rules/zakwas.rules
 grep -count=1 '"Bash\(rm:\*\)"' claude/settings.json

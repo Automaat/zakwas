@@ -1,3 +1,4 @@
+[windows] skip 'launchd is macOS only'
 env ZAKWAS_TEST_GOOS=darwin
 
 chmod 755 bin/launchctl

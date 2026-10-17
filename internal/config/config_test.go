@@ -3,11 +3,13 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/platform"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func loadMac(path, home string) (*Config, error) { return LoadFor(path, home, platform.Darwin) }
@@ -46,7 +48,7 @@ system:
 commands:
   - {name: n, check: "true", run: "true"}
 `)
-	c, err := loadMac(p, "/h")
+	c, err := loadMac(p, testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +81,7 @@ func TestLoadResolvesSymlinkedRoot(t *testing.T) {
 	if err := os.Symlink(real, alias); err != nil {
 		t.Fatal(err)
 	}
-	c, err := loadMac(filepath.Join(alias, FileName), "/h")
+	c, err := loadMac(filepath.Join(alias, FileName), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +306,7 @@ commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := loadMac(writeConfig(t, tt.body), "/h")
+			_, err := loadMac(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h"))
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -398,7 +400,7 @@ agents:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := loadMac(writeConfig(t, tt.body), "/h"); err != nil {
+			if _, err := loadMac(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h")); err != nil {
 				t.Error(err)
 			}
 		})
@@ -424,7 +426,7 @@ agents:
     - a@sai
     - b@cl
     - {id: c@sai, providers: [opencode]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,21 +471,22 @@ func TestFind(t *testing.T) {
 }
 
 func TestPaths(t *testing.T) {
-	p := Paths{Home: "/h", Root: "/r"}
+	a := testutil.Abs
+	p := Paths{Home: a("/h"), Root: a("/r")}
 	tests := []struct {
 		fn   func(string) string
 		in   string
 		want string
 	}{
-		{p.Dst, "~", "/h"},
-		{p.Dst, "~/.zshrc", "/h/.zshrc"},
-		{p.Dst, "/etc/x", "/etc/x"},
+		{p.Dst, "~", a("/h")},
+		{p.Dst, "~/.zshrc", a("/h/.zshrc")},
+		{p.Dst, a("/etc/x"), a("/etc/x")},
 		{p.Dst, "~user/x", "~user/x"},
-		{p.Src, "dotfiles/a", "/r/dotfiles/a"},
-		{p.Src, "/abs", "/abs"},
-		{p.Pretty, "/h/.zshrc", "~/.zshrc"},
-		{p.Pretty, "/hx/y", "/hx/y"},
-		{p.Pretty, "/r/a", "/r/a"},
+		{p.Src, "dotfiles/a", a("/r/dotfiles/a")},
+		{p.Src, a("/abs"), a("/abs")},
+		{p.Pretty, a("/h/.zshrc"), "~/.zshrc"},
+		{p.Pretty, a("/hx/y"), a("/hx/y")},
+		{p.Pretty, a("/r/a"), a("/r/a")},
 	}
 	for _, tt := range tests {
 		if got := tt.fn(tt.in); got != tt.want {
@@ -495,7 +498,7 @@ func TestPaths(t *testing.T) {
 func TestPermissionsFor(t *testing.T) {
 	load := func(t *testing.T, body string) *Agents {
 		t.Helper()
-		c, err := loadMac(writeConfig(t, body), "/h")
+		c, err := loadMac(writeConfig(t, body), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -552,7 +555,7 @@ agents:
 func TestGeminiIsOptIn(t *testing.T) {
 	load := func(yaml string) *Agents {
 		t.Helper()
-		c, err := loadMac(writeConfig(t, yaml), "/h")
+		c, err := loadMac(writeConfig(t, yaml), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -605,7 +608,7 @@ agents:
     b: {command: b}
     a: {command: a, providers: [codex, opencode]}
     c: {url: 'https://e.com', providers: [claude]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,7 +640,7 @@ agents:
     - skills/b
     - {path: skills/a, providers: [codex, opencode]}
     - {git: o/r, path: x/c, providers: [claude]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -682,7 +685,7 @@ func TestAgentsGuard(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := loadMac(writeConfig(t, tt.yaml), "/home/u")
+			cfg, err := loadMac(writeConfig(t, tt.yaml), testutil.Abs("/home/u"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -811,6 +814,86 @@ func TestPathsOverlapFollowsSymlinkedDirs(t *testing.T) {
 	}
 }
 
+func winAbs(body string) string {
+	if runtime.GOOS != "windows" {
+		return body
+	}
+	return strings.ReplaceAll(body, "dst: /", "dst: C:/")
+}
+
+func TestCutHome(t *testing.T) {
+	tests := []struct {
+		in   string
+		rest string
+		ok   bool
+	}{
+		{"~/.zshrc", ".zshrc", true},
+		{"~/", "", true},
+		{"~", "", false},
+		{"~user/x", "", false},
+		{"x/~/y", "", false},
+		{`~\.zshrc`, ".zshrc", runtime.GOOS == "windows"},
+	}
+	for _, tt := range tests {
+		rest, ok := CutHome(tt.in)
+		if ok != tt.ok || ok && rest != tt.rest {
+			t.Errorf("CutHome(%q) = %q, %v; want %q, %v", tt.in, rest, ok, tt.rest, tt.ok)
+		}
+	}
+	if !IsHomePath("~") || !IsHomePath("~/x") || IsHomePath("~x") || IsHomePath("/x") {
+		t.Error("IsHomePath")
+	}
+}
+
+func TestCutPathPrefixFoldsCaseOnRequest(t *testing.T) {
+	sep := string(filepath.Separator)
+	home := sep + "Users" + sep + "Me"
+	tests := []struct {
+		name string
+		path string
+		fold bool
+		rest string
+		ok   bool
+	}{
+		{"same case", home + sep + "x", false, "x", true},
+		{"other case, exact", sep + "users" + sep + "me" + sep + "x", false, "", false},
+		{"other case, folded", sep + "users" + sep + "me" + sep + "x", true, "x", true},
+		{"sibling with the same prefix", home + "x" + sep + "y", true, "", false},
+		{"the directory itself", home, true, "", false},
+		{"shorter than the directory", sep + "Us", true, "", false},
+	}
+	for _, tt := range tests {
+		rest, ok := cutPathPrefix(tt.path, home, tt.fold)
+		if ok != tt.ok || rest != tt.rest {
+			t.Errorf("%s: cutPathPrefix(%q) = %q, %v; want %q, %v", tt.name, tt.path, rest, ok, tt.rest, tt.ok)
+		}
+	}
+}
+
+func TestPrettyUsesSlashesForHomePaths(t *testing.T) {
+	p := Paths{Home: testutil.Abs("/h")}
+	if got := p.Pretty(filepath.Join(p.Home, ".config", "git", "config")); got != "~/.config/git/config" {
+		t.Errorf("Pretty = %q", got)
+	}
+}
+
+func TestMCPServerRecognizesZakwasExe(t *testing.T) {
+	for command, want := range map[string]bool{
+		"zakwas":                     true,
+		"/usr/local/bin/zakwas":      true,
+		`C:\Users\me\bin\zakwas.exe`: true,
+		"C:/Users/me/bin/Zakwas.EXE": true,
+		"zakwas-other":               false,
+		"notzakwas":                  false,
+		`C:\bin\zakwas.exe.bak`:      false,
+	} {
+		s := MCPServer{Command: command, Args: []string{"mcp", "--enable-apply"}}
+		if got := len(s.PromptTools()) > 0; got != want {
+			t.Errorf("%q: prompts = %v, want %v", command, got, want)
+		}
+	}
+}
+
 func TestLoadForPlatform(t *testing.T) {
 	linuxOK := `
 protect: {immutable: true}
@@ -853,7 +936,7 @@ system: {sudoTouchID: true}
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := LoadFor(writeConfig(t, tt.yaml), "/h", tt.goos)
+			_, err := LoadFor(writeConfig(t, tt.yaml), testutil.Abs("/h"), tt.goos)
 			if len(tt.want) == 0 {
 				if err != nil {
 					t.Fatal(err)

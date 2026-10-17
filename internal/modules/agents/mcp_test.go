@@ -12,6 +12,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func mcpModule(t *testing.T, providers []string, servers map[string]config.MCPServer) *Module {
@@ -135,7 +136,7 @@ func TestClaudeMCPCreatesAndDropsConfig(t *testing.T) {
 	if got, want := readFile(t, cfg), "{\n  \"mcpServers\": {\n    \"a\": {\n      \"type\": \"stdio\",\n      \"command\": \"a\",\n      \"args\": []\n    }\n  }\n}\n"; got != want {
 		t.Errorf(".claude.json = %q, want %q", got, want)
 	}
-	if info, err := os.Stat(cfg); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(cfg); err != nil || !testutil.SamePerm(info.Mode(), 0o600) {
 		t.Errorf("mode = %v, %v", info, err)
 	}
 	m.Agents.MCP = nil
@@ -144,6 +145,37 @@ func TestClaudeMCPCreatesAndDropsConfig(t *testing.T) {
 		t.Errorf(".claude.json after removal = %q", got)
 	}
 	assertConverged(t, m)
+}
+
+func TestClaudeMCPEditsKeepCRLFAndLFFilesOnWindows(t *testing.T) {
+	for _, tt := range []struct{ name, eol string }{{"CRLF", "\r\n"}, {"LF", "\n"}} {
+		t.Run(tt.name, func(t *testing.T) {
+			saved := hostOS
+			hostOS = "windows"
+			defer func() { hostOS = saved }()
+			m := mcpModule(t, []string{config.ProviderClaude}, map[string]config.MCPServer{"a": stdioServer("a")})
+			cfg := filepath.Join(m.Paths.Home, ".claude.json")
+			existing := strings.ReplaceAll("{\n  \"numStartups\": 3\n}\n", "\n", tt.eol)
+			writeFile(t, cfg, existing)
+
+			apply(t, plan(t, m))
+			got := readFile(t, cfg)
+
+			if strings.Count(got, "\n") != strings.Count(got, tt.eol) {
+				t.Errorf("mixed line endings in %q", got)
+			}
+			if !strings.Contains(got, `"numStartups": 3`) || !strings.Contains(got, `"command": "a"`) {
+				t.Errorf("edit lost content: %q", got)
+			}
+			assertConverged(t, m)
+
+			m.Agents.MCP = nil
+			apply(t, plan(t, m))
+			if got := readFile(t, cfg); got != existing {
+				t.Errorf("removing the server left %q, want the original %q", got, existing)
+			}
+		})
+	}
 }
 
 func TestClaudeMCPFollowsConfigDir(t *testing.T) {
@@ -421,7 +453,7 @@ func TestCodexMCPCreatesConfig(t *testing.T) {
 	if got, want := readFile(t, cfg), "[mcp_servers.a]\ncommand = \"a\"\n"; got != want {
 		t.Errorf("config.toml = %q, want %q", got, want)
 	}
-	if info, err := os.Stat(cfg); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(cfg); err != nil || !testutil.SamePerm(info.Mode(), 0o600) {
 		t.Errorf("mode = %v, %v", info, err)
 	}
 }
@@ -602,5 +634,40 @@ func TestClaudeMCPEntryCarriesNoToolApproval(t *testing.T) {
 	got := readFile(t, filepath.Join(m.Paths.Home, ".claude.json"))
 	if strings.Contains(got, "approval") {
 		t.Errorf("claude.json mentions an approval mode:\n%s", got)
+	}
+}
+
+func TestJSONEditsKeepCRLFOnlyOnWindows(t *testing.T) {
+	existing := "{\r\n  \"theme\": \"dark\",\r\n  \"permissions\": {\r\n    \"allow\": [\"Bash(ls)\"]\r\n  }\r\n}\r\n"
+	for _, tt := range []struct {
+		goos string
+		crlf bool
+	}{{"darwin", false}, {"linux", false}, {"windows", true}} {
+		t.Run(tt.goos, func(t *testing.T) {
+			saved := hostOS
+			hostOS = tt.goos
+			defer func() { hostOS = saved }()
+			path := filepath.Join(t.TempDir(), "settings.json")
+			writeFile(t, path, existing)
+			o, _, err := readObject(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := o.set("model", "x"); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := writeObject(path, o); err != nil {
+				t.Fatal(err)
+			}
+
+			got := readFile(t, path)
+			if has := strings.Contains(got, "\r"); has != tt.crlf {
+				t.Errorf("on %s CRLF kept = %v, want %v:\n%q", tt.goos, has, tt.crlf, got)
+			}
+			if tt.crlf && strings.Count(got, "\n") != strings.Count(got, "\r\n") {
+				t.Errorf("mixed endings: %q", got)
+			}
+		})
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func moduleNames(mods []engine.Module) []string {
@@ -41,6 +42,7 @@ func TestModulesBuiltPerPlatform(t *testing.T) {
 	}{
 		{platform.Darwin, []string{"system", "files", "links", "templates", "brew", "mise", "agents", "commands", "launchd", "defaults"}},
 		{platform.Linux, []string{"system", "files", "links", "templates", "agents", "commands"}},
+		{platform.Windows, []string{"files", "templates", "agents"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {
@@ -117,6 +119,7 @@ func TestLinuxOnlyNamesAnUnsupportedModule(t *testing.T) {
 }
 
 func TestLinuxImmutableWarnsOnceAndStaysClean(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture needs the links module (symlinks) next to files")
 	env := linuxSetup(t, "protect: {immutable: true}\n"+linksOnly+"files: [{src: dotfiles/zshrc, dst: ~/.config/rc}]\n")
 	plan := invoke(env, "", "plan")
 	if plan.code != ExitOK || strings.Count(plan.stdout, "protect.immutable is macOS-only; files are read-only copies") != 1 {
@@ -197,6 +200,7 @@ func TestAdvertisedSurfaceFollowsThePlatform(t *testing.T) {
 	}{
 		{platform.Darwin, true, 7},
 		{platform.Linux, false, 5},
+		{platform.Windows, false, 5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {
@@ -269,5 +273,66 @@ func TestCompletionOffersCaskOnlyWhereBrewExists(t *testing.T) {
 		if got := strings.Contains(completion(t, shell), "cask"); got != want {
 			t.Errorf("%s completion mentions cask = %v, want %v", shell, got, want)
 		}
+	}
+}
+
+func TestWindowsRejectsWhatItCannotRun(t *testing.T) {
+	tests := []struct {
+		name, cfg, want string
+	}{
+		{"brew", "brew: {file: Brewfile}\n", "brew: not supported on Windows"},
+		{"mise", "mise: {config: m.toml}\n", "mise: not supported on Windows"},
+		{"commands", "commands: [{name: n, check: 'true', run: 'true'}]\n", "commands: not supported on Windows (its checks and steps run with sh"},
+		{"links", "links: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n", "links: not supported on Windows"},
+		{"system dirs", "system: {dirs: [{path: ~/.ssh}]}\n", "system: not supported on Windows"},
+		{"skills", "agents: {skills: [{path: skills/mine}]}\n", "agents.skills: not supported on Windows"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env, _ := setup(t, tt.cfg)
+			env.GOOS = platform.Windows
+
+			r := invoke(env, "", "plan")
+
+			if r.code != ExitErr || !strings.Contains(r.stderr, tt.want) || !strings.Contains(r.stderr, platform.DocsAnchor) {
+				t.Errorf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+			}
+		})
+	}
+}
+
+func TestWindowsPlansTheAgentAndFileModules(t *testing.T) {
+	env, _ := setup(t, "agents: {providers: [claude]}\nfiles: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n")
+	env.GOOS = platform.Windows
+
+	r := invoke(env, "", "plan", "--only", "files,agents")
+
+	if r.code != ExitOK || !strings.Contains(r.stdout, "+ ~/.zshrc") {
+		t.Errorf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+}
+
+func TestOfflineNotCheckedSkipsWhatThePlatformDoesNotHave(t *testing.T) {
+	tests := []struct {
+		goos string
+		want []string
+	}{
+		{platform.Darwin, []string{"system", "brew", "mise", "agents", "commands", "launchd", "defaults"}},
+		{platform.Linux, []string{"system", "agents", "commands"}},
+		{platform.Windows, []string{"agents"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			var ran []engine.Module
+			cfg := &config.Config{Root: t.TempDir()}
+			for _, m := range Modules(cfg, Env{Home: t.TempDir(), Runner: runnertest.New(), GOOS: tt.goos}) {
+				if slices.Contains(offlineChecked, m.Name()) {
+					ran = append(ran, m)
+				}
+			}
+			if got := offlineNotChecked(ran, tt.goos); !slices.Equal(got, tt.want) {
+				t.Errorf("not checked on %s = %v, want %v", tt.goos, got, tt.want)
+			}
+		})
 	}
 }

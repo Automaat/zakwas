@@ -1,3 +1,4 @@
+[windows] skip 'the fake claude is an sh script'
 chmod 755 bin/claude
 env CLAUDE_CONFIG_DIR=$WORK/claude
 

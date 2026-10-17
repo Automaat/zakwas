@@ -10,6 +10,7 @@ import (
 	"github.com/rogpeppe/go-internal/testscript"
 
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -40,6 +41,7 @@ func TestScripts(t *testing.T) {
 				}
 			})
 			env.Setenv("HOME", home)
+			env.Setenv("USERPROFILE", home)
 			env.Setenv("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
 			env.Setenv("ZAKWAS_PAM_FILE", filepath.Join(env.WorkDir, "sudo_local"))
 			return nil
@@ -73,8 +75,9 @@ func TestExtraPathDirs(t *testing.T) {
 		goos string
 		want []string
 	}{
-		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", "/home/u/.local/bin"}},
-		{"linux", []string{"/usr/local/bin", "/home/u/.local/bin"}},
+		{"darwin", []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join("/home/u", ".local", "bin")}},
+		{"linux", []string{"/usr/local/bin", filepath.Join("/home/u", ".local", "bin")}},
+		{"windows", []string{filepath.Join("/home/u", ".local", "bin")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {
@@ -86,6 +89,7 @@ func TestExtraPathDirs(t *testing.T) {
 }
 
 func TestExtendPathKeepsOrderAndSkipsDuplicates(t *testing.T) {
+	testutil.SkipOnWindows(t, "the fixture uses POSIX PATH entries")
 	t.Setenv("PATH", "/usr/local/bin:/bin")
 	extendPath("/home/u")
 	got := filepath.SplitList(os.Getenv("PATH"))
@@ -108,4 +112,21 @@ func countOf(list []string, want string) int {
 		}
 	}
 	return n
+}
+
+func TestSamePathEntry(t *testing.T) {
+	tests := []struct {
+		a, b, goos string
+		want       bool
+	}{
+		{"/usr/local/bin", "/usr/local/bin", "darwin", true},
+		{"/usr/local/bin", "/USR/local/bin", "darwin", false},
+		{`C:\Users\Me\.local\bin`, `c:\users\me\.local\bin`, "windows", true},
+		{"C:/Users/me/bin", "C:/Users/me/bin/", "windows", true},
+	}
+	for _, tt := range tests {
+		if got := samePathEntry(tt.a, tt.b, tt.goos); got != tt.want {
+			t.Errorf("samePathEntry(%q, %q, %s) = %v, want %v", tt.a, tt.b, tt.goos, got, tt.want)
+		}
+	}
 }

@@ -32,7 +32,7 @@ stdout 'up to date: agents'
 
 cp zakwas-missing.yaml zakwas.yaml
 ! zakwas plan --only agents
-stdout 'agents.instructions: source .*/nope.md: no such file or directory'
+stdout 'agents.instructions: source .*[/\\]nope\.md: (no such file or directory|The system cannot find the file specified\.)'
 cmp claude/CLAUDE.md AGENTS.md
 
 cp zakwas-none.yaml zakwas.yaml
@@ -84,16 +84,16 @@ agents:
 links: []
 -- plan.golden --
 agents
-  ~ $WORK/claude/CLAUDE.md  not managed yet, back up to CLAUDE.md.zakwas-bak
-  + $WORK/codex/AGENTS.md
+  ~ $WORK${/}claude${/}CLAUDE.md  not managed yet, back up to CLAUDE.md.zakwas-bak
+  + $WORK${/}codex${/}AGENTS.md
   + ~/.config/opencode/AGENTS.md
 
 Plan: 2 to add, 1 to change, 0 to remove, 0 to run.
 -- drop.golden --
 agents
-  - $WORK/codex/AGENTS.md  instructions no longer managed
+  - $WORK${/}codex${/}AGENTS.md  instructions no longer managed
   - ~/.config/opencode/AGENTS.md              instructions no longer managed
 
-⚠ destructive: $WORK/codex/AGENTS.md, ~/.config/opencode/AGENTS.md
+⚠ destructive: $WORK${/}codex${/}AGENTS.md, ~/.config/opencode/AGENTS.md
 
 Plan: 0 to add, 0 to change, 2 to remove, 0 to run.

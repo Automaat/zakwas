@@ -27,7 +27,16 @@ func TestSupported(t *testing.T) {
 		{"launchd", Darwin, true},
 		{"launchd", Linux, false},
 		{"nope", Darwin, false},
-		{"agents", "windows", false},
+		{"agents", Windows, true},
+		{"files", Windows, true},
+		{"templates", Windows, true},
+		{"links", Windows, false},
+		{"commands", Windows, false},
+		{"system", Windows, false},
+		{"brew", Windows, false},
+		{"mise", Windows, false},
+		{"launchd", Windows, false},
+		{"defaults", Windows, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.module+"/"+tt.goos, func(t *testing.T) {
@@ -76,6 +85,11 @@ func TestErrors(t *testing.T) {
 		{"feature on linux", FeatureError("system.sudoTouchID", Linux), "system.sudoTouchID: not supported on Linux (Touch ID and pam_tid.so are macOS only); see docs/config.md#platform-support"},
 		{"feature on darwin", FeatureError("system.sudoTouchID", Darwin), ""},
 		{"feature with a fallback", FeatureError("protect.immutable", Linux), ""},
+		{"module on windows", ModuleError("links", Windows), "links: not supported on Windows (symlinks need a privilege Windows users lack by default and have no fallback yet); see docs/config.md#platform-support"},
+		{"module with its own windows reason", ModuleError("mise", Windows), "mise: not supported on Windows (it has no Windows bootstrap yet); see docs/config.md#platform-support"},
+		{"windows feature", FeatureError("agents.skills", Windows), "agents.skills: not supported on Windows (skills are linked with symlinks, which Windows does not support yet); see docs/config.md#platform-support"},
+		{"windows touch id", FeatureError("system.sudoTouchID", Windows), "system.sudoTouchID: not supported on Windows (Touch ID and pam_tid.so are macOS only); see docs/config.md#platform-support"},
+		{"windows keeps immutable as a fallback", FeatureError("protect.immutable", Windows), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,5 +113,30 @@ func TestFeatureSupported(t *testing.T) {
 	}
 	if FeatureSupported("unknown", Darwin) {
 		t.Error("unknown feature reported supported")
+	}
+}
+
+func TestWindowsModuleLists(t *testing.T) {
+	if got, want := SupportedModules(Windows), []string{"files", "templates", "agents"}; !slices.Equal(got, want) {
+		t.Errorf("SupportedModules(windows) = %v, want %v", got, want)
+	}
+	if got, want := UnsupportedModules(Windows), []string{"system", "links", "brew", "mise", "commands", "launchd", "defaults"}; !slices.Equal(got, want) {
+		t.Errorf("UnsupportedModules(windows) = %v, want %v", got, want)
+	}
+}
+
+func TestEveryUnsupportedModuleGivesAReasonOnEveryOS(t *testing.T) {
+	for _, m := range Modules {
+		for _, goos := range []string{Darwin, Linux, Windows} {
+			if !slices.Contains(m.OS, goos) && m.Reason(goos) == "" {
+				t.Errorf("%s is unsupported on %s without a reason", m.Name, goos)
+			}
+		}
+	}
+}
+
+func TestNames(t *testing.T) {
+	if Name(Windows) != "Windows" || Machine(Windows) != "machine" {
+		t.Errorf("Name = %q, Machine = %q", Name(Windows), Machine(Windows))
 	}
 }

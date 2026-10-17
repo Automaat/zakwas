@@ -28,7 +28,7 @@ agents:
 
 Each provider plans on its own. When one fails, for example because its CLI is missing, the plan reports the error and the other providers still apply.
 
-**Platforms.** The `agents` module, `capture`, `propose`, `approve` and `zakwas mcp` run on macOS and Linux, with every provider in the table. Each provider's files live where the agent itself looks for them on both systems: `~/.claude` (or `$CLAUDE_CONFIG_DIR`), `~/.codex` (or `$CODEX_HOME`), `~/.copilot` (or `$COPILOT_HOME`), `~/.gemini` (or `$GEMINI_CLI_HOME`), and for opencode `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` (its skills, `AGENTS.md`, agent files and hooks plugin all follow it, except that `opencode.skillsDir` overrides the skills directory). zakwas puts `/usr/local/bin` and `~/.local/bin` on `PATH` for the run, so CLIs installed there are found; on macOS it also adds `/opt/homebrew/bin`. On Linux `brew` and `mise` are not available to install the agent CLIs, so install them yourself first (a missing CLI is reported per provider, as on macOS). See [Platform support](config.md#platform-support).
+**Platforms.** The `agents` module, `capture`, `propose`, `approve` and `zakwas mcp` run on macOS, Linux and Windows, with every provider in the table; on Windows the parts that need symlinks or `sh` (see [Windows](#windows)) fail their own plan. Each provider's files live where the agent itself looks for them (home is `%USERPROFILE%` on Windows): `~/.claude` (or `$CLAUDE_CONFIG_DIR`), `~/.codex` (or `$CODEX_HOME`), `~/.copilot` (or `$COPILOT_HOME`), `~/.gemini` (or `$GEMINI_CLI_HOME`), and for opencode `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` (its skills, `AGENTS.md`, agent files and hooks plugin all follow it, except that `opencode.skillsDir` overrides the skills directory). zakwas puts `/usr/local/bin` and `~/.local/bin` on `PATH` for the run, so CLIs installed there are found; on macOS it also adds `/opt/homebrew/bin`. On Linux `brew` and `mise` are not available to install the agent CLIs, so install them yourself first (a missing CLI is reported per provider, as on macOS). See [Platform support](config.md#platform-support).
 
 | | Claude Code | Codex | opencode | Gemini CLI | Copilot CLI |
 |---|---|---|---|---|---|
@@ -51,6 +51,19 @@ Notes on the cells:
 - Gemini CLI and Copilot CLI rewrite their own `settings.json` or `config.json`, so zakwas never writes them. For Gemini it renders one extension, `~/.gemini/zakwas`, links it, and writes one policy file. Copilot only gets files it reads from a directory of its own.
 - An HTTP server can name a pre-registered OAuth client (`oauth: {clientId, callbackPort, scope}`); every provider takes all three keys, each in its own spelling. See [OAuth clients](config.md#oauth-clients).
 - A profile field a provider cannot express is listed in the plan as a warning, and `check` stays clean. See the [field mapping](config.md#profiles).
+
+## Windows
+
+Windows is early. The agent features run natively: plugins and marketplaces through the `claude`, `codex` and `copilot` CLIs (`.exe` and npm `.cmd` shims on `PATH` both work), MCP servers, instructions, permissions, profiles, `capture`, `propose`, `approve` and `zakwas mcp`. State lives under `%USERPROFILE%\.local\state\zakwas`, and config paths in `zakwas.yaml` keep `~/` and `/`.
+
+What does not work yet, and fails the plan of just that provider or feature with a "not supported on Windows" message:
+
+- `agents.skills` (rejected when the config loads) and the plugin skills opencode links, which need symlinks
+- opencode command hooks, whose plugin runs through `/bin/sh`
+- the Gemini CLI provider's extension link
+- guard deny rules for PowerShell and `cmd`, and for the `zakwas.exe` spelling of the command (Claude's `Bash(zakwas ...)` rules and Codex's `forbidden` rules are written for `zakwas`; the refusal to apply from an agent session works)
+
+zakwas keeps the line endings of the files it edits: a `config.toml` or `settings.json` saved with CRLF stays CRLF, and files it creates use LF.
 
 ## Start small
 

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"syscall"
+
+	"github.com/Automaat/zakwas/internal/fsutil"
 )
 
 // replaceDir moves the freshly made dir next into place at dir. A copy
@@ -20,7 +22,7 @@ func replaceDirWith(exchange func(a, b string) error, next, dir string) error {
 	var err error
 	for range 2 {
 		if _, serr := os.Lstat(dir); errors.Is(serr, os.ErrNotExist) {
-			if err = os.Rename(next, dir); !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
+			if err = fsutil.Rename(next, dir); !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
 				return err
 			}
 			continue
@@ -44,11 +46,11 @@ func replaceDirWith(exchange func(a, b string) error, next, dir string) error {
 // removal is left for the next fetch to clean up.
 func renameAside(next, dir string) error {
 	aside := next + ".old"
-	if err := os.Rename(dir, aside); err != nil {
+	if err := fsutil.Rename(dir, aside); err != nil {
 		return err
 	}
-	if err := os.Rename(next, dir); err != nil {
-		return errors.Join(err, os.Rename(aside, dir))
+	if err := fsutil.Rename(next, dir); err != nil {
+		return errors.Join(err, fsutil.Rename(aside, dir))
 	}
 	_ = os.RemoveAll(aside)
 	return nil

@@ -1,3 +1,4 @@
+[windows] skip 'the commands module runs sh snippets'
 zakwas plan --json
 stdout '"format_version": "1"'
 stdout '"target": "marker"'
