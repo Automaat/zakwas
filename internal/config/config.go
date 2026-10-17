@@ -422,7 +422,7 @@ func KeysOverlap(a, b string) bool { return overlaps(a, b) }
 
 func resolvePath(path string) string {
 	resolved := resolveParents(path)
-	if info, err := os.Lstat(resolved); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+	if info, err := os.Lstat(resolved); err == nil && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
 		if target, err := os.Stat(resolved); err == nil && target.IsDir() {
 			if full, err := filepath.EvalSymlinks(resolved); err == nil {
 				return full
