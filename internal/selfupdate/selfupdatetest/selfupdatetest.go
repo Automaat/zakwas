@@ -3,6 +3,7 @@ package selfupdatetest
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
@@ -40,6 +41,27 @@ func Archive(t testing.TB, files map[string]string) []byte {
 	return buf.Bytes()
 }
 
+// ZipArchive builds a release zip holding files, like GoReleaser's for
+// Windows.
+func ZipArchive(t testing.TB, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(files[name])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 // SHA256 returns the hex digest checksums.txt lists for data.
 func SHA256(data []byte) string {
 	sum := sha256.Sum256(data)
@@ -59,6 +81,10 @@ func ServeFor(t testing.TB, version, goos, arch, binary string) string {
 	t.Helper()
 	asset := fmt.Sprintf("zakwas_%s_%s_%s.tar.gz", version, goos, arch)
 	archive := Archive(t, map[string]string{"LICENSE": "MIT", "zakwas": binary})
+	if goos == "windows" {
+		asset = fmt.Sprintf("zakwas_%s_%s_%s.zip", version, goos, arch)
+		archive = ZipArchive(t, map[string]string{"LICENSE": "MIT", "zakwas.exe": binary})
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/releases/tag/v"+version, http.StatusFound)

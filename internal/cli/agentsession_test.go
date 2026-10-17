@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 func TestDetectAgentSession(t *testing.T) {
@@ -81,6 +83,58 @@ func TestGuardAllowsApplyWhenOffOrWithoutAnAgentsSection(t *testing.T) {
 			}
 			if _, err := os.Lstat(filepath.Join(home, ".zshrc")); err != nil {
 				t.Error(err)
+			}
+		})
+	}
+}
+
+const guardedFiles = "agents:\n  providers: [claude]\nfiles: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n"
+
+func TestGuardRefusesAgentSessionsOnEveryPlatform(t *testing.T) {
+	for _, goos := range []string{platform.Darwin, platform.Linux, platform.Windows} {
+		for _, cmd := range []string{"apply", "upgrade"} {
+			t.Run(goos+"/"+cmd, func(t *testing.T) {
+				env, home := setup(t, guardedFiles)
+				env.GOOS, env.AgentSession, env.StdinTTY = goos, "Claude Code", true
+				env.ClaudeConfigDir = filepath.Join(home, "claude")
+
+				r := invoke(env, "y\n", cmd, "-y")
+
+				if r.code != ExitErr || !strings.Contains(r.stderr, "refusing to "+cmd+" from a Claude Code session") {
+					t.Errorf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+				}
+				for _, name := range []string{".zshrc", "claude"} {
+					if _, err := os.Lstat(filepath.Join(home, name)); err == nil {
+						t.Errorf("the refused run wrote %s", name)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestGuardPlanNamesZakwasExeOnlyOnWindows(t *testing.T) {
+	for _, tt := range []struct {
+		goos      string
+		wantRules string
+		exe       bool
+	}{
+		{platform.Darwin, "permissions +42 deny", false},
+		{platform.Linux, "permissions +42 deny", false},
+		{platform.Windows, "permissions +222 deny", true},
+	} {
+		t.Run(tt.goos, func(t *testing.T) {
+			env, home := setup(t, guardedFiles)
+			env.GOOS = tt.goos
+			env.ClaudeConfigDir = filepath.Join(home, "claude")
+
+			r := invoke(env, "", "plan", "--only", "agents")
+
+			if r.code != ExitOK || !strings.Contains(r.stdout, tt.wantRules) {
+				t.Errorf("exit %d, want %q\nstdout: %s\nstderr: %s", r.code, tt.wantRules, r.stdout, r.stderr)
+			}
+			if strings.Contains(r.stdout+r.stderr, "not enforced") {
+				t.Errorf("the plan warns that the guard is not enforced:\n%s%s", r.stdout, r.stderr)
 			}
 		})
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/testutil"
 )
 
@@ -183,7 +184,7 @@ func TestAgentPermissions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := agentPermissions(tt.agents, tt.args[0], tt.args[1:]...)
+			got, err := agentPermissions(tt.agents, platform.Linux, tt.args[0], tt.args[1:]...)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tt.wantErr)
@@ -208,7 +209,7 @@ func TestAgentPermissions(t *testing.T) {
 func TestAgentPermissionsEscape(t *testing.T) {
 	command := `say "hi" \ <b> & café`
 	a := &config.Agents{Guard: &off, Permissions: &config.AgentPermissions{Deny: []config.AgentPermission{{Command: command}}}}
-	got, err := agentPermissions(a, config.ProviderOpencode)
+	got, err := agentPermissions(a, platform.Linux, config.ProviderOpencode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,3 +391,42 @@ var writableMode = func() string {
 	}
 	return "644"
 }()
+
+func TestAgentPermissionsNamesZakwasExeOnWindows(t *testing.T) {
+	agents := &config.Agents{Providers: []string{config.ProviderOpencode}}
+
+	windows, err := agentPermissions(agents, platform.Windows, config.ProviderOpencode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules map[string]string
+	if err := json.Unmarshal([]byte(windows), &rules); err != nil {
+		t.Fatal(err)
+	}
+	for _, pattern := range []string{
+		"zakwas apply", "*/zakwas * mcp *", "*zakwas.exe apply", "*zakwas.exe apply *", "*zakwas.exe * self-update", "*zakwas.exe * approve *",
+		`*zakwas.exe" apply`, "*zakwas.exe' upgrade *",
+	} {
+		if rules[pattern] != "deny" {
+			t.Errorf("%q = %q, want deny", pattern, rules[pattern])
+		}
+	}
+	if want := len(config.GuardShellNames(platform.Windows)) * 4 * len(config.GuardedCommands); len(rules) != want {
+		t.Errorf("%d rules, want %d", len(rules), want)
+	}
+	for pattern := range rules {
+		if strings.Contains(pattern, `\`) {
+			t.Errorf("pattern %q holds a backslash", pattern)
+		}
+	}
+
+	for _, goos := range []string{platform.Darwin, platform.Linux} {
+		got, err := agentPermissions(agents, goos, config.ProviderOpencode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, ".exe") || strings.Count(got, "deny") != 2*4*len(config.GuardedCommands) {
+			t.Errorf("%s: %s", goos, got)
+		}
+	}
+}

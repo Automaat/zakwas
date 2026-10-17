@@ -457,6 +457,30 @@ func (a *Agents) Wants(provider string) bool {
 // client that answers its confirmation.
 var GuardedCommands = []string{"apply", "upgrade", "self-update", "approve", "mcp"}
 
+// GuardBinaries are the spellings of the zakwas binary the guard denies on
+// goos. Windows resolves a command typed without its extension, so both
+// names reach the same program there; elsewhere only zakwas does.
+func GuardBinaries(goos string) []string {
+	if goos == "windows" {
+		return []string{"zakwas", "zakwas.exe"}
+	}
+	return []string{"zakwas"}
+}
+
+// GuardShellNames are the spellings of the zakwas binary at the start of
+// a command, as patterns of the agents' wildcard rules (Claude Code's
+// Bash and PowerShell rules, opencode's bash patterns): bare and by path.
+// On Windows they also name zakwas.exe by any path, bare or quoted. A
+// pattern holds no backslash: whether a rule reads it as an escape is not
+// documented, and `*` already matches one.
+func GuardShellNames(goos string) []string {
+	names := []string{"zakwas", "*/zakwas"}
+	if goos == "windows" {
+		names = append(names, "*zakwas.exe", `*zakwas.exe"`, "*zakwas.exe'")
+	}
+	return names
+}
+
 // GuardEnabled reports whether the guard is on: it is, for any agents
 // section, unless it sets guard to false.
 func (a *Agents) GuardEnabled() bool {

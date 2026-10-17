@@ -12,6 +12,8 @@ import (
 	"github.com/Automaat/zakwas/internal/selfupdate"
 )
 
+// selfUpdateGOOS picks the release asset; tests set it to fetch another
+// system's archive.
 var selfUpdateGOOS = runtime.GOOS
 
 func newSelfUpdateFlags(errOut *console) (*flag.FlagSet, *string) {
@@ -36,10 +38,6 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 	}); !ok {
 		return code
 	}
-	if selfUpdateGOOS == "windows" {
-		errOut.print("zakwas: self-update is not supported on Windows yet; download the latest release from " + selfupdate.ReleasesURL + "\n")
-		return ExitUsage
-	}
 	var err error
 	exe := env.Executable
 	if exe == "" {
@@ -52,7 +50,17 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 		errOut.print("zakwas: " + msg + "\n")
 		return ExitUsage
 	}
-	u := &selfupdate.Updater{BaseURL: env.ReleaseURL}
+	if selfUpdateGOOS == "windows" {
+		// Two updates would share the files of the swap, and a run of apply
+		// may be executing the binary; Unix replaces the file in one rename.
+		held, ok := takeLock(ctx, env, "self-update", false, errOut)
+		if !ok {
+			return ExitErr
+		}
+		defer func() { _ = held.Release() }()
+	}
+	cleanSelfUpdateLeftovers(env, selfUpdateGOOS, errOut)
+	u := &selfupdate.Updater{BaseURL: env.ReleaseURL, OS: selfUpdateGOOS}
 	var version string
 	if *want == "" {
 		if version, err = u.Latest(ctx); err != nil {
@@ -70,7 +78,7 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 	}
 	bin, err := fetchVerified(ctx, env, u, version, out)
 	if err == nil {
-		err = selfupdate.Replace(exe, bin)
+		err = selfupdate.Replace(exe, env.Home, warning(errOut), bin)
 	}
 	if err != nil {
 		errOut.fail(err)
@@ -78,6 +86,28 @@ func runSelfUpdate(ctx context.Context, env Env, args []string, out, errOut *con
 	}
 	out.printf("zakwas %s → %s (%s)\n", current, version, exe)
 	return ExitOK
+}
+
+func warning(errOut *console) func(string) {
+	return func(msg string) { errOut.print("zakwas: warning: " + msg + "\n") }
+}
+
+// cleanSelfUpdateLeftovers removes the old copies and staged files a
+// Windows self-update left. It changes files and the state it keeps, so only
+// the commands that hold the run lock call it: apply, upgrade and
+// self-update. plan, check and the rest never do.
+func cleanSelfUpdateLeftovers(env Env, goos string, errOut *console) {
+	if goos != "windows" {
+		return
+	}
+	exe := env.Executable
+	if exe == "" {
+		var err error
+		if exe, err = selfupdate.Executable(); err != nil {
+			return
+		}
+	}
+	selfupdate.CleanupOld(env.Home, exe, warning(errOut))
 }
 
 // fetchVerified downloads a release, checks its SHA256 and, like install.sh,

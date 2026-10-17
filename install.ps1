@@ -4,9 +4,11 @@ Installs zakwas on Windows from a GitHub release.
 
 .DESCRIPTION
 Downloads the release zip for this machine's architecture, checks its SHA256
-against the release's checksums.txt and copies zakwas.exe into Dir. It does
-not change PATH unless -AddToPath is given. Windows support is early: see
-the Windows section of the README.
+against the release's checksums.txt and copies zakwas.exe into Dir. When gh is
+installed and logged in, it also verifies the zip's build attestation and
+stops if that fails; without gh it says so and goes on. It does not change
+PATH unless -AddToPath is given. Windows support is early: see the Windows
+section of the README.
 
 .PARAMETER Version
 Release to install, X.Y.Z (default: the latest release).
@@ -102,6 +104,54 @@ function Save-Download([string]$Url, [string]$OutFile) {
     }
 }
 
+# The first release published with build provenance attestations.
+$AttestedSince = '0.4.0'
+
+function Test-VersionAtLeast([string]$Have, [string]$Want) {
+    $a = @(($Have -split '[-+]')[0] -split '\.')
+    $b = @(($Want -split '[-+]')[0] -split '\.')
+    for ($i = 0; $i -lt 3; $i++) {
+        if ([int]$a[$i] -gt [int]$b[$i]) { return $true }
+        if ([int]$a[$i] -lt [int]$b[$i]) { return $false }
+    }
+    return $true
+}
+
+# gh must be installed, logged in, and new enough to know --source-ref.
+function Test-GhCanVerify {
+    # Windows PowerShell 5.1 turns a native command's stderr into an error
+    # that Stop would throw.
+    $ErrorActionPreference = 'Continue'
+    if (-not (Get-Command -Name gh -CommandType Application -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+    & gh auth status *> $null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+    $help = (& gh attestation verify --help 2>&1 | Out-String)
+    return ($LASTEXITCODE -eq 0 -and $help.Contains('--source-ref'))
+}
+
+function Assert-Attestation([string]$File, [string]$Release) {
+    $ErrorActionPreference = 'Continue'
+    $name = Split-Path -Leaf $File
+    if (-not (Test-VersionAtLeast $Release $AttestedSince)) {
+        Write-Step "zakwas $Release predates build attestations; skipping provenance check"
+        return
+    }
+    $options = @('--repo', 'Automaat/zakwas', '--signer-workflow', 'Automaat/zakwas/.github/workflows/release.yml', '--source-ref', "refs/tags/v$Release")
+    if (Test-GhCanVerify) {
+        Write-Step "Verifying build provenance of $name"
+        & gh attestation verify $File @options
+        if ($LASTEXITCODE -ne 0) {
+            throw "attestation verification failed for $name"
+        }
+    } else {
+        Write-Step "Skipped attestation check (needs a recent gh, logged in); to verify: gh release download v$Release -R Automaat/zakwas -p $name; gh attestation verify $name $($options -join ' ')"
+    }
+}
+
 function Get-PathEntry([string]$Path) {
     return @($Path -split ';' | ForEach-Object { $_.Trim().TrimEnd('\') } | Where-Object { $_ })
 }
@@ -134,6 +184,8 @@ try {
     if ($got -ne $want) {
         throw "${asset}: sha256 $got, want $want"
     }
+
+    Assert-Attestation (Join-Path $tmp $asset) $Version
 
     Expand-Archive -Path (Join-Path $tmp $asset) -DestinationPath (Join-Path $tmp 'out')
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null

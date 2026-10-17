@@ -36,6 +36,9 @@ type Module struct {
 	// paths of the templates, which opencode's share of the guard needs.
 	Guard           bool
 	TemplateSources []string
+	// GOOS is the operating system the plan is for; empty means this one.
+	// The guard names zakwas.exe too when it is windows.
+	GOOS string
 	// Vars are the templates.vars, which instructions can reference, and
 	// Immutable is protect.immutable for the instructions copies.
 	Vars      map[string]string
