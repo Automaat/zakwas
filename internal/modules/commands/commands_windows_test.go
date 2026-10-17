@@ -43,7 +43,7 @@ var realShells = map[string]scripts{
 var powerShellScripts = scripts{
 	pass:     `exit 0`,
 	fail:     `exit 1`,
-	code3:    `cmd /c exit 3`,
+	code3:    `cmd /c exit 3; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`,
 	exists:   `if (Test-Path -LiteralPath "$env:ZK_DIR\a b.txt") { exit 0 } else { exit 1 }`,
 	write:    `Write-Output streamed; Set-Content -LiteralPath "$env:ZK_DIR\a b.txt" -Value 'it''s "quoted"'`,
 	relative: `Set-Content -Path rel.txt -Value x`,
@@ -139,7 +139,7 @@ func TestRealShellsPropagateExitCodes(t *testing.T) {
 		}{
 			{"success", s.pass, 0},
 			{"failure", s.fail, 1},
-			{"a native command's own code", s.code3, 3},
+			{"a native command's own code, passed on", s.code3, 3},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
