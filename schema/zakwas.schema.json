@@ -342,12 +342,27 @@
           "check": {
             "type": "string",
             "minLength": 1,
-            "description": "Shell snippet (run with sh in your home directory) that exits 0 when the step is already done. Times out after 30s."
+            "description": "Shell snippet (run in your home directory) that exits 0 when the step is already done. Times out after 30s."
           },
           "run": {
             "type": "string",
             "minLength": 1,
-            "description": "Shell snippet (run with sh in your home directory) executed while 'check' fails. 'check' must pass afterwards, or apply fails."
+            "description": "Shell snippet (run in your home directory) executed while 'check' fails. 'check' must pass afterwards, or apply fails."
+          },
+          "shell": {
+            "enum": [
+              "sh",
+              "bash",
+              "cmd",
+              "powershell",
+              "pwsh",
+              null
+            ],
+            "description": "Shell for 'check' and 'run': sh, bash, cmd, powershell (Windows PowerShell 5.1) or pwsh (PowerShell 7). Default: sh on macOS and Linux; on Windows pwsh when it is on PATH, else powershell. cmd runs a single line. The plan fails when the shell is not installed.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false,

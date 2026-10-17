@@ -1,4 +1,4 @@
-[windows] skip 'the commands module runs sh snippets'
+[windows] skip 'its snippets are sh; windows-commands.txtar drives PowerShell and cmd'
 zakwas plan --json
 stdout '"format_version": "1"'
 stdout '"target": "marker"'

@@ -359,7 +359,7 @@ func (m *Module) planCopyRemove(in *install.Installer, stateFile, dst, detail st
 func (m *Module) planInstructionRemove(link string, l instructionsLink) engine.Change {
 	forget := func(st *instructionsState) { delete(st.Links, link) }
 	current, err := os.Readlink(link)
-	if err != nil || current != l.Target || install.CheckParents(m.Paths, link) != nil {
+	if err != nil || !install.SameTarget(link, current, l.Target) || install.CheckParents(m.Paths, link) != nil {
 		return engine.Change{
 			Action: engine.Remove, Target: m.Paths.Pretty(link), Detail: "no longer zakwas's link, forget it",
 			Apply: func(context.Context) error { return m.updateInstructions(forget) },

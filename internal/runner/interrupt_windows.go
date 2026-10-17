@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -18,6 +19,12 @@ func interrupt(p *os.Process) error {
 		return nil
 	}
 	return p.Kill()
+}
+
+func setCmdLine(cmd *exec.Cmd, line string) {
+	if line != "" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: line}
+	}
 }
 
 func hasTerminal() bool { return false }

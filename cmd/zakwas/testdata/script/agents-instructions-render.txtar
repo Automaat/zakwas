@@ -1,4 +1,4 @@
-[windows] skip 'needs symlinks'
+[!symlink] skip 'it replaces a symlink, which needs symlink rights on Windows'
 mkdir claude
 env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex

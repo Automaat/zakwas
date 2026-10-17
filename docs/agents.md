@@ -28,7 +28,7 @@ agents:
 
 Each provider plans on its own. When one fails, for example because its CLI is missing, the plan reports the error and the other providers still apply.
 
-**Platforms.** The `agents` module, `capture`, `propose`, `approve` and `zakwas mcp` run on macOS, Linux and Windows, with every provider in the table; on Windows the parts that need symlinks or `sh` (see [Windows](#windows)) fail their own plan. Each provider's files live where the agent itself looks for them (home is `%USERPROFILE%` on Windows): `~/.claude` (or `$CLAUDE_CONFIG_DIR`), `~/.codex` (or `$CODEX_HOME`), `~/.copilot` (or `$COPILOT_HOME`), `~/.gemini` (or `$GEMINI_CLI_HOME`), and for opencode `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` (its skills, `AGENTS.md`, agent files and hooks plugin all follow it, except that `opencode.skillsDir` overrides the skills directory). zakwas puts `/usr/local/bin` and `~/.local/bin` on `PATH` for the run, so CLIs installed there are found; on macOS it also adds `/opt/homebrew/bin`. On Linux `brew` and `mise` are not available to install the agent CLIs, so install them yourself first (a missing CLI is reported per provider, as on macOS). See [Platform support](config.md#platform-support).
+**Platforms.** The `agents` module, `capture`, `propose`, `approve` and `zakwas mcp` run on macOS, Linux and Windows, with every provider in the table; on Windows the part that needs `sh` (see [Windows](#windows)) fails its own plan. Each provider's files live where the agent itself looks for them (home is `%USERPROFILE%` on Windows): `~/.claude` (or `$CLAUDE_CONFIG_DIR`), `~/.codex` (or `$CODEX_HOME`), `~/.copilot` (or `$COPILOT_HOME`), `~/.gemini` (or `$GEMINI_CLI_HOME`), and for opencode `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` (its skills, `AGENTS.md`, agent files and hooks plugin all follow it, except that `opencode.skillsDir` overrides the skills directory). zakwas puts `/usr/local/bin` and `~/.local/bin` on `PATH` for the run, so CLIs installed there are found; on macOS it also adds `/opt/homebrew/bin`. On Linux `brew` and `mise` are not available to install the agent CLIs, so install them yourself first (a missing CLI is reported per provider, as on macOS). See [Platform support](config.md#platform-support).
 
 | | Claude Code | Codex | opencode | Gemini CLI | Copilot CLI |
 |---|---|---|---|---|---|
@@ -54,13 +54,11 @@ Notes on the cells:
 
 ## Windows
 
-Windows is early. The agent features run natively: plugins and marketplaces through the `claude`, `codex` and `copilot` CLIs (`.exe` and npm `.cmd` shims on `PATH` both work), MCP servers, instructions, permissions, profiles, `capture`, `propose`, `approve` and `zakwas mcp`. State lives under `%USERPROFILE%\.local\state\zakwas`, and config paths in `zakwas.yaml` keep `~/` and `/`.
+Windows is early. The agent features run natively: plugins and marketplaces through the `claude`, `codex` and `copilot` CLIs (`.exe` and npm `.cmd` shims on `PATH` both work), MCP servers, instructions, permissions, profiles, `capture`, `propose`, `approve` and `zakwas mcp`. State lives under `%USERPROFILE%\.local\state\zakwas`, and config paths in `zakwas.yaml` keep `~/` and `/`. `agents.skills`, the skills opencode links from plugins and the Gemini extension link create symlinks, or junctions for directories when Windows denies the symlink; with neither allowed, the plan of just that provider or feature fails with one line that says how to turn links on (Developer Mode, an elevated terminal or `SeCreateSymbolicLinkPrivilege`; see [Links on Windows](config.md#links-on-windows)).
 
 What does not work yet, and fails the plan of just that provider or feature with a "not supported on Windows" message:
 
-- `agents.skills` (rejected when the config loads) and the plugin skills opencode links, which need symlinks
 - opencode command hooks, whose plugin runs through `/bin/sh`
-- the Gemini CLI provider's extension link
 - guard deny rules for PowerShell and `cmd`, and for the `zakwas.exe` spelling of the command (Claude's `Bash(zakwas ...)` rules and Codex's `forbidden` rules are written for `zakwas`; the refusal to apply from an agent session works)
 
 zakwas keeps the line endings of the files it edits: a `config.toml` or `settings.json` saved with CRLF stays CRLF, and files it creates use LF.

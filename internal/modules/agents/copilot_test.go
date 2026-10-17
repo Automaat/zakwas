@@ -642,7 +642,7 @@ func TestCopilotNullMCPEntryKeepsThePluginsPlanning(t *testing.T) {
 }
 
 func TestCopilotSkillsDir(t *testing.T) {
-	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
+	testutil.RequireSymlinks(t)
 	m, _ := newSkills(t, config.Agents{Providers: []string{config.ProviderCopilot}, Skills: []config.Skill{{Path: "skills/mine"}}})
 	mine := localSkill(t, m, "skills/mine", "mine")
 	if got, want := targets(plan(t, m)), []string{"+ ~/.agents/skills/mine (→ " + mine + ")"}; !slices.Equal(got, want) {

@@ -150,12 +150,6 @@ func (o *opencode) planFrom(d desired, fetch bool) ([]engine.Change, error) {
 	if !installed {
 		return o.planPruneOnly(d, st), nil
 	}
-	if !install.SymlinksSupported && len(d.plugins) > 0 {
-		if slices.Contains(slices.Collect(maps.Values(d.explicit)), true) {
-			return nil, fmt.Errorf("opencode: plugin skills are linked into %s: %w", o.paths.Pretty(o.skillsDir), install.ErrSymlinksUnsupported)
-		}
-		return nil, nil
-	}
 	var fetches []engine.Change
 	pending := map[string]bool{}
 	if fetch {
@@ -433,33 +427,44 @@ func (o *opencode) planLink(name string, s opencodeSkill, st opencodeState) (*en
 		if err := os.MkdirAll(o.skillsDir, 0o755); err != nil {
 			return err
 		}
-		if err := os.Symlink(s.Target, link); err != nil {
+		if err := install.CreateLink(s.Target, link); err != nil {
 			return err
 		}
 		return o.update(record)
 	}
+	needLinks := func() error {
+		if err := install.RequireLinks(true); err != nil {
+			return fmt.Errorf("opencode: plugin skills are linked into %s: %w", o.paths.Pretty(o.skillsDir), err)
+		}
+		return nil
+	}
 	info, err := os.Lstat(link)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		if err := needLinks(); err != nil {
+			return nil, err
+		}
 		return &engine.Change{Action: engine.Create, Target: target, Detail: s.Plugin, Apply: create}, nil
 	case err != nil:
 		return nil, err
 	}
-	current := ""
-	if info.Mode()&fs.ModeSymlink != 0 {
-		if current, err = os.Readlink(link); err != nil {
-			return nil, err
-		}
+	current, _, err := install.LinkTarget(link, info)
+	if err != nil {
+		return nil, err
 	}
+	same := current != "" && install.SameTarget(link, current, s.Target)
 	switch {
-	case current == s.Target && (!ours || key == link && owned == s):
+	case same && (!ours || key == link && owned == s):
 		return nil, nil
-	case current == s.Target:
+	case same:
 		return &engine.Change{
 			Action: engine.Update, Target: target, Detail: "track as " + s.Plugin,
 			Apply: func(context.Context) error { return o.update(record) },
 		}, nil
-	case ours && current != "" && current == owned.Target:
+	case ours && current != "" && install.SameTarget(link, current, owned.Target):
+		if err := needLinks(); err != nil {
+			return nil, err
+		}
 		return &engine.Change{
 			Action: engine.Update, Target: target, Detail: s.Plugin + " (was " + owned.Plugin + ")",
 			Apply: func(ctx context.Context) error {
@@ -516,7 +521,7 @@ func (o *opencode) planDropLink(link string, s opencodeSkill) engine.Change {
 	forget := func(st *opencodeState) { delete(st.Skills, link) }
 	current, err := os.Readlink(link)
 	switch {
-	case err != nil || current != s.Target:
+	case err != nil || !install.SameTarget(link, current, s.Target):
 		return engine.Change{
 			Action: engine.Remove, Target: o.label(link), Detail: "no longer zakwas's link, forget it",
 			Apply: func(context.Context) error { return o.update(forget) },

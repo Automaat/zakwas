@@ -54,7 +54,7 @@ func applyOwned(t *testing.T, env Env) {
 }
 
 func TestOfflineCheckExitCodes(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
+	testutil.RequireSymlinks(t)
 	env, home := setupOffline(t)
 	fake := runnertest.New()
 	env.Runner = fake
@@ -92,7 +92,7 @@ func TestOfflineCheckExitCodes(t *testing.T) {
 }
 
 func TestOfflineCheckStartsNoCommand(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
+	testutil.RequireSymlinks(t)
 	env, _ := setupOffline(t)
 	fake := runnertest.New()
 	env.Runner = fake
@@ -120,7 +120,7 @@ func TestOfflineSplitCoversEveryModule(t *testing.T) {
 }
 
 func TestOfflineCheckJSON(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
+	testutil.RequireSymlinks(t)
 	env, _ := setupOffline(t)
 	r := invoke(env, "", "check", "--offline", "--json")
 	if r.code != ExitDrift {
@@ -167,7 +167,7 @@ func TestOfflineFlagConflicts(t *testing.T) {
 }
 
 func TestOfflineCheckWithOnlyNamesTheUnselectedModules(t *testing.T) {
-	testutil.SkipOnWindows(t, "the fixture runs sh commands and links")
+	testutil.RequireSymlinks(t)
 	env, _ := setupOffline(t)
 	r := invoke(env, "", "check", "--offline", "--only", "links")
 	if r.code != ExitDrift || strings.Contains(r.stdout, ".greeting") {

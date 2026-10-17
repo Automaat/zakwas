@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -278,8 +279,8 @@ func TestDocumentedAgentsBlocksPlan(t *testing.T) {
 					t.Fatalf("%s: no agents module", b.name())
 				}
 				changes, err := mods[i].Plan(context.Background())
-				if err != nil && !install.SymlinksSupported && strings.Contains(err.Error(), install.ErrSymlinksUnsupported.Error()) {
-					t.Skipf("%s links skills: %v", b.name(), install.ErrSymlinksUnsupported)
+				if errors.Is(err, install.ErrLinksDenied) {
+					t.Skipf("%s links skills and this machine denies links: %v", b.name(), err)
 				}
 				if err != nil {
 					t.Fatalf("%s does not plan: %v", b.name(), err)

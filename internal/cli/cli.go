@@ -654,7 +654,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		})
 	}
 	if here("commands") {
-		mods = append(mods, &commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner})
+		mods = append(mods, &commands.Module{Commands: cfg.Commands, Home: env.Home, Runner: env.Runner, GOOS: goos})
 	}
 	if _, err := os.Lstat(launchd.StatePath(env.Home)); here("launchd") && (len(cfg.Launchd) > 0 || err == nil) {
 		mods = append(mods, &launchd.Module{Jobs: cfg.Launchd, Paths: paths, Runner: env.Runner, UID: env.UID})

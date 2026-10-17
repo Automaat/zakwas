@@ -47,8 +47,11 @@ func TestScripts(t *testing.T) {
 			return nil
 		},
 		Condition: func(cond string) (bool, error) {
-			if cond == "root" {
+			switch cond {
+			case "root":
 				return os.Geteuid() == 0, nil
+			case "symlink":
+				return testutil.SymlinkDenied() == nil, nil
 			}
 			return false, fmt.Errorf("unknown condition %q", cond)
 		},
@@ -58,15 +61,20 @@ func TestScripts(t *testing.T) {
 	})
 }
 
-// linkTo asserts that args[0] is a symlink pointing at args[1].
+// linkTo asserts that args[0] is a symlink, or on Windows a junction,
+// pointing at args[1].
 func linkTo(ts *testscript.TestScript, neg bool, args []string) {
 	if len(args) != 2 {
 		ts.Fatalf("usage: linkto link target")
 	}
-	got, err := os.Readlink(ts.MkAbs(args[0]))
-	ok := err == nil && got == ts.MkAbs(args[1])
+	link := ts.MkAbs(args[0])
+	ok, got := false, ""
+	if info, err := os.Lstat(link); err == nil {
+		target, isLink, err := install.LinkTarget(link, info)
+		got, ok = target, err == nil && isLink && install.SameTarget(link, target, ts.MkAbs(args[1]))
+	}
 	if ok == neg {
-		ts.Fatalf("%s → %q (err %v), want %s", args[0], got, err, ts.MkAbs(args[1]))
+		ts.Fatalf("%s → %q, want %s", args[0], got, ts.MkAbs(args[1]))
 	}
 }
 

@@ -27,7 +27,7 @@ On Linux, the agents module, files, links, templates, commands and system `dirs`
 ## Who it is for
 
 - **Fits:** you keep dotfiles in git and want apps, tool versions, macOS preferences and agent config declared in one place, with a plan before anything changes. You use several coding agents (Claude Code, Codex, opencode, Gemini CLI, Copilot CLI) and want their setup declared once. You want to know when a Mac drifted.
-- **Does not fit:** Windows beyond the agent features (see [Windows](#windows-early)), or Linux if you need Homebrew, mise or preferences managed (those modules are macOS only; see [Linux](#linux)). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Secrets (keep them out of the config repo).
+- **Does not fit:** Windows beyond the agent features and the portable core (see [Windows](#windows-early)), or Linux if you need Homebrew, mise or preferences managed (those modules are macOS only; see [Linux](#linux)). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Secrets (keep them out of the config repo).
 
 ## Status
 
@@ -101,7 +101,7 @@ Secrets stay environment references. With an `agents` section, a guard denies th
 
 ## Windows (early)
 
-Windows runs the agent features and the portable core: `agents` (plugins, marketplaces, MCP servers, instructions, permissions, profiles and command hooks), `propose`, `proposals`, `approve`, `capture`, `zakwas mcp`, `files`, `templates`, and `plan`, `check` and `apply` for those. Install from PowerShell, then use it as on a Mac:
+Windows runs the agent features and the portable core: `agents` (plugins, marketplaces, MCP servers, instructions, permissions, profiles, skills and command hooks), `propose`, `proposals`, `approve`, `capture`, `zakwas mcp`, `files`, `links`, `templates`, `commands`, and `plan`, `check` and `apply` for those. Install from PowerShell, then use it as on a Mac:
 
 ```powershell
 irm https://raw.githubusercontent.com/Automaat/zakwas/main/install.ps1 -OutFile install.ps1
@@ -112,7 +112,7 @@ Windows PowerShell 5.1 blocks scripts by default (`Restricted`), so the command 
 
 `install.ps1` checks the release zip against `checksums.txt` and installs `zakwas.exe` to `%LOCALAPPDATA%\Programs\zakwas`. You can also unzip a `zakwas_X.Y.Z_windows_<arch>.zip` from the [releases](https://github.com/Automaat/zakwas/releases) yourself.
 
-Not supported yet: the macOS modules (`brew`, `defaults`, `system.sudoTouchID`, `launchd`), `system`, `mise`, `commands` (they run `sh`), `links` and `agents.skills` (they need symlinks). A config that uses one is rejected with a one-line message, as on Linux; see [Platform support](docs/config.md#platform-support). Also unsupported: opencode's hook plugin and the Gemini extension link (their plans fail), `zakwas self-update`, and `protect.immutable` (files are only read-only). `install.ps1` checks the zip against `checksums.txt` but does not verify the build attestation. The guard's deny rules cover the Bash form of `zakwas apply`, not PowerShell, `cmd` or `zakwas.exe`; the refusal to apply from an agent session still works. Windows is tested on `windows-latest` only. See [docs/agents.md](docs/agents.md#windows) and [troubleshooting](docs/troubleshooting.md#windows).
+`links` and `agents.skills` need a symlink, so they need Developer Mode, an elevated terminal or `SeCreateSymbolicLinkPrivilege`; a directory link falls back to a junction, a file link does not, and without the right the plan says how to turn it on ([Links on Windows](docs/config.md#links-on-windows)). `commands` run in PowerShell (`pwsh` if installed, else `powershell`) unless an entry names a `shell` ([Shells on Windows](docs/config.md#shells-on-windows)). Not supported yet: the macOS modules (`brew`, `defaults`, `system.sudoTouchID`, `launchd`), `system` and `mise`. A config that uses one is rejected with a one-line message, as on Linux; see [Platform support](docs/config.md#platform-support). Also unsupported: opencode's hook plugin (its plan fails), `zakwas self-update`, and `protect.immutable` (files are only read-only). `install.ps1` checks the zip against `checksums.txt` but does not verify the build attestation. The guard's deny rules cover the Bash form of `zakwas apply`, not PowerShell, `cmd` or `zakwas.exe`; the refusal to apply from an agent session still works. Windows is tested on `windows-latest` only. See [docs/agents.md](docs/agents.md#windows) and [troubleshooting](docs/troubleshooting.md#windows).
 
 ## Protected dotfiles
 

@@ -12,21 +12,10 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 )
 
-// ErrSymlinksUnsupported is returned in place of a symlink that Windows
-// can't create without extra privileges; zakwas has no fallback for it yet.
-var ErrSymlinksUnsupported = errors.New("symlinks are not supported on Windows yet")
-
-// SymlinksSupported reports whether zakwas can manage symlinks on this
-// platform.
-const SymlinksSupported = symlinksSupported
-
 // PlanLink returns the change that makes dst a symlink to src, or nil when
 // it already is one. Another symlink at dst is replaced; a file is backed up
 // first; a directory fails the plan.
 func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
-	if !SymlinksSupported {
-		return nil, ErrSymlinksUnsupported
-	}
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return nil, fmt.Errorf("source %s: %w", src, err)
@@ -36,22 +25,27 @@ func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
 	}
 	target := paths.Pretty(dst)
 	link := func(context.Context) error { return Symlink(src, dst) }
+	needLinks := func() error { return RequireLinks(srcInfo.IsDir()) }
 
 	info, err := os.Lstat(dst)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		if err := needLinks(); err != nil {
+			return nil, err
+		}
 		return &engine.Change{Action: engine.Create, Target: target, Detail: "→ " + paths.Pretty(src), Apply: link}, nil
 	case err != nil:
 		return nil, err
 	}
 
-	if info.Mode()&fs.ModeSymlink != 0 {
-		current, err := os.Readlink(dst)
-		if err != nil {
-			return nil, err
-		}
-		if current == src {
+	if current, isLink, err := LinkTarget(dst, info); err != nil {
+		return nil, err
+	} else if isLink {
+		if SameTarget(dst, current, src) {
 			return nil, nil
+		}
+		if err := needLinks(); err != nil {
+			return nil, err
 		}
 		return &engine.Change{
 			Action: engine.Update, Target: target,
@@ -71,6 +65,9 @@ func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
 	if os.SameFile(info, srcInfo) {
 		return nil, fmt.Errorf("%s is the source %s itself; link it somewhere else", dst, paths.Pretty(src))
 	}
+	if err := needLinks(); err != nil {
+		return nil, err
+	}
 	return &engine.Change{
 		Action: engine.Update, Target: target,
 		Detail: fmt.Sprintf("back up to %s, link → %s", filepath.Base(BackupName(dst)), paths.Pretty(src)),
@@ -83,13 +80,11 @@ func PlanLink(paths config.Paths, src, dst string) (*engine.Change, error) {
 	}, nil
 }
 
-// Symlink links dst to src, creating dst's parent directories.
+// Symlink links dst to src (a junction on Windows when src is a directory
+// and symlinks are denied), creating dst's parent directories.
 func Symlink(src, dst string) error {
-	if !SymlinksSupported {
-		return ErrSymlinksUnsupported
-	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	return os.Symlink(src, dst)
+	return CreateLink(src, dst)
 }

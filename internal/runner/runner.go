@@ -33,10 +33,20 @@ type Cmd struct {
 	// terminal (Exec.Detached): a background group is stopped when it
 	// reads /dev/tty, and without a terminal there is nothing to read.
 	Group bool
+	// Label stands for the command in messages, and in the key a
+	// runnertest.Fake matches, when its real arguments are long or noisy.
+	Label string
+	// CmdLine is, on Windows, the whole command line handed to the process
+	// as is, for programs like cmd.exe that don't parse it the way Go quotes
+	// it. Other systems ignore it.
+	CmdLine string
 }
 
 // String renders the command the way a user would type it.
 func (c Cmd) String() string {
+	if c.Label != "" {
+		return c.Label
+	}
 	return strings.Join(append([]string{c.Name}, c.Args...), " ")
 }
 
@@ -102,6 +112,7 @@ func (e *Exec) Installed(name string) bool {
 func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 	cmd.Cancel = func() error { return interrupt(cmd.Process) }
+	setCmdLine(cmd, c.CmdLine)
 	grace := cmp.Or(e.Grace, WaitDelay)
 	cmd.WaitDelay = grace
 	if c.Group && !c.Stream && e.Detached {

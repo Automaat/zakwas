@@ -1,0 +1,40 @@
+[!symlink] skip 'a file link needs symlink rights on Windows (Developer Mode or an elevated account)'
+
+zakwas plan --only links
+stdout '\+ ~/.zshrc'
+stdout '\+ ~/.config/conf'
+! exists home/.zshrc
+! exists home/.config
+
+zakwas apply -y --only links
+linkto home/.zshrc dotfiles/zshrc
+linkto home/.config/conf dotfiles/conf
+exists home/.config/conf/a.txt
+
+zakwas check --only links
+stdout 'up to date: links'
+zakwas plan --only links
+! stdout '~/.zshrc'
+
+cp zakwas-moved.yaml zakwas.yaml
+zakwas plan --only links
+stdout 'relink'
+zakwas apply -y --only links
+linkto home/.zshrc dotfiles/zshrc2
+zakwas check --only links
+stdout 'up to date: links'
+
+-- zakwas.yaml --
+links:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+  - {src: dotfiles/conf, dst: ~/.config/conf}
+-- zakwas-moved.yaml --
+links:
+  - {src: dotfiles/zshrc2, dst: ~/.zshrc}
+  - {src: dotfiles/conf, dst: ~/.config/conf}
+-- dotfiles/zshrc --
+export EDITOR=vim
+-- dotfiles/zshrc2 --
+export EDITOR=nano
+-- dotfiles/conf/a.txt --
+a

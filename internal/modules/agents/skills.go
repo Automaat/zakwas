@@ -510,9 +510,6 @@ func skillMDName(data []byte) (string, bool) {
 // anything else at the path, such as an `npx skills` install, fails the plan.
 func (m *Module) planSkillLink(w skillWant, st skillsState) (*engine.Change, error) {
 	link, target := w.link, m.skillTarget(w)
-	if !install.SymlinksSupported {
-		return nil, fmt.Errorf("skill %q: linking it into %s: %w", w.name, m.Paths.Pretty(link), install.ErrSymlinksUnsupported)
-	}
 	if err := install.CheckParents(m.Paths, link); err != nil {
 		return nil, fmt.Errorf("skill %q: %w", w.name, err)
 	}
@@ -528,34 +525,45 @@ func (m *Module) planSkillLink(w skillWant, st skillsState) (*engine.Change, err
 		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 			return err
 		}
-		if err := os.Symlink(target, link); err != nil {
+		if err := install.CreateLink(target, link); err != nil {
 			return err
 		}
 		return m.updateSkills(record)
+	}
+	needLinks := func() error {
+		if err := install.RequireLinks(true); err != nil {
+			return fmt.Errorf("skill %q: linking it into %s: %w", w.name, m.Paths.Pretty(link), err)
+		}
+		return nil
 	}
 	label, detail := m.Paths.Pretty(link), m.skillDetail(w)
 	info, err := os.Lstat(link)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		if err := needLinks(); err != nil {
+			return nil, err
+		}
 		return &engine.Change{Action: engine.Create, Target: label, Detail: detail, Apply: create}, nil
 	case err != nil:
 		return nil, err
 	}
-	current := ""
-	if info.Mode()&fs.ModeSymlink != 0 {
-		if current, err = os.Readlink(link); err != nil {
-			return nil, err
-		}
+	current, _, err := install.LinkTarget(link, info)
+	if err != nil {
+		return nil, err
 	}
+	same := current != "" && install.SameTarget(link, current, target)
 	switch {
-	case current == target && !ours, current == target && key == link && owned == entry:
+	case same && !ours, same && key == link && owned == entry:
 		return nil, nil
-	case current == target:
+	case same:
 		return &engine.Change{
 			Action: engine.Update, Target: label, Detail: "track " + detail,
 			Apply: func(context.Context) error { return m.updateSkills(record) },
 		}, nil
-	case ours && current != "" && current == owned.Target:
+	case ours && current != "" && install.SameTarget(link, current, owned.Target):
+		if err := needLinks(); err != nil {
+			return nil, err
+		}
 		return &engine.Change{
 			Action: engine.Update, Target: label, Detail: detail + " (was " + m.Paths.Pretty(owned.Target) + ")",
 			Apply: func(ctx context.Context) error {
@@ -576,7 +584,7 @@ func (m *Module) planSkillRemove(link string, l skillLink) engine.Change {
 	forget := func(st *skillsState) { delete(st.Links, link) }
 	label := m.Paths.Pretty(link)
 	current, err := os.Readlink(link)
-	if err != nil || current != l.Target || install.CheckParents(m.Paths, link) != nil {
+	if err != nil || !install.SameTarget(link, current, l.Target) || install.CheckParents(m.Paths, link) != nil {
 		return engine.Change{
 			Action: engine.Remove, Target: label, Detail: "no longer zakwas's link, forget it",
 			Apply: func(context.Context) error { return m.updateSkills(forget) },

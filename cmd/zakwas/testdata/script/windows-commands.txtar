@@ -1,0 +1,70 @@
+[!windows] skip 'drives PowerShell and cmd, which only Windows has'
+
+zakwas plan --only commands
+stdout 'default shell'
+stdout 'cmd shell'
+stdout 'Windows PowerShell'
+! exists home/marker.txt
+
+zakwas apply -y --only commands
+exists home/marker.txt
+exists home/cmd marker.txt
+exists home/legacy.txt
+
+zakwas check --only commands
+stdout 'up to date: commands'
+
+cp zakwas-fail.yaml zakwas.yaml
+! zakwas apply -y --only commands
+stdout 'failed'
+! exists home/after.txt
+
+cp zakwas-badshell.yaml zakwas.yaml
+! zakwas plan --only commands
+stderr 'unknown shell "fish"'
+
+cp zakwas-multiline-cmd.yaml zakwas.yaml
+! zakwas plan --only commands
+stderr 'shell cmd runs a single line'
+
+-- zakwas.yaml --
+commands:
+  - name: default shell
+    check: |-
+      if (Test-Path -LiteralPath 'marker.txt') { exit 0 } else { exit 1 }
+    run: |-
+      Write-Output 'hello from the command'
+      Set-Content -Path 'marker.txt' -Value 'x'
+  - name: cmd shell
+    shell: cmd
+    check: if exist "cmd marker.txt" (exit /b 0) else (exit /b 1)
+    run: echo hi > "cmd marker.txt"
+  - name: Windows PowerShell
+    shell: powershell
+    check: |-
+      if (Test-Path -LiteralPath 'legacy.txt') { exit 0 } else { exit 1 }
+    run: Set-Content -Path 'legacy.txt' -Value 'x'
+-- zakwas-fail.yaml --
+commands:
+  - name: fails
+    shell: cmd
+    check: exit /b 1
+    run: exit /b 3
+  - name: never runs
+    shell: cmd
+    check: exit /b 1
+    run: echo x > after.txt
+-- zakwas-badshell.yaml --
+commands:
+  - name: fish
+    shell: fish
+    check: "true"
+    run: "true"
+-- zakwas-multiline-cmd.yaml --
+commands:
+  - name: two lines
+    shell: cmd
+    check: |
+      echo one
+      echo two
+    run: echo x

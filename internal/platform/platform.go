@@ -43,12 +43,12 @@ func (m Module) Reason(goos string) string {
 var Modules = []Module{
 	{Name: "system", OS: unixOnly, Why: "its directory modes and ssh-keygen setup are not ported to Windows yet"},
 	{Name: "files", OS: allOS},
-	{Name: "links", OS: unixOnly, Why: "symlinks need a privilege Windows users lack by default and have no fallback yet"},
+	{Name: "links", OS: allOS},
 	{Name: "templates", OS: allOS},
 	{Name: "brew", OS: darwinOnly, Why: "it bootstraps Homebrew for macOS and manages casks"},
 	{Name: "mise", OS: darwinOnly, Why: "its bootstrap installs the macOS build of mise", WhyOS: map[string]string{Windows: "it has no Windows bootstrap yet"}},
 	{Name: "agents", OS: allOS},
-	{Name: "commands", OS: unixOnly, Why: "its checks and steps run with sh, which Windows lacks"},
+	{Name: "commands", OS: allOS},
 	{Name: "launchd", OS: darwinOnly, Why: "launchd is macOS's service manager"},
 	{Name: "defaults", OS: darwinOnly, Why: "it drives the macOS 'defaults' tool"},
 }
@@ -65,7 +65,7 @@ type Feature struct {
 
 var Features = []Feature{
 	{Name: "system.sudoTouchID", OS: darwinOnly, Why: "Touch ID and pam_tid.so are macOS only"},
-	{Name: "agents.skills", OS: unixOnly, Why: "skills are linked with symlinks, which Windows does not support yet"},
+	{Name: "agents.skills", OS: allOS},
 	{Name: "protect.immutable", OS: darwinOnly, Why: "the uchg flag is macOS only", Fallback: "files are read-only copies"},
 }
 

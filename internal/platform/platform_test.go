@@ -30,8 +30,8 @@ func TestSupported(t *testing.T) {
 		{"agents", Windows, true},
 		{"files", Windows, true},
 		{"templates", Windows, true},
-		{"links", Windows, false},
-		{"commands", Windows, false},
+		{"links", Windows, true},
+		{"commands", Windows, true},
 		{"system", Windows, false},
 		{"brew", Windows, false},
 		{"mise", Windows, false},
@@ -85,9 +85,11 @@ func TestErrors(t *testing.T) {
 		{"feature on linux", FeatureError("system.sudoTouchID", Linux), "system.sudoTouchID: not supported on Linux (Touch ID and pam_tid.so are macOS only); see docs/config.md#platform-support"},
 		{"feature on darwin", FeatureError("system.sudoTouchID", Darwin), ""},
 		{"feature with a fallback", FeatureError("protect.immutable", Linux), ""},
-		{"module on windows", ModuleError("links", Windows), "links: not supported on Windows (symlinks need a privilege Windows users lack by default and have no fallback yet); see docs/config.md#platform-support"},
+		{"module on windows", ModuleError("brew", Windows), "brew: not supported on Windows (it bootstraps Homebrew for macOS and manages casks); see docs/config.md#platform-support"},
+		{"windows runs links", ModuleError("links", Windows), ""},
+		{"windows runs commands", ModuleError("commands", Windows), ""},
 		{"module with its own windows reason", ModuleError("mise", Windows), "mise: not supported on Windows (it has no Windows bootstrap yet); see docs/config.md#platform-support"},
-		{"windows feature", FeatureError("agents.skills", Windows), "agents.skills: not supported on Windows (skills are linked with symlinks, which Windows does not support yet); see docs/config.md#platform-support"},
+		{"windows runs skills", FeatureError("agents.skills", Windows), ""},
 		{"windows touch id", FeatureError("system.sudoTouchID", Windows), "system.sudoTouchID: not supported on Windows (Touch ID and pam_tid.so are macOS only); see docs/config.md#platform-support"},
 		{"windows keeps immutable as a fallback", FeatureError("protect.immutable", Windows), ""},
 	}
@@ -117,10 +119,10 @@ func TestFeatureSupported(t *testing.T) {
 }
 
 func TestWindowsModuleLists(t *testing.T) {
-	if got, want := SupportedModules(Windows), []string{"files", "templates", "agents"}; !slices.Equal(got, want) {
+	if got, want := SupportedModules(Windows), []string{"files", "links", "templates", "agents", "commands"}; !slices.Equal(got, want) {
 		t.Errorf("SupportedModules(windows) = %v, want %v", got, want)
 	}
-	if got, want := UnsupportedModules(Windows), []string{"system", "links", "brew", "mise", "commands", "launchd", "defaults"}; !slices.Equal(got, want) {
+	if got, want := UnsupportedModules(Windows), []string{"system", "brew", "mise", "launchd", "defaults"}; !slices.Equal(got, want) {
 		t.Errorf("UnsupportedModules(windows) = %v, want %v", got, want)
 	}
 }
