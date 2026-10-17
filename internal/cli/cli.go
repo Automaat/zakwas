@@ -609,7 +609,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if here("links") {
 		mods = append(mods, &links.Module{Links: cfg.Links, Paths: paths})
 	}
-	mods = append(mods, &templates.Module{Templates: cfg.Templates, Agents: cfg.Agents, Paths: paths, Installer: installer})
+	mods = append(mods, &templates.Module{Templates: cfg.Templates, Agents: cfg.Agents, Paths: paths, Installer: installer, GOOS: goos})
 	if cfg.Brew != nil && here("brew") {
 		mods = append(mods, &brew.Module{Brew: *cfg.Brew, Paths: paths, Runner: env.Runner})
 	}
@@ -646,7 +646,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if agentsCfg != nil {
 		mods = append(mods, &agents.Module{
 			Agents: *agentsCfg, Paths: paths, Runner: env.Runner,
-			Guard: cfg.Agents.GuardEnabled(), TemplateSources: templateSrcs(cfg, paths),
+			Guard: cfg.Agents.GuardEnabled(), GOOS: goos, TemplateSources: templateSrcs(cfg, paths),
 			Vars: cfg.Templates.Vars, Immutable: immutable, TemplateFiles: cfg.Templates.Files,
 			Destinations:    cfg.Destinations(paths),
 			ClaudeConfigDir: absFromCwd(env, env.ClaudeConfigDir), CodexHome: absFromCwd(env, env.CodexHome),

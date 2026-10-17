@@ -1,0 +1,33 @@
+env ZAKWAS_TEST_GOOS=windows
+env CLAUDE_CONFIG_DIR=$WORK/claude
+env CODEX_HOME=$WORK/codex
+
+zakwas plan --only agents
+stdout 'permissions \+221 deny'
+stdout 'permissions \+10 forbidden'
+! stdout 'not enforced'
+! stderr 'not enforced'
+
+env CLAUDECODE=1
+! zakwas apply -y
+stderr 'refusing to apply from a Claude Code session'
+! exists claude/settings.json
+! exists codex/rules/zakwas.rules
+env CLAUDECODE=
+
+zakwas apply -y --only agents
+grep -count=1 '"Bash\(zakwas apply\)"' claude/settings.json
+grep -count=1 '"Bash\(\*zakwas\.exe apply\)"' claude/settings.json
+grep -count=1 '"Bash\(\*zakwas\.exe \* self-update \*\)"' claude/settings.json
+grep -count=1 '"PowerShell\(zakwas apply\)"' claude/settings.json
+grep -count=1 '"PowerShell\(& zakwas apply\)"' claude/settings.json
+grep -count=1 '"PowerShell\(\*zakwas\.exe \* mcp \*\)"' claude/settings.json
+grep -count=1 '"Edit\(~/\.local/state/zakwas/\*\*\)"' claude/settings.json
+grep -count=1 '^prefix_rule\(pattern=\["zakwas", "apply"\], decision="forbidden"' codex/rules/zakwas.rules
+grep -count=1 '^prefix_rule\(pattern=\["zakwas.exe", "apply"\], decision="forbidden"' codex/rules/zakwas.rules
+zakwas check --only agents
+stdout 'No changes'
+
+-- zakwas.yaml --
+agents:
+  providers: [claude, codex]

@@ -346,6 +346,21 @@ func guardPathPrefix() string {
 	return `(?:|[^ ]*/|` + guardPathParts(geminiGuardPathParts) + `/|\\"[^"]*/\\"|'[^']*/')`
 }
 
+// guardBackslash is a backslash in a call: the JSON doubles it. guardExe is
+// the optional extension and guardCallOperator the optional PowerShell
+// call operator; none is a quantified group, which Gemini rejects.
+const (
+	guardBackslash    = `\\\\`
+	guardExe          = `(?:|\.[eE][xX][eE])`
+	guardCallOperator = `(?:|&[ ]*)`
+)
+
+// guardPathPrefixWindows is guardPathPrefix where a path without blanks may
+// also end in a backslash.
+func guardPathPrefixWindows() string {
+	return `(?:|[^ ]*(?:/|` + guardBackslash + `)|` + guardPathParts(geminiGuardPathParts) + `/|\\"[^"]*/\\"|'[^']*/')`
+}
+
 // geminiGuardRegex matches a guarded command that starts the shell command
 // as the agent wrote it: the binary bare, by path or quoted, in any case,
 // then the guarded word as the first word after the binary or after flags
@@ -355,17 +370,34 @@ func guardPathPrefix() string {
 // or quoted word follows it, as in `zakwas -m "apply" plan`; the real
 // command takes no word there, only flags.
 func geminiGuardRegex(words []string) string {
+	return geminiGuardRegexFor(words, false)
+}
+
+// geminiGuardRegexFor is geminiGuardRegex for the operating system of the
+// plan. On Windows the binary may also end in .exe and stand in a path with
+// backslashes, which the JSON of the call doubles, and PowerShell may start
+// the command with the call operator, as in `& "C:\bin\zakwas.exe" apply`.
+func geminiGuardRegexFor(words []string, windows bool) string {
 	name := caselessWord(words[0])
+	lead := guardLead()
+	prefix := guardPathPrefix()
+	quotedPath := `\\"[^"]*/` + name + `\\"|'[^']*/` + name + `'`
+	if windows {
+		name += guardExe
+		lead += guardCallOperator
+		prefix = guardPathPrefixWindows()
+		quotedPath = `\\"[^"]*(?:/|` + guardBackslash + `)` + name + `\\"|'[^']*(?:/|` + guardBackslash + `)` + name + `'`
+	}
 	word := regexp.QuoteMeta(strings.Join(words[1:], " "))
 	quoted := `(?:\\"` + word + `\\"|'` + word + `')`
-	binary := `(?:` + guardPathPrefix() + `(?:` + name + `|\\"` + name + `\\"|'` + name + `')|\\"[^"]*/` + name + `\\"|'[^']*/` + name + `')`
+	binary := `(?:` + prefix + `(?:` + name + `|\\"` + name + `\\"|'` + name + `')|` + quotedPath + `)`
 	rest := `[^"']*`
 	for range geminiGuardQuotedValues {
 		rest = `[^"']*(?:|` + guardQuoted + rest + `)`
 	}
 	first := `(?:` + word + guardWordEnd + `|` + quoted + guardWordEnd + `)`
 	later := `(?:` + word + guardWordEnd + `|` + quoted + guardQuotedEnd() + `)`
-	return guardLead() + binary + guardBlank() + `(?:` + first + `|` + guardFlagStart + rest + guardOneBlank + later + `)`
+	return lead + binary + guardBlank() + `(?:` + first + `|` + guardFlagStart + rest + guardOneBlank + later + `)`
 }
 
 func caselessWord(word string) string {
@@ -388,7 +420,7 @@ func (m *Module) geminiRules() []geminiRule {
 	if m.Guard {
 		for _, g := range m.Agents.GuardPermissions(config.ProviderGemini) {
 			rules = append(rules, geminiRule{
-				ToolName: "run_shell_command", CommandRegex: geminiGuardRegex(g.Words),
+				ToolName: "run_shell_command", CommandRegex: geminiGuardRegexFor(g.Words, m.goos() == "windows"),
 				Decision: "deny", Priority: geminiGuardPriority, DenyMessage: g.Justification,
 			})
 		}

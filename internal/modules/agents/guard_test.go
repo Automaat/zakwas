@@ -22,6 +22,7 @@ func guardedModule(t *testing.T, providers ...string) *Module {
 	m := permissionsModule(t, providers, nil)
 	m.Paths = config.Paths{Home: home, Root: root}
 	m.Guard = true
+	m.GOOS = "linux"
 	return m
 }
 
@@ -290,29 +291,151 @@ func TestOpencodeIsToldToPromptByHand(t *testing.T) {
 	}
 }
 
-func TestGuardWarnsOnWindowsThatItIsNotEnforced(t *testing.T) {
-	for _, tt := range []struct {
-		goos  string
-		guard bool
-		want  bool
-	}{{"windows", true, true}, {"windows", false, false}, {"darwin", true, false}, {"linux", true, false}} {
-		t.Run(tt.goos, func(t *testing.T) {
-			saved := hostOS
-			hostOS = tt.goos
-			defer func() { hostOS = saved }()
-			m := &Module{Agents: config.Agents{Providers: []string{config.ProviderClaude}}, Guard: tt.guard, Paths: config.Paths{Home: t.TempDir(), Root: t.TempDir()}}
-
-			var found bool
-			for _, w := range m.Warnings(context.Background()) {
-				if strings.Contains(w, "agents.guard: not enforced on Windows yet") {
-					found = true
-				}
-			}
-
-			if found != tt.want {
-				t.Errorf("warned = %v, want %v", found, tt.want)
+func TestGuardDoesNotWarnThatItIsNotEnforcedOnWindows(t *testing.T) {
+	for _, goos := range []string{"windows", "darwin", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			m := guardedModule(t, config.ProviderClaude, config.ProviderCodex)
+			m.GOOS = goos
+			if warnings := m.Warnings(context.Background()); len(warnings) != 0 {
+				t.Errorf("warnings = %q", warnings)
 			}
 		})
+	}
+}
+
+func TestGuardFollowsTheHostWithoutAnExplicitSystem(t *testing.T) {
+	m := guardedModule(t, config.ProviderClaude)
+	m.GOOS = ""
+	for _, goos := range []string{"windows", "linux"} {
+		asHost(t, goos)
+		if got := m.goos(); got != goos {
+			t.Errorf("goos = %q, want %q", got, goos)
+		}
+		if got := slices.ContainsFunc(m.claudeGuardRules(), func(r string) bool { return strings.HasPrefix(r, "PowerShell(") }); got != (goos == "windows") {
+			t.Errorf("%s: PowerShell rules = %v", goos, got)
+		}
+	}
+}
+
+func TestGuardNamesZakwasExeAndPowerShellOnWindows(t *testing.T) {
+	m := guardedModule(t, config.ProviderClaude)
+	m.GOOS = "windows"
+	settings := filepath.Join(m.Paths.Home, ".claude", "settings.json")
+	apply(t, plan(t, m))
+	deny := settingsDeny(t, settings)
+	for _, want := range []string{
+		"Bash(zakwas apply)", "Bash(*/zakwas * mcp *)",
+		"Bash(*zakwas.exe apply)", "Bash(*zakwas.exe apply *)", "Bash(*zakwas.exe * apply)", "Bash(*zakwas.exe * self-update *)",
+		`Bash(*zakwas.exe" apply *)`, "Bash(*zakwas.exe' * upgrade)",
+		"PowerShell(zakwas apply)", "PowerShell(*/zakwas apply *)", "PowerShell(*zakwas.exe apply)", "PowerShell(*zakwas.exe * approve *)",
+		`PowerShell(*zakwas.exe" mcp *)`, "PowerShell(& zakwas apply)", "PowerShell(& zakwas * upgrade *)",
+		"Edit(~/dotfiles/**)", "Edit(~/.local/state/zakwas/**)",
+	} {
+		if !slices.Contains(deny, want) {
+			t.Errorf("deny lacks %q", want)
+		}
+	}
+	names := len(config.GuardShellNames("windows"))
+	want := names*4*len(config.GuardedCommands) + (names+1)*4*len(config.GuardedCommands) + 2
+	if len(deny) != want {
+		t.Errorf("%d deny rules, want %d", len(deny), want)
+	}
+	for _, rule := range deny {
+		if strings.ContainsAny(rule, `\`) {
+			t.Errorf("rule %q holds a backslash, whose meaning in a rule is not documented", rule)
+		}
+		for _, plain := range []string{"plan", "check"} {
+			if strings.Contains(rule, "zakwas.exe "+plain) || strings.Contains(rule, "* "+plain) {
+				t.Errorf("rule %q reaches %s", rule, plain)
+			}
+		}
+	}
+	assertConverged(t, m)
+
+	m.Guard = false
+	apply(t, plan(t, m))
+	if got := settingsDeny(t, settings); len(got) != 0 {
+		t.Errorf("deny after turning the guard off = %q", got)
+	}
+}
+
+func TestGuardRulesAreTheSameOffWindows(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		m := guardedModule(t, config.ProviderClaude)
+		m.GOOS = goos
+		rules := m.claudeGuardRules()
+		if len(rules) != 42 {
+			t.Errorf("%s: %d rules, want 42", goos, len(rules))
+		}
+		for _, r := range rules {
+			if strings.HasPrefix(r, "PowerShell(") || strings.Contains(r, ".exe") {
+				t.Errorf("%s: rule %q is for Windows", goos, r)
+			}
+		}
+	}
+}
+
+func TestClaudeAbsPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/tmp/repo":            "//tmp/repo",
+		"/Users/me/dotfiles":   "//Users/me/dotfiles",
+		"D:/repo":              "//d/repo",
+		"c:/Users/me/repo":     "//c/Users/me/repo",
+		"C:/Users/me/my repo":  "//c/Users/me/my repo",
+		"D:/":                  "//d/",
+		"/d:/not-a-drive-path": "//d:/not-a-drive-path",
+	} {
+		if got := claudeAbsPath(in); got != want {
+			t.Errorf("claudeAbsPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestClaudePathUsesTheDriveFormOutsideHome(t *testing.T) {
+	m := &Module{Paths: config.Paths{Home: "C:/Users/me"}}
+	for dir, want := range map[string]string{
+		"C:/Users/me/dotfiles": "~/dotfiles",
+		"D:/repo":              "//d/repo",
+		"E:/work/zakwas":       "//e/work/zakwas",
+	} {
+		if got := m.claudePath(dir); got != want {
+			t.Errorf("claudePath(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
+func TestGuardForbidsZakwasExeInCodexOnWindows(t *testing.T) {
+	m := guardedModule(t, config.ProviderClaude, config.ProviderCodex)
+	m.GOOS = "windows"
+	apply(t, plan(t, m))
+	rules := readFile(t, m.codexRulesPath())
+	for _, c := range config.GuardedCommands {
+		for _, binary := range []string{"zakwas", "zakwas.exe"} {
+			want := `prefix_rule(pattern=["` + binary + `", "` + c + `"], decision="forbidden", justification=`
+			if !strings.Contains(rules, want) {
+				t.Errorf("rules lack %q:\n%s", want, rules)
+			}
+		}
+	}
+	if got, want := strings.Count(rules, "decision=\"forbidden\""), 2*len(config.GuardedCommands); got != want {
+		t.Errorf("%d forbidden rules, want %d", got, want)
+	}
+	assertConverged(t, m)
+
+	linux := guardedModule(t, config.ProviderClaude, config.ProviderCodex)
+	apply(t, plan(t, linux))
+	if got := readFile(t, linux.codexRulesPath()); strings.Contains(got, ".exe") {
+		t.Errorf("rules off Windows name zakwas.exe:\n%s", got)
+	}
+}
+
+func TestGuardOnWindowsKeepsAUsersOwnExeRuleInCodex(t *testing.T) {
+	m := guardedModule(t, config.ProviderClaude, config.ProviderCodex)
+	m.GOOS = "windows"
+	m.Agents.Permissions = &config.AgentPermissions{Deny: entries("zakwas.exe apply")}
+	apply(t, plan(t, m))
+	if got := strings.Count(readFile(t, m.codexRulesPath()), `["zakwas.exe", "apply"]`); got != 1 {
+		t.Errorf("zakwas.exe apply is forbidden %d times", got)
 	}
 }
 

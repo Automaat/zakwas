@@ -32,6 +32,12 @@ func geminiGuardMatcher(t testing.TB, words ...string) func(string) bool {
 	return func(command string) bool { return re.MatchString(geminiCall(t, command)) }
 }
 
+func geminiWindowsGuardMatcher(t testing.TB, words ...string) func(string) bool {
+	t.Helper()
+	re := regexp.MustCompile(`"command":"` + geminiGuardRegexFor(words, true))
+	return func(command string) bool { return re.MatchString(geminiCall(t, command)) }
+}
+
 var nestedQuantifier = regexp.MustCompile(`\([^)]*[*+?{].*\)[*+?{]`)
 
 func TestGeminiGuardRegexPassesGeminiSafetyCheck(t *testing.T) {
@@ -45,6 +51,16 @@ func TestGeminiGuardRegexPassesGeminiSafetyCheck(t *testing.T) {
 		}
 		if _, err := regexp.Compile(regex); err != nil {
 			t.Errorf("%s regex: %v", command, err)
+		}
+		windows := `"command":"` + geminiGuardRegexFor([]string{"zakwas", command}, true)
+		if len(windows) > 1700 {
+			t.Errorf("%s regex for Windows is %d characters, Gemini rejects 2048", command, len(windows))
+		}
+		if nestedQuantifier.MatchString(windows) {
+			t.Errorf("%s regex for Windows has a quantified group, which Gemini rejects as unsafe", command)
+		}
+		if _, err := regexp.Compile(windows); err != nil {
+			t.Errorf("%s regex for Windows: %v", command, err)
 		}
 	}
 }
@@ -210,6 +226,109 @@ func TestGeminiGuardRegexTable(t *testing.T) {
 	}
 }
 
+func TestGeminiGuardRegexForOtherSystemsHasNoWindowsPieces(t *testing.T) {
+	for _, word := range config.GuardedCommands {
+		regex := geminiGuardRegexFor([]string{"zakwas", word}, false)
+		if regex != geminiGuardRegex([]string{"zakwas", word}) {
+			t.Errorf("%s: geminiGuardRegex is not the regex for other systems", word)
+		}
+		for _, piece := range []string{guardExe, guardCallOperator} {
+			if strings.Contains(regex, piece) {
+				t.Errorf("%s: the regex off Windows holds %q", word, piece)
+			}
+		}
+	}
+}
+
+func TestGeminiGuardRegexTableOnWindows(t *testing.T) {
+	denied := geminiWindowsGuardMatcher(t, "zakwas", "apply")
+	for _, tc := range []struct {
+		command string
+		want    bool
+	}{
+		{"zakwas apply", true},
+		{"zakwas.exe apply", true},
+		{"ZAKWAS.EXE apply", true},
+		{"Zakwas.Exe apply", true},
+		{`.\zakwas.exe apply`, true},
+		{`.\zakwas apply`, true},
+		{`C:\Users\me\bin\zakwas.exe apply`, true},
+		{`C:\Users\me\bin\zakwas apply`, true},
+		{`c:\users\me\bin\ZAKWAS.EXE apply`, true},
+		{`C:/Users/me/bin/zakwas.exe apply`, true},
+		{`~/bin/zakwas.exe apply`, true},
+		{`C:\Users\me\bin\zakwas.exe -c C:\repo\zakwas.yaml apply`, true},
+		{`zakwas.exe -c "C:\my dir\zakwas.yaml" apply`, true},
+		{`zakwas.exe -c 'C:\my dir\zakwas.yaml' -y apply`, true},
+		{`zakwas.exe "apply"`, true},
+		{`zakwas.exe 'apply'`, true},
+		{"zakwas.exe\tapply", true},
+		{`"zakwas.exe" apply`, true},
+		{`'zakwas.exe' apply`, true},
+		{`"zakwas" apply`, true},
+		{`"C:\Program Files\zakwas\zakwas.exe" apply`, true},
+		{`"C:\Program Files\zakwas\zakwas" apply`, true},
+		{`'C:\Program Files\zakwas\zakwas.exe' apply`, true},
+		{`"C:/Program Files/zakwas/zakwas.exe" apply`, true},
+		{`& "C:\Program Files\zakwas\zakwas.exe" apply`, true},
+		{`& 'C:\Program Files\zakwas\zakwas.exe' apply`, true},
+		{`&"C:\Program Files\zakwas\zakwas.exe" apply`, true},
+		{`& C:\bin\zakwas.exe apply`, true},
+		{`& .\zakwas.exe -c x.yaml apply`, true},
+		{`& zakwas apply`, true},
+		{`&  zakwas.exe  apply`, true},
+		{`  & zakwas.exe apply`, true},
+		{`& "C:\Program Files\zakwas\zakwas.exe" -c "C:\my dir\x.yaml" apply`, true},
+		{`C:\bin\zakwas.exe apply -y`, true},
+		{`C:\bin\zakwas.exe apply;echo`, true},
+		{`C:\bin\zakwas.exe 2>&1 apply`, true},
+		{`zakwas.exe plan`, false},
+		{`C:\bin\zakwas.exe plan`, false},
+		{`& "C:\Program Files\zakwas\zakwas.exe" plan`, false},
+		{`& "C:\Program Files\zakwas\zakwas.exe" check -c "apply notes.yaml"`, false},
+		{`C:\bin\zakwas.exe -m "apply" plan`, false},
+		{`zakwas.exe plan apply`, false},
+		{`zakwas.exe applyx`, false},
+		{`zakwas.exe apply-x`, false},
+		{`zakwas.exex apply`, false},
+		{`zakwas.ex apply`, false},
+		{`zakwas.exe.bak apply`, false},
+		{`notzakwas.exe apply`, false},
+		{`C:\bin\notzakwas.exe apply`, false},
+		{`C:\bin\zakwasx.exe apply`, false},
+		{`echo zakwas.exe apply`, false},
+		{`echo C:\bin\zakwas.exe apply`, false},
+		{`Write-Host zakwas apply`, false},
+		{`& echo zakwas apply`, false},
+		{`"zakwas.exe apply"`, false},
+		{`"C:\Program Files\zakwas\x\zakwas.exe plan"`, false},
+	} {
+		if got := denied(tc.command); got != tc.want {
+			t.Errorf("%q denied = %v, want %v", tc.command, got, tc.want)
+		}
+	}
+}
+
+func TestGeminiGuardRegexOffWindowsDoesNotNameExe(t *testing.T) {
+	denied := geminiGuardMatcher(t, "zakwas", "apply")
+	for _, command := range []string{`zakwas.exe apply`, `C:\bin\zakwas.exe apply`, `& zakwas apply`, `.\zakwas apply`} {
+		if denied(command) {
+			t.Errorf("%q is denied off Windows", command)
+		}
+	}
+}
+
+func TestGeminiGuardRegexOnWindowsKeepsEveryOtherSystemCase(t *testing.T) {
+	linux := geminiGuardMatcher(t, "zakwas", "apply")
+	windows := geminiWindowsGuardMatcher(t, "zakwas", "apply")
+	rng := rand.New(rand.NewPCG(3, 4))
+	for _, c := range guardCases(rng, 20000) {
+		if linux(c.command) && !windows(c.command) {
+			t.Errorf("%q is denied off Windows but not on it", c.command)
+		}
+	}
+}
+
 func TestGeminiGuardRegexTabLimit(t *testing.T) {
 	denied := geminiGuardMatcher(t, "zakwas", "apply")
 	for n := 1; n <= geminiGuardTabs+1; n++ {
@@ -308,10 +427,19 @@ func TestGeminiGuardRegexIsLinearInJavaScript(t *testing.T) {
 		{"quoted-word-tabs", `zakwas -y "apply"` + strings.Repeat(" \t", n/2) + "x"},
 		{"flags", "zakwas " + strings.Repeat("-y ", n/3) + "apply"},
 		{"quoted-values", "zakwas " + strings.Repeat(`-c "a b" `, n/9) + "plan"},
+		{"backslashes", strings.Repeat(`\`, n)},
+		{"backslash-slash", strings.Repeat(`\/`, n/2) + "zakwas.exe apply"},
+		{"windows-path", `C:` + strings.Repeat(`\a`, n/2) + `\zakwas.exe apply`},
+		{"windows-quoted-path", `"C:` + strings.Repeat(`\a b`, n/4) + `\zakwas.exe" apply`},
+		{"windows-quote-backslash-lattice", strings.Repeat(`"a\b\`, n/6) + "zakwas.exe apply"},
+		{"calls", strings.Repeat("& ", n/2) + "zakwas apply"},
+		{"ampersands", strings.Repeat("&", n)},
+		{"exes", strings.Repeat("zakwas.exe", n/10)},
+		{"exe-then-tabs", "zakwas.exe" + strings.Repeat("\t", n) + "apply"},
 	}
 	var regexes []string
 	for _, word := range config.GuardedCommands {
-		regexes = append(regexes, `"command":"`+geminiGuardRegex([]string{"zakwas", word}))
+		regexes = append(regexes, `"command":"`+geminiGuardRegex([]string{"zakwas", word}), `"command":"`+geminiGuardRegexFor([]string{"zakwas", word}, true))
 	}
 	payload, err := json.Marshal(map[string]any{"regexes": regexes, "inputs": inputs})
 	if err != nil {
@@ -552,5 +680,25 @@ func TestGeminiGuardRegexDocumentedLimits(t *testing.T) {
 		if denied(command) {
 			t.Errorf("%q is denied, so the limit in docs/config.md is out of date", command)
 		}
+	}
+}
+
+func TestGeminiPolicyGuardFollowsThePlannedSystem(t *testing.T) {
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			m := &Module{Agents: config.Agents{Providers: []string{config.ProviderGemini}}, Guard: true, GOOS: goos}
+			rules := m.geminiRules()
+			if len(rules) != len(config.GuardedCommands) {
+				t.Fatalf("%d rules, want %d", len(rules), len(config.GuardedCommands))
+			}
+			for i, r := range rules {
+				if want := geminiGuardRegexFor([]string{"zakwas", config.GuardedCommands[i]}, goos == "windows"); r.CommandRegex != want {
+					t.Errorf("rule %d regex is not the one for %s", i, goos)
+				}
+				if got := regexp.MustCompile(`"command":"` + r.CommandRegex).MatchString(geminiCall(t, `C:\bin\zakwas.exe `+config.GuardedCommands[i])); got != (goos == "windows") {
+					t.Errorf("%s: denies C:\\bin\\zakwas.exe %s = %v", goos, config.GuardedCommands[i], got)
+				}
+			}
+		})
 	}
 }
