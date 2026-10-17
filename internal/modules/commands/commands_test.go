@@ -173,7 +173,7 @@ func TestPowerShellInvocation(t *testing.T) {
 		t.Fatalf("args = %q, want %q and one script", got.Args, head)
 	}
 	wrapped := got.Args[len(head)]
-	for _, want := range []string{script, "UTF8Encoding", "exit $zakwasCode"} {
+	for _, want := range []string{script, "UTF8Encoding", "exit $zkCode"} {
 		if !strings.Contains(wrapped, want) {
 			t.Errorf("wrapped script lacks %q:\n%s", want, wrapped)
 		}
@@ -181,10 +181,10 @@ func TestPowerShellInvocation(t *testing.T) {
 	if !strings.HasPrefix(wrapped, psPrologue) || !strings.HasSuffix(wrapped, psEpilogue) {
 		t.Errorf("the script is not framed by the prologue and epilogue:\n%s", wrapped)
 	}
-	if !strings.Contains(wrapped, script+"\n$zakwasOK=$?") {
+	if !strings.Contains(wrapped, script+"\n$zkOK=$?") {
 		t.Errorf("the status is read after a newline, so a trailing comment can't swallow it:\n%s", wrapped)
 	}
-	if got.Label != "pwsh -Command "+script {
+	if got.Label != "pwsh -Command Write-Output 'a \"b\"'…" {
 		t.Errorf("label = %q", got.Label)
 	}
 	if got.CmdLine != "" {
@@ -275,5 +275,112 @@ func TestEntriesStopAtTheFirstFailureAcrossShells(t *testing.T) {
 	}
 	if fake.Ran("sh -c d") {
 		t.Error("the entry after the failing one ran")
+	}
+}
+
+func TestSplitUsingHoistsLeadingUsingStatements(t *testing.T) {
+	tests := []struct {
+		name, script, head, body string
+	}{
+		{"no using", "Get-Date\nUsing namespace X\n", "", "Get-Date\nUsing namespace X\n"},
+		{"one", "using namespace System.Text\nGet-Date", "using namespace System.Text\n", "Get-Date"},
+		{"comments and blanks before and between", "# note\n\nusing module Foo\n  # more\nUSING NAMESPACE X\n\nGet-Date", "# note\n\nusing module Foo\n  # more\nUSING NAMESPACE X\n", "\nGet-Date"},
+		{"comments with no using stay", "# note\nGet-Date", "", "# note\nGet-Date"},
+		{"assembly and type", "using assembly System.Web\nusing type X\nx", "using assembly System.Web\nusing type X\n", "x"},
+		{"only using", "using namespace X", "using namespace X", ""},
+		{"a command named using something", "using-thing foo\nx", "", "using-thing foo\nx"},
+		{"a later using is the user's", "x\nusing namespace X", "", "x\nusing namespace X"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			head, body := splitUsing(tt.script)
+			if head != tt.head || body != tt.body {
+				t.Errorf("splitUsing = %q, %q; want %q, %q", head, body, tt.head, tt.body)
+			}
+			if got := psScript(tt.script); tt.head != "" && !strings.HasPrefix(got, tt.head+psPrologue) {
+				t.Errorf("using statements are not first:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestShortenKeepsMessagesToOneLine(t *testing.T) {
+	long := strings.Repeat("x", 100)
+	tests := []struct{ in, want string }{
+		{"echo hi", "echo hi"},
+		{"echo hi\n", "echo hi"},
+		{"one\ntwo", "one…"},
+		{"one\r\ntwo", "one…"},
+		{long, strings.Repeat("x", labelWidth) + "…"},
+	}
+	for _, tt := range tests {
+		if got := shorten(tt.in); got != tt.want {
+			t.Errorf("shorten(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestShNotInstalled(t *testing.T) {
+	tests := []struct {
+		name  string
+		goos  string
+		shell string
+		want  bool
+	}{
+		{"default on unix keeps the raw error", platform.Linux, "", false},
+		{"default on macOS keeps the raw error", platform.Darwin, "", false},
+		{"explicit sh is checked", platform.Linux, "sh", true},
+		{"explicit sh on windows is checked", platform.Windows, "sh", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Module{Runner: runnertest.New().Missing("sh"), Home: "/h", GOOS: tt.goos}
+
+			_, err := m.cmd(config.Command{Name: "n", Shell: tt.shell}, "true")
+
+			if got := err != nil; got != tt.want {
+				t.Fatalf("err = %v, want an error: %v", err, tt.want)
+			}
+			if tt.want && !strings.Contains(err.Error(), "n: shell sh is not installed (sh not found on PATH)") {
+				t.Errorf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestLongWindowsCommandLineFailsThePlan(t *testing.T) {
+	long := strings.Repeat("Write-Output 'x'\n", 3000)
+	m := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Windows}
+
+	_, err := m.cmd(config.Command{Name: "big", Shell: "pwsh"}, long)
+
+	if err == nil || !strings.Contains(err.Error(), "big: the pwsh command line is ") || !strings.Contains(err.Error(), "32767") || strings.Contains(err.Error(), "\n") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := m.cmd(config.Command{Name: "small", Shell: "pwsh"}, "Get-Date"); err != nil {
+		t.Errorf("a short script fails: %v", err)
+	}
+	cmdLong := strings.Repeat("a", 33000)
+	if _, err := m.cmd(config.Command{Name: "big", Shell: "cmd"}, cmdLong); err == nil {
+		t.Error("a 33000 character cmd line was accepted")
+	}
+	unix := &Module{Runner: runnertest.New(), Home: "/h", GOOS: platform.Linux}
+	if _, err := unix.cmd(config.Command{Name: "big"}, long+long); err != nil {
+		t.Errorf("Unix has no such limit: %v", err)
+	}
+}
+
+func TestErrorsNameTheScriptOnOneLine(t *testing.T) {
+	script := "Write-Output one\nWrite-Output two"
+	fake := runnertest.New().On("pwsh -Command Write-Output one…", runner.Result{ExitCode: 4, Stderr: "boom"})
+	m := &Module{Runner: fake, Home: "/h", GOOS: platform.Windows, Commands: []config.Command{{Name: "n", Shell: "pwsh", Check: script, Run: "x"}}}
+
+	_, err := m.Plan(context.Background())
+	if err != nil {
+		t.Fatalf("a failing check only means the step runs: %v", err)
+	}
+	c, _ := m.cmd(m.Commands[0], script)
+	if err := (runner.Result{ExitCode: 4, Stderr: "boom"}).Err(c); err == nil || strings.Contains(err.Error(), "\n") || strings.Contains(err.Error(), "ProgressPreference") {
+		t.Errorf("err = %v; want the short label only", err)
 	}
 }

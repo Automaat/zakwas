@@ -974,6 +974,10 @@ func TestCommandShellsAreValidatedOnEveryOS(t *testing.T) {
       echo one
     run: echo two
     shell: cmd
+  - name: h
+    check: "echo one\n  \t\n\n"
+    run: "echo two   \n \n"
+    shell: cmd
 `
 	for _, goos := range []string{platform.Darwin, platform.Linux, platform.Windows} {
 		t.Run(goos, func(t *testing.T) {
@@ -985,7 +989,7 @@ func TestCommandShellsAreValidatedOnEveryOS(t *testing.T) {
 			for _, c := range cfg.Commands {
 				got = append(got, c.Shell)
 			}
-			if want := []string{"", "sh", "bash", "pwsh", "powershell", "cmd", "cmd"}; !slices.Equal(got, want) {
+			if want := []string{"", "sh", "bash", "pwsh", "powershell", "cmd", "cmd", "cmd"}; !slices.Equal(got, want) {
 				t.Errorf("shells = %q, want %q", got, want)
 			}
 		})

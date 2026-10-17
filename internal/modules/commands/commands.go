@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Automaat/zakwas/internal/config"
@@ -49,48 +48,6 @@ func (m *Module) goos() string {
 	}
 	return platform.Current()
 }
-
-// cmd builds the invocation of script in c's shell. sh stays exactly
-// `sh -c script`. PowerShell never reads a profile or prompts, and reports
-// a failing last statement or native command by its exit code. cmd.exe takes
-// one line, handed over verbatim with /s so its quote stripping applies.
-func (m *Module) cmd(c config.Command, script string) (runner.Cmd, error) {
-	sh := m.shellFor(c)
-	run := runner.Cmd{Dir: m.Home}
-	switch sh {
-	case config.ShellSh, config.ShellBash:
-		run.Name, run.Args = sh, []string{"-c", script}
-	case config.ShellPowerShell, config.ShellPwsh:
-		run.Name = sh
-		run.Args = []string{"-NoProfile", "-NonInteractive"}
-		if m.goos() == platform.Windows {
-			run.Args = append(run.Args, "-ExecutionPolicy", "Bypass")
-		}
-		run.Args = append(run.Args, "-Command", psScript(script))
-		run.Label = sh + " -Command " + script
-	case config.ShellCmd:
-		line := strings.TrimRight(script, "\r\n")
-		run.Name, run.Args = "cmd.exe", []string{"/d", "/s", "/c", line}
-		run.CmdLine = `cmd.exe /d /s /c "` + line + `"`
-		run.Label = "cmd /c " + line
-	default:
-		return run, fmt.Errorf("%s: unknown shell %q", c.Name, sh)
-	}
-	if run.Name != "sh" && !m.Runner.Installed(run.Name) {
-		return run, fmt.Errorf("%s: shell %s is not installed (%s not found on PATH)", c.Name, sh, run.Name)
-	}
-	return run, nil
-}
-
-const (
-	psPrologue = "$ProgressPreference='SilentlyContinue';$zakwasEnc=[Console]::OutputEncoding;try{[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding}catch{}\n"
-	psEpilogue = "\n$zakwasOK=$?;$zakwasCode=$LASTEXITCODE;try{[Console]::OutputEncoding=$zakwasEnc}catch{};if($zakwasOK){exit 0}elseif($zakwasCode){exit $zakwasCode}else{exit 1}"
-)
-
-// psScript wraps script so that PowerShell writes UTF-8 and exits like sh
-// would: 0 when the last statement succeeded, else the native exit code.
-// -Command alone reports only 0 or 1 for a native command.
-func psScript(script string) string { return psPrologue + script + psEpilogue }
 
 func (m *Module) Name() string { return "commands" }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,32 @@ func TestExecStreamStdin(t *testing.T) {
 			}
 			if out.String() != tc.want {
 				t.Errorf("output %q, want %q", out.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestRestoreCodePage(t *testing.T) {
+	tests := []struct {
+		name        string
+		start, then uint32
+		wantSet     []uint32
+	}{
+		{"changed by the command", 850, 65001, []uint32{850}},
+		{"left alone", 850, 850, nil},
+		{"no console", 0, 65001, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cp := tt.start
+			var set []uint32
+			restore := restoreCodePage(func() uint32 { return cp }, func(v uint32) { set = append(set, v); cp = v })
+
+			cp = tt.then
+			restore()
+
+			if !slices.Equal(set, tt.wantSet) {
+				t.Errorf("set %v, want %v", set, tt.wantSet)
 			}
 		})
 	}

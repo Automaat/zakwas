@@ -21,9 +21,7 @@ const (
 	reparseTagSymlink    = 0xA000000C
 	reparseTagMountPoint = 0xA0000003
 
-	errAccessDenied     syscall.Errno = 5
 	errPrivilegeNotHeld syscall.Errno = 1314
-	errInvalidParameter syscall.Errno = 87
 
 	probePattern = "zakwas-linkprobe-"
 )
@@ -92,29 +90,30 @@ func (h linkOS) probe(dir bool) error {
 	if err != nil {
 		return fmt.Errorf("checking that links can be created: %w", err)
 	}
-	return h.create(target, filepath.Join(tmp, "link"), dir)
-}
-
-// create links link to target: a symlink, else on Windows a junction for a
-// directory. Denial becomes ErrLinksDenied.
-func (h linkOS) create(target, link string, dir bool) error {
-	err := h.symlink(target, link)
-	if err == nil || h.goos != "windows" {
-		return err
-	}
-	if dir && h.junction != nil && filepath.IsAbs(target) {
-		if jerr := h.junction(target, link); jerr == nil {
-			return nil
-		}
-	}
-	if isDenied(err) {
-		return ErrLinksDenied
+	err = h.create(target, filepath.Join(tmp, "link"), dir)
+	if err != nil && !errors.Is(err, ErrLinksDenied) {
+		return fmt.Errorf("checking that links can be created in %s: %w", tmp, err)
 	}
 	return err
 }
 
-func isDenied(err error) bool {
-	return errors.Is(err, errPrivilegeNotHeld) || errors.Is(err, errAccessDenied) || errors.Is(err, errInvalidParameter)
+// create links link to target: a symlink, else on Windows a junction for a
+// directory. Only the error for a missing symlink privilege becomes
+// ErrLinksDenied; any other failure, such as an ACL on the parent, is
+// returned as it is.
+func (h linkOS) create(target, link string, dir bool) error {
+	err := h.symlink(target, link)
+	if err == nil || h.goos != "windows" || !errors.Is(err, errPrivilegeNotHeld) {
+		return err
+	}
+	if dir && h.junction != nil && filepath.IsAbs(target) {
+		jerr := h.junction(target, link)
+		if jerr == nil {
+			return nil
+		}
+		return fmt.Errorf("%w; a junction failed too: %w", ErrLinksDenied, jerr)
+	}
+	return ErrLinksDenied
 }
 
 // CreateLink makes link point at target: a symbolic link, or on Windows a

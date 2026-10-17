@@ -2,6 +2,7 @@ package install
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -54,7 +55,6 @@ func TestRequireLinksOnWindows(t *testing.T) {
 		{"directory falls back to a junction", "windows", denied, nil, true, nil},
 		{"a file has no junction", "windows", denied, nil, false, ErrLinksDenied},
 		{"neither works", "windows", denied, errors.New("no"), true, ErrLinksDenied},
-		{"access denied counts", "windows", syscall.Errno(5), errors.New("no"), true, ErrLinksDenied},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -275,5 +275,61 @@ func TestLinkTargetReadsSymlinksOnly(t *testing.T) {
 		if err != nil || got != want || ok != (want != "") {
 			t.Errorf("LinkTarget(%s) = %q, %v, %v; want %q", path, got, ok, err, want)
 		}
+	}
+}
+
+func TestOnlyAMissingPrivilegeIsDenial(t *testing.T) {
+	tests := []struct {
+		errno  syscall.Errno
+		denied bool
+	}{
+		{5, false},
+		{1314, true},
+		{87, false},
+		{3, false},
+		{183, false},
+		{123, false},
+	}
+	for _, tt := range tests {
+		for _, dir := range []bool{false, true} {
+			name := fmt.Sprintf("error %d for a %s", tt.errno, map[bool]string{false: "file", true: "directory"}[dir])
+			t.Run(name, func(t *testing.T) {
+				f := &fakeLinks{symlinkErr: tt.errno, junctionErr: errors.New("junction failed")}
+				f.install(t, "windows")
+				target := t.TempDir()
+				if !dir {
+					target = filepath.Join(target, "f")
+					if err := os.WriteFile(target, nil, 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				err := CreateLink(target, filepath.Join(t.TempDir(), "l"))
+
+				if got := errors.Is(err, ErrLinksDenied); got != tt.denied {
+					t.Fatalf("err = %v; denial = %v, want %v", err, got, tt.denied)
+				}
+				if !tt.denied && !errors.Is(err, tt.errno) {
+					t.Errorf("err = %v; the %d error was dropped", err, tt.errno)
+				}
+				if tried := len(f.junctions) > 0; tried != (tt.denied && dir) {
+					t.Errorf("junction tried = %v for denial %v, directory %v", tried, tt.denied, dir)
+				}
+				if tt.denied && dir && !strings.Contains(err.Error(), "junction failed") {
+					t.Errorf("err = %v; the junction error is masked", err)
+				}
+			})
+		}
+	}
+}
+
+func TestProbeNamesTheTempDirForOtherFailures(t *testing.T) {
+	f := &fakeLinks{symlinkErr: syscall.Errno(5)}
+	f.install(t, "windows")
+
+	err := RequireLinks(false)
+
+	if err == nil || errors.Is(err, ErrLinksDenied) || !strings.Contains(err.Error(), "checking that links can be created in ") || !errors.Is(err, syscall.Errno(5)) {
+		t.Errorf("err = %v", err)
 	}
 }

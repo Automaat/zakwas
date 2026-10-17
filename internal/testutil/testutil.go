@@ -39,12 +39,28 @@ func SkipOnWindows(t testing.TB, reason string) {
 
 // RequireSymlinks skips the test on a machine that denies creating symlinks,
 // which on Windows needs Developer Mode or an elevated account. It checks by
-// creating one in a scratch directory, once per test binary.
+// creating one in a scratch directory, once per test binary. In CI it fails
+// the test instead: the Windows runner is elevated, so a denial there means
+// the runner changed and the tests that need links must not pass by skipping.
 func RequireSymlinks(t testing.TB) {
 	t.Helper()
-	if err := SymlinkDenied(); err != nil {
-		t.Skipf("this Windows account can't create symlinks (no Developer Mode, not elevated): %v", err)
+	requireSymlinks(t, SymlinkDenied(), InCI())
+}
+
+func requireSymlinks(t testing.TB, denied error, ci bool) {
+	t.Helper()
+	switch {
+	case denied == nil:
+	case ci:
+		t.Fatalf("this CI runner can't create symlinks, which its tests rely on: %v", denied)
+	default:
+		t.Skipf("this Windows account can't create symlinks (no Developer Mode, not elevated): %v", denied)
 	}
+}
+
+// InCI reports a run on a CI service.
+func InCI() bool {
+	return os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true"
 }
 
 // SymlinkDenied is why this machine can't create a symlink, or nil. Only

@@ -68,7 +68,11 @@ func TestScripts(t *testing.T) {
 			case "root":
 				return os.Geteuid() == 0, nil
 			case "symlink":
-				return testutil.SymlinkDenied() == nil, nil
+				denied := testutil.SymlinkDenied()
+				if denied != nil && testutil.InCI() {
+					return false, fmt.Errorf("this CI runner can't create symlinks, which its scripts rely on: %w", denied)
+				}
+				return denied == nil, nil
 			}
 			return false, fmt.Errorf("unknown condition %q", cond)
 		},

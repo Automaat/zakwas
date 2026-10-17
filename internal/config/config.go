@@ -548,5 +548,5 @@ func cutPathPrefix(path, dir string, fold bool) (rest string, ok bool) {
 }
 
 func multiline(script string) bool {
-	return strings.ContainsAny(strings.TrimRight(script, "\r\n"), "\r\n")
+	return strings.ContainsAny(strings.TrimRight(script, " \t\r\n"), "\r\n")
 }

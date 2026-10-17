@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,86 +154,6 @@ func TestRealShellsPropagateExitCodes(t *testing.T) {
 	})
 }
 
-func TestPowerShellExitsLikeShDoes(t *testing.T) {
-	tests := []struct {
-		name, script string
-		want         int
-	}{
-		{"a later success hides an earlier native failure", "cmd /c exit 3\nWrite-Output done", 0},
-		{"a failing last native command", "Write-Output start\ncmd /c exit 4", 4},
-		{"a failing cmdlet", `Get-Item -LiteralPath C:\zakwas-no-such-path -ErrorAction SilentlyContinue; Get-Item -LiteralPath C:\zakwas-no-such-path`, 1},
-		{"an explicit exit", "exit 7", 7},
-		{"a trailing comment", "cmd /c exit 5 # fails", 5},
-		{"a failing check written as a condition", `if (-not (Test-Path C:\zakwas-no-such-path)) { exit 1 }`, 1},
-	}
-	for _, shell := range []string{"pwsh", "powershell"} {
-		if _, err := exec.LookPath(shell); err != nil {
-			t.Logf("%s is not on PATH here", shell)
-			continue
-		}
-		for _, tt := range tests {
-			t.Run(shell+"/"+tt.name, func(t *testing.T) {
-				m := &Module{Runner: &runner.Exec{NoStdin: true}, Home: t.TempDir()}
-				c, err := m.cmd(config.Command{Name: "n", Shell: shell}, tt.script)
-				if err != nil {
-					t.Fatal(err)
-				}
-				res, err := m.Runner.Run(context.Background(), c)
-				if err != nil || res.ExitCode != tt.want {
-					t.Errorf("exit %d, err %v, want %d\nstdout: %s\nstderr: %s", res.ExitCode, err, tt.want, res.Stdout, res.Stderr)
-				}
-			})
-		}
-	}
-}
-
-func TestPowerShellWritesUTF8AndQuotes(t *testing.T) {
-	for _, shell := range []string{"pwsh", "powershell"} {
-		t.Run(shell, func(t *testing.T) {
-			if _, err := exec.LookPath(shell); err != nil {
-				t.Skipf("%s is not on PATH here: %v", shell, err)
-			}
-			m := &Module{Runner: &runner.Exec{NoStdin: true}, Home: t.TempDir()}
-			c, err := m.cmd(config.Command{Name: "n", Shell: shell}, `Write-Output "zażółć 'gęślą' $env:USERNAME_ZK"`)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			res, err := m.Runner.Run(context.Background(), c)
-
-			if err != nil || res.ExitCode != 0 {
-				t.Fatalf("exit %d, err %v\n%s", res.ExitCode, err, res.Stderr)
-			}
-			if got := strings.TrimSpace(res.Stdout); got != "zażółć 'gęślą'" {
-				t.Errorf("stdout = %q; non-ASCII text and quotes must arrive as written", got)
-			}
-		})
-	}
-}
-
-func TestPowerShellNeverPrompts(t *testing.T) {
-	for _, shell := range []string{"pwsh", "powershell"} {
-		t.Run(shell, func(t *testing.T) {
-			if _, err := exec.LookPath(shell); err != nil {
-				t.Skipf("%s is not on PATH here: %v", shell, err)
-			}
-			m := &Module{Runner: &runner.Exec{NoStdin: true}, Home: t.TempDir()}
-			c, err := m.cmd(config.Command{Name: "n", Shell: shell}, `Read-Host 'name'`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-
-			res, err := m.Runner.Run(ctx, c)
-
-			if err != nil || res.ExitCode == 0 {
-				t.Errorf("exit %d, err %v; a prompt must fail, not wait", res.ExitCode, err)
-			}
-		})
-	}
-}
-
 func TestHungCheckIsKilledOnWindows(t *testing.T) {
 	hangs := map[string]string{
 		"pwsh":       `Start-Sleep -Seconds 60`,
@@ -285,4 +206,53 @@ func TestRunStillFailingCheckIsReported(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
+}
+
+func TestCmdQuotingRules(t *testing.T) {
+	dir := t.TempDir()
+	spaced := filepath.Join(dir, "sp ace")
+	if err := os.Mkdir(spaced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(spaced, "tool.cmd"), []byte("@echo off\r\necho got %1\r\nexit /b 3\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ZK_DIR", dir)
+	t.Setenv("ZK_VAL", "x y")
+	tests := []struct {
+		name, line string
+		wantOut    []string
+		wantExit   int
+	}{
+		{"a variable is expanded", `echo %ZK_VAL%`, []string{"x y"}, 0},
+		{"an unset variable stays as written", `echo %ZK_UNSET_VAR%`, []string{"%ZK_UNSET_VAR%"}, 0},
+		{"a caret escapes an ampersand", `echo a^&b`, []string{"a&b"}, 0},
+		{"a bare ampersand chains commands", `echo one& echo two`, []string{"one", "two"}, 0},
+		{"quotes stay in what echo prints", `echo "a b"`, []string{`"a b"`}, 0},
+		{"a program path with spaces runs from quotes", `"%ZK_DIR%\sp ace\tool.cmd" arg`, []string{"got arg"}, 3},
+		{"exit code", `exit /b 7`, nil, 7},
+		{"the first failing command of a chain with && stops it", `exit /b 4 && echo never`, nil, 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Module{Runner: &runner.Exec{NoStdin: true}, Home: dir}
+			c, err := m.cmd(config.Command{Name: "n", Shell: "cmd"}, tt.line)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			res, err := m.Runner.Run(context.Background(), c)
+
+			if err != nil || res.ExitCode != tt.wantExit {
+				t.Fatalf("exit %d, err %v, want %d\nstdout: %s\nstderr: %s", res.ExitCode, err, tt.wantExit, res.Stdout, res.Stderr)
+			}
+			var got []string
+			for line := range strings.Lines(res.Stdout) {
+				got = append(got, strings.TrimRight(line, " \r\n"))
+			}
+			if !slices.Equal(got, tt.wantOut) {
+				t.Errorf("stdout = %q, want %q", got, tt.wantOut)
+			}
+		})
+	}
 }

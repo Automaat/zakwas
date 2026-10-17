@@ -10,18 +10,8 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
-
-func canSymlink(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "t"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(dir, "t"), filepath.Join(dir, "l")); err != nil {
-		t.Skipf("this Windows account can't create symlinks (no Developer Mode, not elevated): %v", err)
-	}
-}
 
 func TestJunctionNeedsNoPrivilegeAndIsALink(t *testing.T) {
 	root := t.TempDir()
@@ -66,7 +56,7 @@ func TestJunctionNeedsNoPrivilegeAndIsALink(t *testing.T) {
 }
 
 func TestSymlinksAreRecognizedByTheirTarget(t *testing.T) {
-	canSymlink(t)
+	testutil.RequireSymlinks(t)
 	root := t.TempDir()
 	file := filepath.Join(root, "f.txt")
 	dir := filepath.Join(root, "d")
@@ -117,7 +107,7 @@ func TestRequireLinksMatchesWhatThisMachineAllows(t *testing.T) {
 }
 
 func TestPlanLinkConvergesFileAndDirectoryLinks(t *testing.T) {
-	canSymlink(t)
+	testutil.RequireSymlinks(t)
 	root, home := t.TempDir(), t.TempDir()
 	paths := config.Paths{Home: home, Root: root}
 	srcFile, srcDir := filepath.Join(root, "rc"), filepath.Join(root, "conf")
@@ -138,5 +128,33 @@ func TestPlanLinkConvergesFileAndDirectoryLinks(t *testing.T) {
 		if c, err := PlanLink(paths, src, dst); c != nil || err != nil {
 			t.Errorf("a second plan of %s wants %v, %v", dst, c, err)
 		}
+	}
+}
+
+func TestTheCIRunnerCreatesSymlinksAndJunctions(t *testing.T) {
+	if !testutil.InCI() {
+		t.Skip("only CI promises symlink rights; elsewhere the symlink tests skip")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "d")
+	file := filepath.Join(root, "f")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(file, filepath.Join(root, "file-link")); err != nil {
+		t.Errorf("file symlink: %v", err)
+	}
+	if err := os.Symlink(dir, filepath.Join(root, "dir-link")); err != nil {
+		t.Errorf("directory symlink: %v", err)
+	}
+	if err := makeJunction(dir, filepath.Join(root, "junction")); err != nil {
+		t.Errorf("junction: %v", err)
+	}
+	if err := RequireLinks(false); err != nil {
+		t.Errorf("RequireLinks(file): %v", err)
 	}
 }
