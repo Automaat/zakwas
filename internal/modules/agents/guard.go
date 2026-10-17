@@ -154,6 +154,9 @@ func (m *Module) Warnings(context.Context) []string {
 	if !m.Guard {
 		return out
 	}
+	if hostOS == "windows" {
+		out = append(out, "agents.guard: not enforced on Windows yet (deny rules do not cover zakwas.exe); agent sessions are still refused by apply, upgrade and approve through environment markers")
+	}
 	if m.Agents.GuardsProvider(config.ProviderClaude) {
 		if _, warning := m.guardedDirs(); warning != "" {
 			out = append(out, "claude is only partly protected: "+warning)

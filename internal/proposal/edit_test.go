@@ -3,10 +3,13 @@ package proposal
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/platform"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const baseConfig = `# my setup
@@ -61,7 +64,7 @@ func newRepo(t *testing.T, yamlText string) (*config.Config, string) {
 	write("zakwas.yaml", yamlText)
 	write("Brewfile", baseBrewfile)
 	write("mise/config.toml", baseMise)
-	cfg, err := config.Load(filepath.Join(root, "zakwas.yaml"), home)
+	cfg, err := config.LoadFor(filepath.Join(root, "zakwas.yaml"), home, platform.Darwin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +114,14 @@ func TestApplyMCPServerWithOAuthClient(t *testing.T) {
 		{"client id with a flow character", &OAuth{ClientID: "a,b"}, "      oauth: {clientId: \"a,b\"}\n"},
 		{"client id with a question mark", &OAuth{ClientID: "a?b"}, "      oauth: {clientId: \"a?b\"}\n"},
 		{"quotes in client id and scope", &OAuth{ClientID: `a'b"c\d`, Scope: "it's:ok a'b"}, `      oauth: {clientId: a'b"c\d, scope: it's:ok a'b}` + "\n"},
+		{"client id that is a merge key", &OAuth{ClientID: "<<"}, "      oauth: {clientId: \"<<\"}\n"},
+		{"scope that is a merge key", &OAuth{ClientID: "c", Scope: "<<"}, "      oauth: {clientId: c, scope: \"<<\"}\n"},
+		{"client id that is a tilde", &OAuth{ClientID: "~"}, "      oauth: {clientId: \"~\"}\n"},
+		{"client id that is null", &OAuth{ClientID: "null"}, "      oauth: {clientId: \"null\"}\n"},
+		{"client id that is a date", &OAuth{ClientID: "2001-01-01"}, "      oauth: {clientId: \"2001-01-01\"}\n"},
+		{"client id that is a boolean", &OAuth{ClientID: "true", Scope: "off"}, "      oauth: {clientId: \"true\", scope: \"off\"}\n"},
+		{"client id that is an anchor", &OAuth{ClientID: "&a"}, "      oauth: {clientId: \"&a\"}\n"},
+		{"client id that is an alias", &OAuth{ClientID: "*a"}, "      oauth: {clientId: \"*a\"}\n"},
 		{"scope with a question mark", &OAuth{ClientID: "c", Scope: "https://x/y?z"}, "      oauth: {clientId: c, scope: \"https://x/y?z\"}\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -340,7 +351,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestSensitiveTouches(t *testing.T) {
-	s := Sensitive{Home: "/Users/me", Extra: []string{"/work/claude"}}
+	s := Sensitive{Home: testutil.Abs("/Users/me"), Extra: []string{testutil.Abs("/work/claude")}}
 	tests := []struct {
 		text string
 		want bool
@@ -363,8 +374,16 @@ func TestSensitiveTouches(t *testing.T) {
 		{"brew bundle install", false},
 	}
 	for _, tt := range tests {
-		if _, got := s.Touches(tt.text); got != tt.want {
-			t.Errorf("Touches(%q) = %v, want %v", tt.text, got, tt.want)
+		text := tt.text
+		if strings.HasPrefix(strings.ToLower(text), "/etc") {
+			if runtime.GOOS == "windows" {
+				continue
+			}
+		} else {
+			text = testutil.Abs(text)
+		}
+		if _, got := s.Touches(text); got != tt.want {
+			t.Errorf("Touches(%q) = %v, want %v", text, got, tt.want)
 		}
 	}
 }
@@ -392,4 +411,119 @@ func derefPort(p *int) int {
 		return 0
 	}
 	return *p
+}
+
+const linuxConfig = `agents:
+  providers: [claude]
+  marketplaces:
+    market: owner/repo
+  plugins:
+    - first@market
+`
+
+func newLinuxRepo(t *testing.T) (*config.Config, string) {
+	t.Helper()
+	home, root := t.TempDir(), t.TempDir()
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "zakwas.yaml"), []byte(linuxConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFor(filepath.Join(root, "zakwas.yaml"), home, platform.Linux)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg, home
+}
+
+func TestApplyOnLinux(t *testing.T) {
+	cfg, home := newLinuxRepo(t)
+	res, err := Apply([]Op{{Kind: AddPlugin, Name: "second@market"}}, cfg, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Config.OS() != platform.Linux || len(res.Config.Agents.Plugins) != 2 {
+		t.Errorf("edited config: OS %q, agents %+v", res.Config.OS(), res.Config.Agents)
+	}
+	tests := []struct {
+		name string
+		op   Op
+		want string
+	}{
+		{"brew", Op{Kind: AddBrew, Name: "jq"}, "add-brew: brew: not supported on Linux"},
+		{"mise", Op{Kind: PinMise, Name: "jq", Version: "1.8.0"}, "pin-mise: mise: not supported on Linux"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Apply([]Op{tt.op}, cfg, home); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyQuotesEveryYAMLHazardInEveryField(t *testing.T) {
+	hazards := []string{"<<", "~", "null", "Null", "true", "False", "yes", "off", "12", "0x1f", "1e3", ".inf", "2001-01-01", "-", "-x", "*a", "&a", "!t", "|", ">", "%x", "@x", "`x", "a: b", "a #b", "x:", "[a]", "{a}"}
+	for _, h := range hazards {
+		t.Run(h, func(t *testing.T) {
+			cfg, home := newRepo(t, baseConfig)
+			ops := []Op{
+				{Kind: AddMarketplace, Name: "mk", Source: h},
+				{Kind: AddMCP, Name: "srv", Server: &Server{Command: h, Args: []string{h, "-y"}}},
+			}
+			withOAuth := !strings.Contains(h, " ")
+			if withOAuth {
+				ops = append(ops, Op{Kind: AddMCP, Name: "web", Server: &Server{URL: "https://example.com/mcp", OAuth: &OAuth{ClientID: h, Scope: h}}})
+			}
+			withRule := !strings.ContainsAny(h, "<>*&|`[]{}")
+			command := "git log"
+			if withRule {
+				command = h
+			}
+			ops = append(ops, Op{Kind: AddPermission, Decision: "deny", Command: command, Justification: h})
+			res, err := Apply(ops, cfg, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := res.Config.Agents
+			if got := a.Marketplaces["mk"].Source; got != h {
+				t.Errorf("marketplace source = %q", got)
+			}
+			if srv := a.MCP["srv"]; srv.Command != h || len(srv.Args) != 2 || srv.Args[0] != h {
+				t.Errorf("command server = %+v", srv)
+			}
+			if o := a.MCP["web"].OAuth; withOAuth && (o.ClientID != h || o.Scope != h) {
+				t.Errorf("oauth = %+v", o)
+			}
+			found := false
+			for _, r := range a.Permissions.Deny {
+				found = found || r.Command == strings.Join(strings.Fields(command), " ") && r.Justification == h
+			}
+			if !found {
+				t.Errorf("deny rules = %+v", a.Permissions.Deny)
+			}
+		})
+	}
+}
+
+func TestValidateRefusesTextThatCannotBeWrittenBack(t *testing.T) {
+	for _, tt := range []struct{ name, source string }{
+		{"invalid UTF-8", "a\xffb/c"},
+		{"U+FFFE", "a\ufffeb/c"},
+		{"U+FFFF", "a\uffffb/c"},
+		{"noncharacter U+FDD0", "a\ufdd0b/c"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Op{Kind: AddMarketplace, Name: "mk", Source: tt.source}.Validate()
+			if err == nil || !strings.Contains(err.Error(), "one line of printable text") {
+				t.Errorf("err = %v", err)
+			}
+			err = Op{Kind: AddMCP, Name: "mk", Server: &Server{Command: "x", Args: []string{tt.source}}}.Validate()
+			if err == nil || !strings.Contains(err.Error(), "one line of printable text") {
+				t.Errorf("mcp arg: err = %v", err)
+			}
+		})
+	}
 }

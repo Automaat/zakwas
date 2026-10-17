@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func completion(t *testing.T, shell string) string {
@@ -33,7 +34,7 @@ func TestCompletionCoversEverything(t *testing.T) {
 				t.Errorf("%s: no flag %q", shell, f.name)
 			}
 		}
-		for _, mod := range ModuleNames {
+		for _, mod := range completionModules() {
 			if !strings.Contains(script, mod) {
 				t.Errorf("%s: no module %q", shell, mod)
 			}
@@ -43,7 +44,7 @@ func TestCompletionCoversEverything(t *testing.T) {
 
 func TestCompletionModulesMatchCLI(t *testing.T) {
 	env, _ := setup(t, "brew: {file: Brewfile}\nmise: {config: m.toml}\nagents: {prune: true}\nlaunchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]\n")
-	cfg, err := loadConfig("", env.Cwd, env.Home)
+	cfg, err := loadConfig("", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +84,7 @@ func TestCompletionScriptsParse(t *testing.T) {
 }
 
 func TestBashCompletion(t *testing.T) {
+	testutil.SkipOnWindows(t, "needs bash with the generated completion loaded")
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash not installed")
@@ -96,8 +98,8 @@ func TestBashCompletion(t *testing.T) {
 		{[]string{"zakwas", "-y", "ap"}, "apply approve"},
 		{[]string{"zakwas", "-c", "x.yaml", "pl"}, "plan"},
 		{[]string{"zakwas", "plan", "--d"}, "--diff"},
-		{[]string{"zakwas", "--only", "b"}, "brew"},
-		{[]string{"zakwas", "--only", "brew,m"}, "brew,mise"},
+		{[]string{"zakwas", "--only", "a"}, "agents"},
+		{[]string{"zakwas", "--only", "agents,c"}, "agents,commands"},
 		{[]string{"zakwas", "check", "-only", "files,links,t"}, "files,links,templates"},
 		{[]string{"zakwas", "init", "dir", "--a"}, "--add"},
 		{[]string{"zakwas", "self-update", "-"}, "--version"},

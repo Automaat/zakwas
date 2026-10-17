@@ -1,7 +1,8 @@
 version: 2
 
 builds:
-  - main: ./cmd/zakwas
+  - id: darwin
+    main: ./cmd/zakwas
     env:
       - CGO_ENABLED=0
     goos: [darwin]
@@ -9,9 +10,37 @@ builds:
     flags: [-trimpath]
     ldflags:
       - -s -w -X main.version={{.Version}}
+  - id: linux
+    main: ./cmd/zakwas
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [arm64, amd64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+  - id: windows
+    main: ./cmd/zakwas
+    env:
+      - CGO_ENABLED=0
+    goos: [windows]
+    goarch: [arm64, amd64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
 
 archives:
-  - formats: [tar.gz]
+  - id: darwin
+    ids: [darwin]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: linux
+    ids: [linux]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: windows
+    ids: [windows]
+    formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
@@ -19,6 +48,7 @@ checksum:
 
 homebrew_casks:
   - name: zakwas
+    ids: [darwin]
     repository:
       owner: Automaat
       name: homebrew-tap

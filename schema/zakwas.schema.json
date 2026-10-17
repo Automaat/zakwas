@@ -614,7 +614,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Global instructions: one file in the config repo, or a list joined in order, each relative to the directory holding zakwas.yaml (or absolute). Every file is a template that sees '{{ .Provider }}' (claude, codex, opencode, gemini, copilot or shared), '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Each managed provider gets its own rendered, protected copy: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode ~/.config/opencode/AGENTS.md (best effort unless opencode is named), gemini the context file of its zakwas extension, ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/GEMINI.md (only when gemini is named; ~/.gemini/GEMINI.md is never written), copilot ${COPILOT_HOME:-~/.copilot}/instructions/zakwas.instructions.md (only when copilot is named, with 'applyTo: \"**\"' added). Claude keeps its '@path' imports, the others get them inlined; a missing import fails the plan, as does a copy over the provider's size limit (codex: 32768 bytes). A file already there is backed up, a link zakwas made is replaced; copies of providers no longer managed are removed.",
+          "description": "Global instructions: one file in the config repo, or a list joined in order, each relative to the directory holding zakwas.yaml (or absolute). Every file is a template that sees '{{ .Provider }}' (claude, codex, opencode, gemini, copilot or shared), '{{ .Home }}' and the templates.vars as '{{ .Vars }}'. Each managed provider gets its own rendered, protected copy: claude ${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md, codex ${CODEX_HOME:-~/.codex}/AGENTS.md (only when codex is named, like its plugins), opencode $XDG_CONFIG_HOME/opencode/AGENTS.md, or ~/.config/opencode/AGENTS.md when it is unset (best effort unless opencode is named), gemini the context file of its zakwas extension, ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/GEMINI.md (only when gemini is named; ~/.gemini/GEMINI.md is never written), copilot ${COPILOT_HOME:-~/.copilot}/instructions/zakwas.instructions.md (only when copilot is named, with 'applyTo: \"**\"' added). Claude keeps its '@path' imports, the others get them inlined; a missing import fails the plan, as does a copy over the provider's size limit (codex: 32768 bytes). A file already there is backed up, a link zakwas made is replaced; copies of providers no longer managed are removed.",
           "type": [
             "string",
             "array",
@@ -872,7 +872,7 @@
             "properties": {
               "command": {
                 "minLength": 1,
-                "description": "Command that starts a stdio server. Set either 'command' or 'url'.",
+                "description": "Command that starts a stdio server. A leading ~ (alone or before /) is expanded to your home directory, so ~/.local/bin/x works on any machine; ~user and $HOME are not expanded. Set either 'command' or 'url'.",
                 "type": [
                   "string",
                   "null"
@@ -882,7 +882,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "Arguments of the command. Written to the agents' config as is, so keep secrets out of them.",
+                "description": "Arguments of the command. An argument that is ~ (quoted in YAML, since a bare ~ is null) or starts with ~/ is expanded to your home directory; a ~ elsewhere in it (--dir=~/x), ~user and $HOME are not. Otherwise written to the agents' config as is, so keep secrets out of them.",
                 "type": [
                   "array",
                   "null"
@@ -897,7 +897,7 @@
                     "null"
                   ]
                 },
-                "description": "Environment variables set when the command starts, with their values. Written to the agents' config as is, so list secrets under 'envVars' instead.",
+                "description": "Environment variables set when the command starts, with their values. A value that starts with ~/ is expanded to your home directory (a bare ~, ~user and $HOME are not). Otherwise written to the agents' config as is, so list secrets under 'envVars' instead.",
                 "type": [
                   "object",
                   "null"
@@ -969,7 +969,7 @@
                     "type": "string",
                     "minLength": 1,
                     "pattern": "^[\\p{L}\\p{N}\\p{P}\\p{S}]+$",
-                    "description": "OAuth client ID registered for this server with its authorization server or gateway, as a string (quote a number). A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are. Only letters, digits, punctuation and symbols are accepted: spaces, control and invisible characters, combining marks, and the blank letters U+115F, U+1160, U+3164, U+FFA0 and U+2800 are rejected."
+                    "description": "OAuth client ID registered for this server with its authorization server or gateway, as a string: quote a value YAML reads as another type, such as '12345', 'true', '2024-01-01' or 'null'. A client ID is public, so it is written to the agents' config as is; the client secret is not supported, only public (PKCE) clients are. Only letters, digits, punctuation and symbols are accepted: spaces, control and invisible characters, combining marks, and the blank letters U+115F, U+1160, U+3164, U+FFA0 and U+2800 are rejected."
                   },
                   "callbackPort": {
                     "maximum": 65535,
@@ -1289,7 +1289,7 @@
               "description"
             ]
           },
-          "description": "Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file ~/.config/opencode/agents/<name>.md ('opencode --agent <name>', best effort unless opencode is named) a Gemini CLI subagent file ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md (delegate with '@<name>', only when gemini is named) and a Copilot CLI agent file ${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md ('copilot --agent <name>', only when copilot is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name may be at most 64 characters, and a profile name an opencode template also defines under 'agent' fails the plan, as does a profile file that a 'files', 'links' or 'templates' destination also writes. Removing a profile removes only the files zakwas rendered.",
+          "description": "Agent profiles by name, each declared once and rendered for every managed provider: a Claude Code subagent file in ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/zakwas/<name>.md (start it with 'claude --agent <name>'), a Codex profile file ${CODEX_HOME:-~/.codex}/<name>.config.toml ('codex --profile <name>', only when codex is named) an opencode agent file $XDG_CONFIG_HOME/opencode/agents/<name>.md, or ~/.config/opencode/agents/<name>.md when it is unset ('opencode --agent <name>', best effort unless opencode is named) a Gemini CLI subagent file ${GEMINI_CLI_HOME:-~}/.gemini/zakwas/agents/<name>.md (delegate with '@<name>', only when gemini is named) and a Copilot CLI agent file ${COPILOT_HOME:-~/.copilot}/agents/<name>.agent.md ('copilot --agent <name>', only when copilot is named). A profile denies every server declared under 'mcp' that it does not list; servers added outside zakwas are not affected. The plan names, per provider, every profile field that provider cannot express. A profile name may be at most 64 characters, and a profile name an opencode template also defines under 'agent' fails the plan, as does a profile file that a 'files', 'links' or 'templates' destination also writes. Removing a profile removes only the files zakwas rendered.",
           "type": [
             "object",
             "null"
@@ -1359,7 +1359,7 @@
           "properties": {
             "skillsDir": {
               "minLength": 1,
-              "description": "Directory opencode loads user skills from, absolute or '~/...'. Default: ~/.config/opencode/skills. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere.",
+              "description": "Directory opencode loads user skills from, absolute or '~/...'. Default: $XDG_CONFIG_HOME/opencode/skills, or ~/.config/opencode/skills when it is unset. OPENCODE_CONFIG_DIR is ignored, since tools like Orca set it to a private config; set this instead to install elsewhere.",
               "type": [
                 "string",
                 "null"

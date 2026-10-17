@@ -52,7 +52,7 @@ func (m *Module) profilePath(provider, name string) string {
 	case config.ProviderCopilot:
 		return filepath.Join(m.copilotBackend().home, "agents", name+".agent.md")
 	}
-	return m.Paths.Dst("~/.config/opencode/agents/" + name + ".md")
+	return filepath.Join(m.xdgConfigHome(), "opencode", "agents", name+".md")
 }
 
 // planProfiles renders agents.profiles for every managed provider and
@@ -192,7 +192,7 @@ func (m *Module) opencodeTemplateAgents() (map[string]string, error) {
 			continue
 		}
 		src := filepath.Clean(m.Paths.Src(f.Src))
-		data, err := templates.Render(src, templates.Data{Home: m.Paths.Home, Vars: m.Vars}, templates.Funcs(&m.Agents))
+		data, err := templates.Render(src, templates.Data{Home: m.Paths.Home, Vars: m.Vars}, templates.Funcs(&m.Agents, m.Paths.Home))
 		if err != nil {
 			continue
 		}

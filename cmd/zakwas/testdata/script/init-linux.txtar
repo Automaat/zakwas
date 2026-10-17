@@ -1,0 +1,40 @@
+env ZAKWAS_TEST_GOOS=linux
+
+zakwas init plain
+stdout '^Created .*[/\\]plain$'
+stdout 'no brew section: the brew module is not supported on Linux'
+stdout 'no mise section: the mise module is not supported on Linux'
+stdout 'On a new machine:'
+exists plain/.git
+exists plain/.gitignore
+! exists plain/Brewfile
+! exists plain/dotfiles
+grep '^files: \[\]$' plain/zakwas.yaml
+! grep '\n\n\n' plain/zakwas.yaml
+! grep 'protect:|brew:|mise:' plain/zakwas.yaml
+cd plain
+zakwas plan
+stdout 'No changes'
+zakwas check
+stdout 'No changes'
+cd ..
+
+mkdir empty
+zakwas init empty
+exists empty/zakwas.yaml
+cd empty
+zakwas check
+cd ..
+
+zakwas init withfile --add ~/.zshrc
+grep 'src: dotfiles/zshrc' withfile/zakwas.yaml
+! grep '\n\n\n' withfile/zakwas.yaml
+! grep 'protect:|brew:|mise:|files: \[\]' withfile/zakwas.yaml
+cmp withfile/dotfiles/zshrc home/.zshrc
+cd withfile
+zakwas plan
+stdout 'already matches, start tracking'
+! stdout 'set immutable'
+
+-- home/.zshrc --
+export EDITOR=vim

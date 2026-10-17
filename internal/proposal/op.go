@@ -10,8 +10,10 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/platform"
 )
 
 // Operation kinds.
@@ -27,6 +29,29 @@ const (
 
 // Kinds lists the operations in the order they are documented.
 var Kinds = []string{AddMarketplace, AddPlugin, AddPermission, RemovePermission, AddBrew, PinMise, AddMCP}
+
+var kindModule = map[string]string{AddBrew: "brew", PinMise: "mise"}
+
+// KindError is why kind cannot be proposed on goos, or nil.
+func KindError(kind, goos string) error {
+	module, ok := kindModule[kind]
+	if !ok {
+		return nil
+	}
+	if err := platform.ModuleError(module, goos); err != nil {
+		return fmt.Errorf("%s: %w", kind, err)
+	}
+	return nil
+}
+
+// KindsFor lists the operations that work on goos: add-brew and pin-mise
+// need modules Linux does not have.
+func KindsFor(goos string) []string {
+	return slices.DeleteFunc(slices.Clone(Kinds), func(kind string) bool {
+		module, ok := kindModule[kind]
+		return ok && !platform.Supported(module, goos)
+	})
+}
 
 // Op is one typed edit. Which fields it uses depends on Kind: Name is the
 // marketplace name, plugin id, MCP server name, brew package or mise tool.
@@ -73,7 +98,9 @@ var (
 // Hidden reports a character that isn't visible text: a control character
 // or a format character such as a bidirectional override or a zero-width
 // space, which can reorder or hide what a reviewer reads.
-func Hidden(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }
+func Hidden(r rune) bool {
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r&0xfffe == 0xfffe || r >= 0xfdd0 && r <= 0xfdef
+}
 
 // Validate checks the operation's own fields; whether the edit fits the
 // config is checked when it is applied.
@@ -117,7 +144,7 @@ func (o Op) Validate() error {
 		need(o.Source == "", "only add-marketplace takes a source")
 	}
 	for _, s := range []string{o.Name, o.Command, o.Justification, o.Version, o.Source} {
-		need(!strings.ContainsFunc(s, Hidden), "values must be one line of printable text")
+		need(utf8.ValidString(s) && !strings.ContainsFunc(s, Hidden), "values must be one line of printable text")
 	}
 	return errors.Join(errs...)
 }
@@ -132,7 +159,7 @@ func (o Op) validateMCP() []error {
 		return append(errs, errors.New("set either a command or a url"))
 	}
 	for _, v := range append(slices.Clone(s.Args), s.Command, s.URL) {
-		if strings.ContainsFunc(v, Hidden) {
+		if !utf8.ValidString(v) || strings.ContainsFunc(v, Hidden) {
 			errs = append(errs, errors.New("values must be one line of printable text"))
 			break
 		}

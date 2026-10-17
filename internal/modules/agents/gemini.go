@@ -176,11 +176,12 @@ func geminiServerEntry(s config.MCPServer) geminiServer {
 func (m *Module) geminiServers() (servers map[string]geminiServer, skipped map[string][]string) {
 	servers, skipped = map[string]geminiServer{}, map[string][]string{}
 	for _, s := range m.Agents.MCPFor(config.ProviderGemini) {
-		if gaps := geminiServerGaps(s.Name, s.MCPServer); len(gaps) > 0 {
+		server := s.ExpandHome(m.Paths.Home)
+		if gaps := geminiServerGaps(s.Name, server); len(gaps) > 0 {
 			skipped[s.Name] = gaps
 			continue
 		}
-		servers[s.Name] = geminiServerEntry(s.MCPServer)
+		servers[s.Name] = geminiServerEntry(server)
 	}
 	return servers, skipped
 }
@@ -283,22 +284,67 @@ var geminiPriorities = map[string]int{
 // The pieces of geminiGuardRegex. Gemini tests the regex against the
 // JSON-encoded call, `"command":"<command>"`, where a quote is `\"`, a tab
 // is `\t` and a newline `\n`, and rejects a quantified group as unsafe, so
-// the quoted values are nested optional groups and none is repeated.
+// the quoted values and the tabs of a blank run are nested optional groups
+// and none is repeated.
 const (
 	geminiGuardQuotedValues = 6
-	guardLead               = `[ ]*(?:|\\t[ ]*(?:|\\t[ ]*))`
-	guardBlank              = `(?:[ ]|\\t)[ ]*(?:|\\t[ ]*)`
-	guardOneBlank           = `(?:[ ]|\\t)`
+	geminiGuardTabs         = 4
+	geminiGuardPathParts    = 2
 	guardWordEnd            = `(?:[ ;&|)<>"]|\\[tn])`
-	guardAfterBlank         = `(?:[-;&|<>$#"` + "`" + `]|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
-	guardQuotedEnd          = `(?:"|[;&|)<>]|\\n|` + guardBlank + guardAfterBlank + `)`
+	guardAfterBlank         = `(?:[-;&|<>$#"` + "`" + `]|\\n|\\\\|\\"[-$` + "`" + `]|'[-$` + "`" + `]|[0-9]+[<>])`
+	guardOneBlank           = `(?:[ ]|\\t)`
 	guardEscapedQuote       = `\\\\\\"`
 	guardEscapedApostrophe  = `\\\\'`
 	guardDoubleQuoted       = `\\"[^"]*(?:|` + guardEscapedQuote + `[^"]*(?:|` + guardEscapedQuote + `[^"]*))\\"`
 	guardSingleQuoted       = `'[^']*(?:|` + guardEscapedApostrophe + `[^']*)'`
 	guardQuoted             = `(?:` + guardDoubleQuoted + `|` + guardSingleQuoted + `|` + guardEscapedQuote + `|` + guardEscapedApostrophe + `)`
 	guardFlagStart          = `(?:-|\\\\|[<>&${` + "`" + `]|[0-9]+[<>]|\\"[-$][^"]*\\"|'[-$][^']*')`
+	guardPathPart           = `(?:\\\\ |\\"[^"]*\\"|'[^']*')`
 )
+
+// guardTabRuns is what may follow a run of spaces: up to tabs tabs, each
+// followed by spaces.
+func guardTabRuns(tabs int) string {
+	if tabs == 0 {
+		return ""
+	}
+	return `(?:|\\t[ ]*` + guardTabRuns(tabs-1) + `)`
+}
+
+// guardLead is optional blanks: any mix of spaces and up to
+// geminiGuardTabs tabs.
+func guardLead() string {
+	return `[ ]*` + guardTabRuns(geminiGuardTabs)
+}
+
+// guardBlank is at least one blank, a run guardLead matches.
+func guardBlank() string {
+	return `(?:[ ]+` + guardTabRuns(geminiGuardTabs) + `|\\t[ ]*` + guardTabRuns(geminiGuardTabs-1) + `)`
+}
+
+func guardQuotedEnd() string {
+	return `(?:"|[;&|)<>]|\\n|` + guardBlank() + guardAfterBlank + `)`
+}
+
+// guardPathParts is a path with one to parts quoted parts or escaped
+// spaces. The text between the parts cannot hold a quote or a backslash, so
+// every part starts where the previous text ends and the match stays linear.
+func guardPathParts(parts int) string {
+	text := `[^ "'\\]*`
+	rest := text
+	for range parts - 1 {
+		rest = text + `(?:|` + guardPathPart + rest + `)`
+	}
+	return text + guardPathPart + rest
+}
+
+// guardPathPrefix is the directory part of the binary: a path without
+// blanks, a path with up to geminiGuardPathParts quoted parts or escaped
+// spaces (`"a b"/zakwas`, `/a\ b/zakwas`), or a quoted path that ends before
+// the name.
+func guardPathPrefix() string {
+	return `(?:|[^ ]*/|` + guardPathParts(geminiGuardPathParts) + `/|\\"[^"]*/\\"|'[^']*/')`
+}
 
 // geminiGuardRegex matches a guarded command that starts the shell command
 // as the agent wrote it: the binary bare, by path or quoted, in any case,
@@ -306,21 +352,20 @@ const (
 // and their values, as in `zakwas -c "my dir/x.yaml" apply`. A word before
 // the flags, as in `zakwas plan apply`, makes that word the command, so it
 // does not match. A quoted guarded word after flags matches unless a plain
-// word follows it, as in `zakwas -m "apply" plan`; the real command takes
-// no word there, only flags.
+// or quoted word follows it, as in `zakwas -m "apply" plan`; the real
+// command takes no word there, only flags.
 func geminiGuardRegex(words []string) string {
 	name := caselessWord(words[0])
 	word := regexp.QuoteMeta(strings.Join(words[1:], " "))
 	quoted := `(?:\\"` + word + `\\"|'` + word + `')`
-	prefix := `(?:|[^ ]*/|\\"[^"]*/\\"|'[^']*/')`
-	binary := `(?:` + prefix + `(?:` + name + `|\\"` + name + `\\"|'` + name + `')|\\"[^"]*/` + name + `\\"|'[^']*/` + name + `')`
+	binary := `(?:` + guardPathPrefix() + `(?:` + name + `|\\"` + name + `\\"|'` + name + `')|\\"[^"]*/` + name + `\\"|'[^']*/` + name + `')`
 	rest := `[^"']*`
 	for range geminiGuardQuotedValues {
 		rest = `[^"']*(?:|` + guardQuoted + rest + `)`
 	}
 	first := `(?:` + word + guardWordEnd + `|` + quoted + guardWordEnd + `)`
-	later := `(?:` + word + guardWordEnd + `|` + quoted + guardQuotedEnd + `)`
-	return guardLead + binary + guardBlank + `(?:` + first + `|` + guardFlagStart + rest + guardOneBlank + later + `)`
+	later := `(?:` + word + guardWordEnd + `|` + quoted + guardQuotedEnd() + `)`
+	return guardLead() + binary + guardBlank() + `(?:` + first + `|` + guardFlagStart + rest + guardOneBlank + later + `)`
 }
 
 func caselessWord(word string) string {
@@ -502,6 +547,9 @@ func (m *Module) planGeminiStaleUnlinks(tracked []string) (changes []engine.Chan
 // kept reports a link zakwas made that can't be removed yet because gemini
 // is not installed: its manifest stays until the uninstall has run.
 func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink, kept bool, err error) {
+	if wanted && !install.SymlinksSupported {
+		return nil, false, false, fmt.Errorf("linking the gemini extension: %w", install.ErrSymlinksUnsupported)
+	}
 	have, err := m.geminiLinked()
 	if err != nil {
 		return nil, false, false, err
@@ -540,6 +588,9 @@ func (m *Module) planGeminiLink(wanted bool) (c *engine.Change, unlink, kept boo
 // which needs the manifest, is the last change.
 func (m *Module) planGemini() ([]engine.Change, error) {
 	wanted := m.Agents.Wants(config.ProviderGemini)
+	if err := m.mcpHomeError(config.ProviderGemini); err != nil {
+		return nil, fmt.Errorf("gemini: mcp: %w", err)
+	}
 	statePath := m.geminiStatePath()
 	if info, err := os.Lstat(statePath); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 		return nil, fmt.Errorf("gemini: %s is a symlink; remove it", m.Paths.Pretty(statePath))

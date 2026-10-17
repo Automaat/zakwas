@@ -17,7 +17,7 @@ Flags go before or after the command: `zakwas -y apply` and `zakwas apply -y` ar
 | [`proposals`](#proposals) | list pending proposals |
 | [`approve`](#approve) | show a proposal's diff and plan, confirm, apply it and commit it |
 | [`mcp`](#mcp) | serve config reads and proposals to coding agents over MCP |
-| [`init`](#init) | create a starter config repo from this Mac |
+| [`init`](#init) | create a starter config repo from this machine |
 | [`self-update`](#self-update) | replace the zakwas binary with a release |
 | [`completion`](#completion) | print a shell completion script |
 | [`schema`](#schema) | print the JSON Schema of `zakwas.yaml` |
@@ -235,7 +235,7 @@ Not captured
 
 - anything that may hold a credential, by what it is passed with or how it looks: a flag or name such as `--token`, `--password`, `-p`, `-k`, `-t`, `--pin`, `--session-id`, `-u USER:VALUE`, `--header "Authorization: ..."`, `NAME_KEY=VALUE` or `export NAME VALUE` (a name containing PASS, PWD, PAT, KEY, TOKEN, SECRET, CRED or AUTH), `login VALUE`, `/password:VALUE`; a DSN or URL with user info, a password, a query or a fragment; a JSON value with a credential key; a JWT, base64, long hex or long mixed-case token, a known token prefix (`ghp_`, `sk-`, `sk_live_`, `AKIA`, ...); a URL path segment that isn't a plain lower-case word, version or short ID; a marketplace source or ref that does; a name or environment variable name that does, or that isn't upper case. This covers marketplace sources, MCP commands, arguments and URLs, Claude allow rules and Codex approvals. The value is never printed or echoed in a reason: a skipped rule is shown as `Bash(...)` or `prefix_rule on line N`, a skipped name as `(name withheld)`. A Codex rule's `justification` is free text and never read or declared;
 - a disabled plugin (declaring it would enable it) and a plugin whose marketplace `zakwas.yaml` doesn't declare for that provider and capture can't either (a plugin installed in two providers whose marketplaces of one name differ is declared for the provider whose marketplace is);
-- an MCP server with settings `agents.mcp` can't express here (literal `env` values or headers, which may be secrets; a URL with a query, a fragment or credentials; options such as timeouts; an `oauth` object with a key that names a secret, or with settings beyond the client ID, callback port and scopes), one whose name another provider uses for a different server, and one `zakwas.yaml` declares for other providers only;
+- an MCP server with settings `agents.mcp` can't express here (literal `env` values or headers, which may be secrets; a URL with a query, a fragment or credentials; options such as timeouts; an `oauth` object with a key that names a secret, or with settings beyond the client ID, callback port and scopes), one whose name another provider uses for a different server, one with a literal leading `~` in its `command` or `args` (the agent doesn't expand it, `zakwas.yaml` would; put the absolute path in the agent's config first), and one `zakwas.yaml` declares for other providers only. A captured path stays absolute;
 - a Claude rule that isn't a command prefix (`Read(...)`, `WebFetch(...)`, an exact `Bash(cmd)` rule, `Bash(*)`), and a Codex rule whose pattern has alternatives, that spans lines or whose decision isn't `allow`, `prompt` or `forbidden`; when one command is saved with several decisions, only the strictest is declared;
 - an operation that wouldn't apply to `zakwas.yaml` (a marketplace declared for other providers only, a flow-style list, an invalid rule), with the error.
 
@@ -305,7 +305,7 @@ Claude Code and Codex install the plugin; opencode gets the skill linked. The pl
 zakwas init DIR [--add PATH]...
 ```
 
-Creates a starter config repo in DIR from the current Mac. DIR must not exist or be empty (exit 64 otherwise). Nothing outside DIR is changed.
+Creates a starter config repo in DIR from the current machine. DIR must not exist or be empty (exit 64 otherwise). Nothing outside DIR is changed. On Linux, where `brew` and `mise` are not supported, it writes no `brew` or `mise` section and no `protect` section, and copies only the `--add` files.
 
 | Flag | Meaning |
 |---|---|
@@ -367,11 +367,13 @@ If zakwas already manages files on this Mac from another config, init warns: `pl
 zakwas self-update [--version X.Y.Z]
 ```
 
+On Windows `self-update` exits 64 with "not supported on Windows yet": download the newer zip from the releases page or run `install.ps1` again.
+
 | Flag | Meaning |
 |---|---|
 | `--version X.Y.Z` | release to install (a leading `v` is fine); default: latest |
 
-Resolves the latest release from the `https://github.com/Automaat/zakwas/releases/latest` redirect (not the rate-limited API), downloads `zakwas_<version>_darwin_<arm64|amd64>.tar.gz` and `checksums.txt`, verifies the SHA256, and replaces the running binary atomically (temp file in the same directory, `chmod 0755`, rename). Prints a message and does nothing when that version is already running.
+Resolves the latest release from the `https://github.com/Automaat/zakwas/releases/latest` redirect (not the rate-limited API), downloads `zakwas_<version>_<darwin|linux>_<arm64|amd64>.tar.gz` for the running system and `checksums.txt`, verifies the SHA256, and replaces the running binary atomically (temp file in the same directory, `chmod 0755`, rename). Prints a message and does nothing when that version is already running.
 
 Build provenance is checked the way `install.sh` does it (see [security.md](security.md)): when `gh` is installed, logged in (`gh auth status`) and supports `--source-ref`, self-update runs `gh attestation verify <archive> --repo Automaat/zakwas --signer-workflow Automaat/zakwas/.github/workflows/release.yml --source-ref refs/tags/v<version>` and stops (exit 1) if it fails. Without such a `gh` it prints the command to verify by hand and continues. Versions before 0.4.0 carry no attestation and skip the check.
 
@@ -448,7 +450,9 @@ Prints `zakwas <version>` (`dev` for builds outside a release).
 | 1 | error; also when a module failed to plan (the others still apply) |
 | 2 | `check` found drift |
 | 64 | usage error (usage goes to stderr): no or unknown command, unknown flag, conflicting flags, invalid `init`/`self-update` arguments, package-managed binary |
-| 130 | interrupted (Ctrl-C) |
+| 129 | stopped by SIGHUP (closed terminal) |
+| 130 | interrupted (Ctrl-C, SIGINT) |
+| 143 | stopped by SIGTERM (`timeout`, a supervisor) |
 
 ## Environment
 

@@ -125,6 +125,7 @@ func TestGuardOutsideGitDeniesTheConfigDir(t *testing.T) {
 }
 
 func TestGuardCantDenyARepoHoldingHome(t *testing.T) {
+	asHost(t, "linux")
 	m := guardedModule(t, config.ProviderClaude)
 	if err := os.Mkdir(filepath.Join(m.Paths.Home, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -188,6 +189,7 @@ func TestGuardOffLeavesTheAgentsAlone(t *testing.T) {
 }
 
 func TestGuardWarnsAboutOpencodeWithoutAnAgentPermissionsTemplate(t *testing.T) {
+	asHost(t, "linux")
 	tests := []struct {
 		name      string
 		providers []string
@@ -220,6 +222,7 @@ func TestGuardWarnsAboutOpencodeWithoutAnAgentPermissionsTemplate(t *testing.T) 
 }
 
 func TestGuardCantDenyAConfigAtHomeWithoutARepo(t *testing.T) {
+	asHost(t, "linux")
 	m := guardedModule(t, config.ProviderClaude)
 	m.Paths.Root = m.Paths.Home
 	if err := os.RemoveAll(filepath.Join(m.Paths.Home, "dotfiles")); err != nil {
@@ -285,4 +288,37 @@ func TestOpencodeIsToldToPromptByHand(t *testing.T) {
 	if got := m.Warnings(context.Background()); len(got) != 0 {
 		t.Errorf("warnings for a server opencode doesn't get = %q", got)
 	}
+}
+
+func TestGuardWarnsOnWindowsThatItIsNotEnforced(t *testing.T) {
+	for _, tt := range []struct {
+		goos  string
+		guard bool
+		want  bool
+	}{{"windows", true, true}, {"windows", false, false}, {"darwin", true, false}, {"linux", true, false}} {
+		t.Run(tt.goos, func(t *testing.T) {
+			saved := hostOS
+			hostOS = tt.goos
+			defer func() { hostOS = saved }()
+			m := &Module{Agents: config.Agents{Providers: []string{config.ProviderClaude}}, Guard: tt.guard, Paths: config.Paths{Home: t.TempDir(), Root: t.TempDir()}}
+
+			var found bool
+			for _, w := range m.Warnings(context.Background()) {
+				if strings.Contains(w, "agents.guard: not enforced on Windows yet") {
+					found = true
+				}
+			}
+
+			if found != tt.want {
+				t.Errorf("warned = %v, want %v", found, tt.want)
+			}
+		})
+	}
+}
+
+func asHost(t *testing.T, goos string) {
+	t.Helper()
+	saved := hostOS
+	hostOS = goos
+	t.Cleanup(func() { hostOS = saved })
 }

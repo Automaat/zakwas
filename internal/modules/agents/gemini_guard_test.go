@@ -2,12 +2,15 @@ package agents
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Automaat/zakwas/internal/config"
 )
@@ -77,6 +80,20 @@ func TestGeminiGuardRegexTable(t *testing.T) {
 		{"zakwas\t\tapply", true},
 		{"zakwas -c\tx.yaml\tapply", true},
 		{"zakwas  apply", true},
+		{"zakwas \t\tapply", true},
+		{"zakwas\t\t apply", true},
+		{"zakwas \t \t apply", true},
+		{"zakwas  \t\t  \t apply", true},
+		{"zakwas\t\t\t\tapply", true},
+		{" \t\t zakwas apply", true},
+		{"\t \t\t\tzakwas apply", true},
+		{"zakwas -c x.yaml \t\tapply", true},
+		{"zakwas -c x.yaml \"apply\" \t\t-y", true},
+		{"zakwas -c x.yaml \"apply\"\t\t -y", true},
+		{"zakwas -y \"apply\" \t\t", true},
+		{"zakwas -y \"apply\" \nls", true},
+		{"zakwas -y \"apply\" \n", true},
+		{"zakwas -y 'apply' \t \t\t# why", true},
 		{" zakwas apply", true},
 		{"\tzakwas apply", true},
 		{"ZAKWAS apply", true},
@@ -135,7 +152,25 @@ func TestGeminiGuardRegexTable(t *testing.T) {
 		{"/a\u2003b/zakwas apply", true},
 		{"/a\u2028b/zakwas apply", true},
 		{`'/a/'zakwas apply`, true},
+		{`"a b"/zakwas apply`, true},
+		{`'a b'/zakwas apply`, true},
+		{`/a\ b/zakwas apply`, true},
+		{`/a\ b\ c/zakwas apply`, true},
+		{`x/"a b"/y/zakwas apply`, true},
+		{`"a b"x/zakwas -y "apply"`, true},
+		{`/a\ b/"zakwas" apply`, true},
 		{"zakwas plan", false},
+		{`"a b"/zakwas plan`, false},
+		{`/a\ b/zakwas plan`, false},
+		{`"a b" /zakwas apply`, false},
+		{`/a\ b /zakwas apply`, false},
+		{`echo "a b"/zakwas apply`, false},
+		{`echo /a\ b/zakwas apply`, false},
+		{`zakwas -y "apply" x.yaml`, false},
+		{`zakwas --json "apply" "y" status`, false},
+		{`zakwas --json "apply" 'y' status`, false},
+		{"zakwas -m \"apply\"\t\tplan", false},
+		{"zakwas -m \"apply\" \t\tplan", false},
 		{`zakwas -c "x.yaml" plan`, false},
 		{`zakwas -c x.yaml "apply" 'y'`, false},
 		{`zakwas -c x.yaml "apply" "plan"`, false},
@@ -175,6 +210,39 @@ func TestGeminiGuardRegexTable(t *testing.T) {
 	}
 }
 
+func TestGeminiGuardRegexTabLimit(t *testing.T) {
+	denied := geminiGuardMatcher(t, "zakwas", "apply")
+	for n := 1; n <= geminiGuardTabs+1; n++ {
+		tabs := strings.Repeat("\t", n)
+		for name, command := range map[string]string{
+			"lead":    tabs + "zakwas apply",
+			"between": "zakwas" + tabs + "apply",
+			"mixed":   "zakwas " + tabs + " apply",
+			"spaced":  "zakwas" + strings.Repeat(" \t", n) + " apply",
+			"after":   `zakwas -y "apply"` + tabs + "-y",
+			"end":     `zakwas -y "apply" ` + tabs,
+		} {
+			if got, want := denied(command), n <= geminiGuardTabs; got != want {
+				t.Errorf("%s with %d tabs %q: denied = %v, want %v", name, n, command, got, want)
+			}
+		}
+	}
+}
+
+func TestGeminiGuardRegexPathPartLimit(t *testing.T) {
+	denied := geminiGuardMatcher(t, "zakwas", "apply")
+	for n := 0; n <= geminiGuardPathParts+1; n++ {
+		for name, command := range map[string]string{
+			"escaped": "/a" + strings.Repeat(`\ b`, n) + "/zakwas apply",
+			"quoted":  strings.Repeat(`"a b"`, n) + "/zakwas apply",
+		} {
+			if got, want := denied(command), n <= geminiGuardPathParts; got != want {
+				t.Errorf("%s with %d parts %q: denied = %v, want %v", name, n, command, got, want)
+			}
+		}
+	}
+}
+
 func TestGeminiGuardRegexAppliesToEveryGuardedWord(t *testing.T) {
 	for _, word := range config.GuardedCommands {
 		denied := geminiGuardMatcher(t, "zakwas", word)
@@ -202,6 +270,73 @@ func TestGeminiGuardRegexQuotedValueLimit(t *testing.T) {
 		if got := denied(command); got != want {
 			t.Errorf("%d quoted values: denied = %v, want %v", n, got, want)
 		}
+	}
+}
+
+const guardTimingScript = `
+const { regexes, inputs } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const worst = [];
+for (const source of regexes) {
+  const re = new RegExp(source);
+  for (const [name, text] of inputs) {
+    const start = process.hrtime.bigint();
+    re.test('"command":' + JSON.stringify(text) + ',"description":"d"');
+    worst.push([Number(process.hrtime.bigint() - start) / 1e6, name]);
+  }
+}
+worst.sort((a, b) => b[0] - a[0]);
+console.log(JSON.stringify(worst[0]));
+`
+
+func TestGeminiGuardRegexIsLinearInJavaScript(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	const n = 40000
+	inputs := [][2]string{
+		{"quotes", strings.Repeat(`"`, n)},
+		{"apostrophes", strings.Repeat(`'`, n)},
+		{"quote-slash", strings.Repeat(`"/`, n/2) + "zakwas apply"},
+		{"apostrophe-slash", strings.Repeat(`'/`, n/2) + "zakwas apply"},
+		{"quote-slash-lattice", strings.Repeat(`"a/"b/`, n/6) + "zakwas apply"},
+		{"escaped-spaces", "/a" + strings.Repeat(`\ b`, n/4) + "/zakwas apply"},
+		{"quoted-parts", strings.Repeat(`"a b"`, n/5) + "/zakwas apply"},
+		{"slashes", strings.Repeat("/", n)},
+		{"tabs", "zakwas" + strings.Repeat("\t", n) + "apply"},
+		{"space-tabs", "zakwas" + strings.Repeat(" \t", n/2) + "apply"},
+		{"quoted-word-tabs", `zakwas -y "apply"` + strings.Repeat(" \t", n/2) + "x"},
+		{"flags", "zakwas " + strings.Repeat("-y ", n/3) + "apply"},
+		{"quoted-values", "zakwas " + strings.Repeat(`-c "a b" `, n/9) + "plan"},
+	}
+	var regexes []string
+	for _, word := range config.GuardedCommands {
+		regexes = append(regexes, `"command":"`+geminiGuardRegex([]string{"zakwas", word}))
+	}
+	payload, err := json.Marshal(map[string]any{"regexes": regexes, "inputs": inputs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "-e", guardTimingScript)
+	cmd.Stdin = bytes.NewReader(payload)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("node: %v (a timeout means the regex backtracks superlinearly)", err)
+	}
+	var worst struct {
+		ms   float64
+		name string
+	}
+	var row []any
+	if err := json.Unmarshal(out, &row); err != nil || len(row) != 2 {
+		t.Fatalf("node output %q: %v", out, err)
+	}
+	worst.ms, _ = row[0].(float64)
+	worst.name, _ = row[1].(string)
+	if worst.ms > 250 {
+		t.Errorf("%s takes %.0f ms on %d characters, the regex backtracks superlinearly", worst.name, worst.ms, n)
 	}
 }
 
@@ -245,7 +380,7 @@ func guardCases(rng *rand.Rand, n int) []guardCase {
 		{"/a/zakwas/b", false},
 		{"echo zakwas", false},
 	}
-	seps := []string{" ", " ", " ", "  ", "\t", " \t", "\t\t"}
+	seps := []string{" ", " ", " ", "  ", "\t", " \t", "\t\t", " \t\t", "\t \t", "\t\t\t\t", "  \t \t  "}
 	items := []guardItem{
 		{"-y", false, 0},
 		{"--json", false, 0},
@@ -409,7 +544,8 @@ func TestGeminiGuardRegexDocumentedLimits(t *testing.T) {
 		"env zakwas apply", "sudo zakwas apply", "command zakwas apply", "exec zakwas apply", "nohup zakwas apply",
 		"time zakwas apply", "xargs zakwas apply", "FOO=1 zakwas apply", `bash -lc "zakwas apply"`, `eval "zakwas apply"`,
 		`\zakwas apply`, `z""akwas apply`, `zakwas ap""ply`, ">/dev/null zakwas apply", "${ZAKWAS:-zakwas} apply",
-		"zakwas $SUBCOMMAND", "zakwas\t\t\tapply", "\t\t\tzakwas apply", "zakwas -y \\\napply",
+		"zakwas $SUBCOMMAND", "zakwas" + strings.Repeat("\t", geminiGuardTabs+1) + "apply", strings.Repeat("\t", geminiGuardTabs+1) + "zakwas apply",
+		"zakwas -y \\\napply", "/a" + strings.Repeat(`\ b`, geminiGuardPathParts+1) + "/zakwas apply",
 		"zakwas" + strings.Repeat(` -c "a b"`, geminiGuardQuotedValues+1) + " apply",
 		"zakwas -c \"a\" -m 'b' -m \"c\" -m 'd' -m \"e\" -m 'f' -m \"g\" apply",
 	} {

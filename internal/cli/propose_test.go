@@ -13,6 +13,7 @@ import (
 	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const proposeConfig = `templates:
@@ -276,6 +277,18 @@ func TestApproveAppliesAndCommits(t *testing.T) {
 	}
 }
 
+func TestApproveAcceptsAWindowsLineEnding(t *testing.T) {
+	env, _ := proposeSetup(t)
+	p := propose(t, env, "add-permission", "review", "git", "push")
+	env.StdinTTY = true
+
+	r := invoke(env, "y\r\n", "approve", p.ID)
+
+	if r.code != ExitOK || !strings.Contains(r.stdout, "Applied 1 of 1 steps") {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+}
+
 func TestApproveAcceptsAnIDPrefix(t *testing.T) {
 	env, _ := proposeSetup(t)
 	p := propose(t, env, "add-permission", "deny", "dd")
@@ -372,6 +385,7 @@ func TestApproveAllowsAgentsWhenTheGuardIsOff(t *testing.T) {
 }
 
 func TestApproveRestoresTheFilesWhenApplyFails(t *testing.T) {
+	testutil.SkipOnWindows(t, "directory and file modes (chmod 0500, 0000) have no Windows equivalent")
 	env, home := proposeSetup(t)
 	p := propose(t, env, "add-permission", "review", "git", "push")
 	env.StdinTTY = true

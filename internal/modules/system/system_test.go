@@ -10,6 +10,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func applyAll(t *testing.T, changes []engine.Change) {
@@ -20,6 +21,7 @@ func applyAll(t *testing.T, changes []engine.Change) {
 }
 
 func TestDirs(t *testing.T) {
+	testutil.SkipOnWindows(t, "directory modes (chmod 0700) have no Windows equivalent; the system module is macOS only")
 	home := t.TempDir()
 	existing := filepath.Join(home, "Documents")
 	loose := filepath.Join(home, ".ssh")

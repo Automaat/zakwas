@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const holdEnv = "ZAKWAS_LOCK_TEST_HOME"
@@ -244,6 +246,7 @@ func TestBlockedRunDoesNotNameAHolderItCannotTrust(t *testing.T) {
 }
 
 func TestUnavailable(t *testing.T) {
+	testutil.SkipOnWindows(t, "directory and file modes (chmod 0555, 0000) have no Windows equivalent")
 	skipIfRoot(t)
 	tests := []struct {
 		name  string
@@ -349,6 +352,7 @@ func TestBlockedRunIgnoresAHolderThatIsGone(t *testing.T) {
 }
 
 func TestUnopenableLockFileFailsInAWritableDir(t *testing.T) {
+	testutil.SkipOnWindows(t, "directory and file modes (chmod 0555, 0000) have no Windows equivalent")
 	skipIfRoot(t)
 	home := t.TempDir()
 	if err := acquire(t, home, Options{}).Release(); err != nil {

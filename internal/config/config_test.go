@@ -3,10 +3,16 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Automaat/zakwas/internal/platform"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
+
+func loadMac(path, home string) (*Config, error) { return LoadFor(path, home, platform.Darwin) }
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -42,7 +48,7 @@ system:
 commands:
   - {name: n, check: "true", run: "true"}
 `)
-	c, err := Load(p, "/h")
+	c, err := loadMac(p, testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +81,7 @@ func TestLoadResolvesSymlinkedRoot(t *testing.T) {
 	if err := os.Symlink(real, alias); err != nil {
 		t.Fatal(err)
 	}
-	c, err := Load(filepath.Join(alias, FileName), "/h")
+	c, err := loadMac(filepath.Join(alias, FileName), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +125,7 @@ launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}}]`, []strin
 		{"launchd control character in log", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}, log: \"~/a\\u0000\"}]", []string{"launchd[0]: log"}},
 		{"launchd relative log", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}, log: out.log}]", []string{"launchd[0]: log:"}},
 		{"launchd env name with =", "launchd: [{label: a.b, program: [/bin/true], schedule: {at: '10:00'}, env: {'A=B': x}}]", []string{`env name "A=B"`}},
-		{"unknown field", "linkz: []", []string{"field linkz not found"}},
+		{"unknown field", "linkz: []", []string{"unknown field in type config.Config"}},
 		{"missing link fields", "links: [{src: a}]", []string{"links[0]: src and dst are required"}},
 		{"duplicate destination", `
 links: [{src: a, dst: ~/x}]
@@ -187,9 +193,9 @@ defaults:
 		{"profile gemini override zakwas sets", "agents: {providers: [gemini], profiles: {r: {description: d, gemini: {overrides: {tools: [x]}}}}}", []string{"agents.profiles.r: gemini.overrides.tools: zakwas sets it from the profile's own fields"}},
 		{"marketplace provider not managed", "agents: {providers: [claude], marketplaces: {sai: {source: o/sai, providers: [codex]}}}", []string{`agents.marketplaces.sai.providers: provider "codex" is not in agents.providers`}},
 		{"plugin provider not in marketplace", "agents: {marketplaces: {sai: {source: o/sai, providers: [claude]}}, plugins: [{id: a@sai, providers: [opencode]}]}", []string{`agents.plugins[0].providers: provider "opencode" is not in the providers of marketplace sai`}},
-		{"unknown marketplace field", "agents: {marketplaces: {sai: {source: o/sai, auto: true}}}", []string{"field auto not found"}},
-		{"unknown plugin field", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, scope: user}]}", []string{"field scope not found"}},
-		{"unknown agents field", "agents: {marketplace: {}}", []string{"field marketplace not found"}},
+		{"unknown marketplace field", "agents: {marketplaces: {sai: {source: o/sai, auto: true}}}", []string{"unknown field in a marketplace"}},
+		{"unknown plugin field", "agents: {marketplaces: {sai: o/sai}, plugins: [{id: a@sai, scope: user}]}", []string{"unknown field in a plugin"}},
+		{"unknown agents field", "agents: {marketplace: {}}", []string{"unknown field in type config.Agents"}},
 		{"relative opencode skills dir", "agents: {opencode: {skillsDir: skills}}", []string{`agents.opencode.skillsDir: "skills" must be absolute or start with ~/`}},
 		{"env var opencode skills dir", "agents: {opencode: {skillsDir: $HOME/skills}}", []string{"agents.opencode.skillsDir"}},
 		{"marketplace names differing in case", "agents: {marketplaces: {Foo: o/a, foo: o/b}}", []string{"agents.marketplaces.foo: differs from Foo only in case"}},
@@ -203,7 +209,7 @@ defaults:
 		{"empty command hook", "agents: {hooks: {commands: [{event: beforeTool, command: ' '}]}}", []string{"agents.hooks.commands[0].command: command is required"}},
 		{"command hook outside providers", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check, providers: [codex]}]}}", []string{`agents.hooks.commands[0].providers: provider "codex" is not in agents.providers`}},
 		{"duplicate command hook", "agents: {providers: [claude], hooks: {commands: [{event: stop, command: check}, {event: stop, command: check}]}}", []string{"agents.hooks.commands[1]: duplicates agents.hooks.commands[0]"}},
-		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"field dir not found"}},
+		{"unknown opencode field", "agents: {opencode: {dir: ~/x}}", []string{"unknown field in type config.Opencode"}},
 		{"mcp server without command or url", "agents: {mcp: {docs: {}}}", []string{"agents.mcp.docs: set command for a stdio server or url for an HTTP server"}},
 		{"mcp server with command and url", "agents: {mcp: {docs: {command: x, url: 'https://e.com'}}}", []string{"agents.mcp.docs: set either command or url, not both"}},
 		{"mcp name with a space", "agents: {mcp: {'my server': {command: x}}}", []string{"agents.mcp.my server: name may only contain"}},
@@ -270,11 +276,11 @@ defaults:
 		{"skill name", "agents: {skills: [s/.hidden]}", []string{`name ".hidden" (the last element of path)`}},
 		{"duplicate skill name", "agents: {skills: [a/foo, {git: o/r, path: b/Foo}]}", []string{`agents.skills[1]: skill "Foo" is already declared by agents.skills[0]`}},
 		{"skill provider not managed", "agents: {providers: [claude], skills: [{path: s/a, providers: [codex]}]}", []string{`agents.skills[0].providers: provider "codex" is not in agents.providers`}},
-		{"skill unknown field", "agents: {skills: [{path: s/a, name: b}]}", []string{"field name not found"}},
+		{"skill unknown field", "agents: {skills: [{path: s/a, name: b}]}", []string{"unknown field in a skill"}},
 		{"mcp oauth and bearer token", "agents: {mcp: {a: {url: 'https://e.com', oauth: true, bearerTokenEnv: T}}}", []string{"agents.mcp.a: oauth can't be combined with an Authorization header (bearerTokenEnv)"}},
 		{"mcp control character", "agents: {mcp: {a: {command: x, args: [\"a\\nb\"]}}}", []string{"agents.mcp.a: values may not hold control characters"}},
 		{"mcp provider not managed", "agents: {providers: [claude], mcp: {a: {command: x, providers: [codex]}}}", []string{`agents.mcp.a.providers: provider "codex" is not in agents.providers`}},
-		{"mcp unknown field", "agents: {mcp: {a: {command: x, cmd: y}}}", []string{"field cmd not found"}},
+		{"mcp unknown field", "agents: {mcp: {a: {command: x, cmd: y}}}", []string{"unknown field in type config.MCPServer"}},
 		{"empty permission", "agents: {permissions: {allow: ['  ']}}", []string{"agents.permissions.allow[0]: command is required"}},
 		{"null permission command", "agents: {permissions: {deny: [{providers: [claude]}]}}", []string{"agents.permissions.deny[0]: command is required"}},
 		{"permission with a glob", "agents: {permissions: {allow: ['git *']}}", []string{`agents.permissions.allow[0]: "git *" contains '*'`}},
@@ -290,8 +296,8 @@ defaults:
 		{"empty permission providers", "agents: {permissions: {allow: [{command: ls, providers: []}]}}", []string{"agents.permissions.allow[0].providers: list at least one provider"}},
 		{"duplicate permission", "agents: {permissions: {allow: [git status, 'git  status']}}", []string{`agents.permissions.allow[1]: "git status" duplicates agents.permissions.allow[0] for claude`}},
 		{"permission in two lists", "agents: {providers: [claude, codex], permissions: {allow: [git push], deny: [{command: git push, providers: [codex]}]}}", []string{`agents.permissions.deny[0]: "git push" is also listed in agents.permissions.allow[0] for codex; give each command one decision per provider`}},
-		{"unknown permission field", "agents: {permissions: {allow: [{command: ls, decision: allow}]}}", []string{"field decision not found"}},
-		{"unknown permission list", "agents: {permissions: {ask: [ls]}}", []string{"field ask not found"}},
+		{"unknown permission field", "agents: {permissions: {allow: [{command: ls, decision: allow}]}}", []string{"unknown field in a permission"}},
+		{"unknown permission list", "agents: {permissions: {ask: [ls]}}", []string{"unknown field in type config.AgentPermissions"}},
 		{"multi-line justification", `agents: {permissions: {deny: [{command: rm, justification: "no\nway"}]}}`, []string{"agents.permissions.deny[0].justification: write it on one line"}},
 		{"blank justification", `agents: {providers: [codex], permissions: {deny: [{command: rm, justification: "  "}]}}`, []string{"agents.permissions.deny[0].justification: is blank"}},
 		{"reports all errors", `
@@ -300,7 +306,7 @@ commands: [{name: n}]`, []string{"links[0]", "commands[0]"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Load(writeConfig(t, tt.body), "/h")
+			_, err := loadMac(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h"))
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -394,7 +400,7 @@ agents:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Load(writeConfig(t, tt.body), "/h"); err != nil {
+			if _, err := loadMac(writeConfig(t, winAbs(tt.body)), testutil.Abs("/h")); err != nil {
 				t.Error(err)
 			}
 		})
@@ -411,7 +417,7 @@ func mustRead(t *testing.T, path string) string {
 }
 
 func TestAgentsProviders(t *testing.T) {
-	c, err := Load(writeConfig(t, `
+	c, err := loadMac(writeConfig(t, `
 agents:
   marketplaces:
     sai: o/sai
@@ -420,7 +426,7 @@ agents:
     - a@sai
     - b@cl
     - {id: c@sai, providers: [opencode]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,21 +471,22 @@ func TestFind(t *testing.T) {
 }
 
 func TestPaths(t *testing.T) {
-	p := Paths{Home: "/h", Root: "/r"}
+	a := testutil.Abs
+	p := Paths{Home: a("/h"), Root: a("/r")}
 	tests := []struct {
 		fn   func(string) string
 		in   string
 		want string
 	}{
-		{p.Dst, "~", "/h"},
-		{p.Dst, "~/.zshrc", "/h/.zshrc"},
-		{p.Dst, "/etc/x", "/etc/x"},
+		{p.Dst, "~", a("/h")},
+		{p.Dst, "~/.zshrc", a("/h/.zshrc")},
+		{p.Dst, a("/etc/x"), a("/etc/x")},
 		{p.Dst, "~user/x", "~user/x"},
-		{p.Src, "dotfiles/a", "/r/dotfiles/a"},
-		{p.Src, "/abs", "/abs"},
-		{p.Pretty, "/h/.zshrc", "~/.zshrc"},
-		{p.Pretty, "/hx/y", "/hx/y"},
-		{p.Pretty, "/r/a", "/r/a"},
+		{p.Src, "dotfiles/a", a("/r/dotfiles/a")},
+		{p.Src, a("/abs"), a("/abs")},
+		{p.Pretty, a("/h/.zshrc"), "~/.zshrc"},
+		{p.Pretty, a("/hx/y"), a("/hx/y")},
+		{p.Pretty, a("/r/a"), a("/r/a")},
 	}
 	for _, tt := range tests {
 		if got := tt.fn(tt.in); got != tt.want {
@@ -491,7 +498,7 @@ func TestPaths(t *testing.T) {
 func TestPermissionsFor(t *testing.T) {
 	load := func(t *testing.T, body string) *Agents {
 		t.Helper()
-		c, err := Load(writeConfig(t, body), "/h")
+		c, err := loadMac(writeConfig(t, body), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -548,7 +555,7 @@ agents:
 func TestGeminiIsOptIn(t *testing.T) {
 	load := func(yaml string) *Agents {
 		t.Helper()
-		c, err := Load(writeConfig(t, yaml), "/h")
+		c, err := loadMac(writeConfig(t, yaml), testutil.Abs("/h"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -595,13 +602,13 @@ func TestGeminiIsOptIn(t *testing.T) {
 }
 
 func TestAgentsMCPFor(t *testing.T) {
-	c, err := Load(writeConfig(t, `
+	c, err := loadMac(writeConfig(t, `
 agents:
   mcp:
     b: {command: b}
     a: {command: a, providers: [codex, opencode]}
     c: {url: 'https://e.com', providers: [claude]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,13 +634,13 @@ agents:
 }
 
 func TestAgentsSkillsFor(t *testing.T) {
-	c, err := Load(writeConfig(t, `
+	c, err := loadMac(writeConfig(t, `
 agents:
   skills:
     - skills/b
     - {path: skills/a, providers: [codex, opencode]}
     - {git: o/r, path: x/c, providers: [claude]}
-`), "/h")
+`), testutil.Abs("/h"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +685,7 @@ func TestAgentsGuard(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := Load(writeConfig(t, tt.yaml), "/home/u")
+			cfg, err := loadMac(writeConfig(t, tt.yaml), testutil.Abs("/home/u"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -802,6 +809,184 @@ func TestPathsOverlapFollowsSymlinkedDirs(t *testing.T) {
 			}
 			if got := PathsOverlap(tt.b, tt.a); got != tt.want {
 				t.Errorf("PathsOverlap(%q, %q) = %v, want %v", tt.b, tt.a, got, tt.want)
+			}
+		})
+	}
+}
+
+func winAbs(body string) string {
+	if runtime.GOOS != "windows" {
+		return body
+	}
+	return strings.ReplaceAll(body, "dst: /", "dst: C:/")
+}
+
+func TestCutHome(t *testing.T) {
+	tests := []struct {
+		in   string
+		rest string
+		ok   bool
+	}{
+		{"~/.zshrc", ".zshrc", true},
+		{"~/", "", true},
+		{"~", "", false},
+		{"~user/x", "", false},
+		{"x/~/y", "", false},
+		{`~\.zshrc`, ".zshrc", runtime.GOOS == "windows"},
+	}
+	for _, tt := range tests {
+		rest, ok := CutHome(tt.in)
+		if ok != tt.ok || ok && rest != tt.rest {
+			t.Errorf("CutHome(%q) = %q, %v; want %q, %v", tt.in, rest, ok, tt.rest, tt.ok)
+		}
+	}
+	if !IsHomePath("~") || !IsHomePath("~/x") || IsHomePath("~x") || IsHomePath("/x") {
+		t.Error("IsHomePath")
+	}
+}
+
+func TestCutPathPrefixFoldsCaseOnRequest(t *testing.T) {
+	sep := string(filepath.Separator)
+	home := sep + "Users" + sep + "Me"
+	tests := []struct {
+		name string
+		path string
+		fold bool
+		rest string
+		ok   bool
+	}{
+		{"same case", home + sep + "x", false, "x", true},
+		{"other case, exact", sep + "users" + sep + "me" + sep + "x", false, "", false},
+		{"other case, folded", sep + "users" + sep + "me" + sep + "x", true, "x", true},
+		{"sibling with the same prefix", home + "x" + sep + "y", true, "", false},
+		{"the directory itself", home, true, "", false},
+		{"shorter than the directory", sep + "Us", true, "", false},
+	}
+	for _, tt := range tests {
+		rest, ok := cutPathPrefix(tt.path, home, tt.fold)
+		if ok != tt.ok || rest != tt.rest {
+			t.Errorf("%s: cutPathPrefix(%q) = %q, %v; want %q, %v", tt.name, tt.path, rest, ok, tt.rest, tt.ok)
+		}
+	}
+}
+
+func TestPrettyUsesSlashesForHomePaths(t *testing.T) {
+	p := Paths{Home: testutil.Abs("/h")}
+	if got := p.Pretty(filepath.Join(p.Home, ".config", "git", "config")); got != "~/.config/git/config" {
+		t.Errorf("Pretty = %q", got)
+	}
+}
+
+func TestMCPServerRecognizesZakwasExe(t *testing.T) {
+	for command, want := range map[string]bool{
+		"zakwas":                     true,
+		"/usr/local/bin/zakwas":      true,
+		`C:\Users\me\bin\zakwas.exe`: true,
+		"C:/Users/me/bin/Zakwas.EXE": true,
+		"zakwas-other":               false,
+		"notzakwas":                  false,
+		`C:\bin\zakwas.exe.bak`:      false,
+	} {
+		s := MCPServer{Command: command, Args: []string{"mcp", "--enable-apply"}}
+		if got := len(s.PromptTools()) > 0; got != want {
+			t.Errorf("%q: prompts = %v, want %v", command, got, want)
+		}
+	}
+}
+
+func TestLoadForPlatform(t *testing.T) {
+	linuxOK := `
+protect: {immutable: true}
+files:
+  - {src: a, dst: ~/.a}
+links:
+  - {src: b, dst: ~/.b}
+templates:
+  files:
+    - {src: c.tmpl, dst: ~/.c}
+system:
+  dirs: [{path: ~/.ssh, mode: 0700}]
+  sshKey: {path: ~/.ssh/id_ed25519, comment: me}
+commands:
+  - {name: n, check: "true", run: "true"}
+agents:
+  providers: [claude, codex]
+`
+	tests := []struct {
+		name, yaml, goos string
+		want             []string
+	}{
+		{"every linux module on linux", linuxOK, "linux", nil},
+		{"every linux module on darwin", linuxOK, "darwin", nil},
+		{"all modules on darwin", `
+brew: {file: Brewfile}
+mise: {config: m.toml}
+defaults: [{domain: d, key: k, value: 1}]
+launchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]
+system: {sudoTouchID: true}
+`, "darwin", nil},
+		{"brew on linux", "brew: {file: Brewfile}\n", "linux", []string{"brew: not supported on Linux"}},
+		{"mise on linux", "mise: {config: m.toml}\n", "linux", []string{"mise: not supported on Linux"}},
+		{"defaults on linux", "defaults: [{domain: d, key: k, value: 1}]\n", "linux", []string{"defaults: not supported on Linux"}},
+		{"launchd on linux", "launchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]\n", "linux", []string{"launchd: not supported on Linux"}},
+		{"sudoTouchID on linux", "system: {sudoTouchID: true}\n", "linux", []string{"system.sudoTouchID: not supported on Linux"}},
+		{"sudoTouchID off on linux", "system: {sudoTouchID: false}\n", "linux", nil},
+		{"every problem is named", "brew: {file: Brewfile}\nmise: {config: m.toml}\nsystem: {sudoTouchID: true}\n", "linux", []string{"brew: not supported", "mise: not supported", "system.sudoTouchID: not supported"}},
+		{"invalid macOS fields are not second-guessed on linux", "brew: {}\ndefaults: [{domain: d}]\n", "linux", []string{"brew: not supported", "defaults: not supported"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadFor(writeConfig(t, tt.yaml), testutil.Abs("/h"), tt.goos)
+			if len(tt.want) == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			lines := strings.Split(err.Error(), "\n")
+			if len(lines) != len(tt.want) {
+				t.Fatalf("got %d lines, want %d:\n%v", len(lines), len(tt.want), err)
+			}
+			for i, w := range tt.want {
+				if !strings.Contains(lines[i], w) || !strings.Contains(lines[i], platform.DocsAnchor) {
+					t.Errorf("line %d = %q, want %q pointing at %s", i, lines[i], w, platform.DocsAnchor)
+				}
+			}
+		})
+	}
+}
+
+func TestParseForRecordsTheOS(t *testing.T) {
+	c, err := ParseFor([]byte("commands: []\n"), filepath.Join(t.TempDir(), FileName), "/h", platform.Linux)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OS() != platform.Linux {
+		t.Errorf("OS = %q", c.OS())
+	}
+	if got := (&Config{}).OS(); got != platform.Current() {
+		t.Errorf("default OS = %q, want %q", got, platform.Current())
+	}
+}
+
+func TestExamplesLoadWhereTheyClaimTo(t *testing.T) {
+	tests := []struct {
+		path, goos string
+		ok         bool
+	}{
+		{"../../examples/zakwas.yaml", platform.Darwin, true},
+		{"../../examples/zakwas.yaml", platform.Linux, false},
+		{"../../examples/linux/zakwas.yaml", platform.Linux, true},
+		{"../../examples/linux/zakwas.yaml", platform.Darwin, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path+" on "+tt.goos, func(t *testing.T) {
+			_, err := LoadFor(tt.path, t.TempDir(), tt.goos)
+			if (err == nil) != tt.ok {
+				t.Errorf("err = %v, want ok = %v", err, tt.ok)
 			}
 		})
 	}

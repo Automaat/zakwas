@@ -77,6 +77,7 @@ type Sensitive struct {
 
 var sensitiveHome = []string{
 	".claude", ".claude.json", ".codex", ".config/opencode", ".local/share/opencode", ".agents", ".gemini", ".copilot",
+	"Documents/PowerShell", "Documents/WindowsPowerShell", ".config/powershell",
 	".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile",
 	".config/fish", ".ssh",
 }
@@ -102,11 +103,10 @@ func (s Sensitive) Touches(text string) (string, bool) {
 	paths := s.paths()
 	for _, tok := range strings.Fields(text) {
 		tok = strings.Trim(tok, `"'`+"`,;:()[]")
-		switch {
-		case tok == "~":
+		if tok == "~" {
 			tok = s.Home
-		case strings.HasPrefix(tok, "~/"):
-			tok = filepath.Join(s.Home, tok[2:])
+		} else if rest, ok := config.CutHome(tok); ok {
+			tok = filepath.Join(s.Home, rest)
 		}
 		if !filepath.IsAbs(tok) {
 			continue

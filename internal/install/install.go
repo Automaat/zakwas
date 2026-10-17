@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/fsutil"
 )
 
 // Installer writes protected copies. State is loaded from StatePath on first
@@ -78,7 +80,7 @@ func (in *Installer) Plan(dst string, want []byte, perm fs.FileMode) (*engine.Ch
 		return c
 	}
 	if bytes.Equal(have, want) {
-		reasons, err := in.protectionDrift(dst, info.Mode().Perm(), perm)
+		reasons, err := in.protectionDrift(dst, info.Mode().Perm(), statPerm(perm))
 		if err != nil {
 			return nil, err
 		}
@@ -289,7 +291,7 @@ func (in *Installer) ownsPath(dst string) bool {
 			return false
 		}
 		info, err := os.Lstat(dir)
-		if err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		if err == nil && isLink(info) {
 			return false
 		}
 	}
@@ -304,7 +306,7 @@ func CheckParents(paths config.Paths, dst string) error {
 	home := filepath.Clean(paths.Home)
 	for dir := filepath.Dir(filepath.Clean(dst)); ; dir = filepath.Dir(dir) {
 		info, err := os.Lstat(dir)
-		if err == nil && info.Mode()&fs.ModeSymlink != 0 &&
+		if err == nil && isLink(info) &&
 			(within(dir, home) || resolvesInto(dir, paths.Root)) {
 			return fmt.Errorf("parent %s of %s is a symlink; remove it", paths.Pretty(dir), paths.Pretty(dst))
 		}
@@ -314,8 +316,15 @@ func CheckParents(paths config.Paths, dst string) error {
 	}
 }
 
+// isLink reports a symlink, or on Windows a junction: Go reports a
+// directory junction as irregular, and it redirects a write like a symlink.
+func isLink(info fs.FileInfo) bool {
+	return info.Mode()&fs.ModeSymlink != 0 || runtime.GOOS == "windows" && info.Mode()&fs.ModeIrregular != 0
+}
+
 func within(path, dir string) bool {
-	return strings.HasPrefix(path, dir+string(filepath.Separator))
+	_, ok := config.CutDir(path, dir)
+	return ok
 }
 
 func resolvesInto(link, root string) bool {
@@ -402,16 +411,8 @@ func WriteAtomic(dst string, data []byte, perm fs.FileMode) (err error) {
 	if err = os.Chmod(tmp.Name(), perm); err != nil {
 		return err
 	}
-	if err = os.Rename(tmp.Name(), dst); err != nil {
+	if err = fsutil.Rename(tmp.Name(), dst); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(dst))
-}
-
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	return errors.Join(d.Sync(), d.Close())
+	return fsutil.SyncDir(filepath.Dir(dst))
 }

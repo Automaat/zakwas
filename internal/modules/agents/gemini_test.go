@@ -17,6 +17,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 // geminiRunner stands in for gemini: link and uninstall keep the record
@@ -129,6 +130,7 @@ func prepareGemini(t *testing.T, m *Module) {
 }
 
 func TestGeminiConvergesTheExtension(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, geminiConfig(t))
 	prepareGemini(t, m)
 
@@ -209,6 +211,7 @@ func TestGeminiConvergesTheExtension(t *testing.T) {
 }
 
 func TestGeminiPolicyRanksDenyOverAskOverAllow(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, geminiConfig(t))
 	m.Guard = true
 	prepareGemini(t, m)
@@ -250,6 +253,7 @@ func TestGeminiPolicyRanksDenyOverAskOverAllow(t *testing.T) {
 }
 
 func TestGeminiPolicyDeniesQuotedGuardedCommands(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, geminiConfig(t))
 	m.Guard = true
 	prepareGemini(t, m)
@@ -317,6 +321,7 @@ func TestGeminiGuardOffWritesNoGuardRules(t *testing.T) {
 }
 
 func TestGeminiIsOptIn(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	for _, providers := range [][]string{nil, {config.ProviderClaude, config.ProviderCodex, config.ProviderOpencode}} {
 		a := geminiConfig(t)
 		m, r := newGemini(t, a)
@@ -335,6 +340,7 @@ func TestGeminiIsOptIn(t *testing.T) {
 }
 
 func TestGeminiNamedByAnEntryAlone(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, config.Agents{Hooks: &config.AgentHooks{Commands: []config.AgentCommandHook{
 		{Event: "stop", Command: "/bin/gemini-stop", Providers: []string{config.ProviderGemini}},
 		{Event: "stop", Command: "/bin/everyone"},
@@ -352,6 +358,7 @@ func TestGeminiNamedByAnEntryAlone(t *testing.T) {
 }
 
 func TestGeminiLeavesServersItCannotCarry(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, config.Agents{MCP: map[string]config.MCPServer{
 		"ok":         {Command: "ok", EnvVars: []string{"REGION"}},
 		"secret":     {Command: "ok", EnvVars: []string{"GITHUB_TOKEN"}},
@@ -398,6 +405,7 @@ func TestGeminiLeavesServersItCannotCarry(t *testing.T) {
 }
 
 func TestGeminiProfilesWithoutAToolsList(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	a := config.Agents{
 		MCP: map[string]config.MCPServer{"docs": {Command: "docs"}, "wiki": {Command: "wiki"}, "files": {Command: "files"}},
 		Profiles: map[string]config.Profile{
@@ -458,6 +466,7 @@ func TestGeminiProfilesWithoutAToolsList(t *testing.T) {
 }
 
 func TestGeminiMissingCLIFailsOnlyGemini(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	a := geminiConfig(t)
 	a.Providers = []string{config.ProviderClaude, config.ProviderGemini}
 	m, r := newGemini(t, a)
@@ -482,6 +491,7 @@ func TestGeminiMissingCLIFailsOnlyGemini(t *testing.T) {
 }
 
 func TestGeminiBadInstructionsFailOnlyGemini(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	a := geminiConfig(t)
 	a.Providers = []string{config.ProviderClaude, config.ProviderGemini}
 	m, _ := newGemini(t, a)
@@ -511,6 +521,7 @@ func (f *refusingLink) Run(ctx context.Context, c runner.Cmd) (runner.Result, er
 }
 
 func TestGeminiApplyFailureStopsOnlyGemini(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	a := geminiConfig(t)
 	a.Providers = []string{config.ProviderClaude, config.ProviderGemini}
 	m, r := newGemini(t, a)
@@ -527,6 +538,7 @@ func TestGeminiApplyFailureStopsOnlyGemini(t *testing.T) {
 }
 
 func TestGeminiForeignExtensionFailsThePlan(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, config.Agents{Hooks: &config.AgentHooks{Commands: []config.AgentCommandHook{{Event: "stop", Command: "/bin/stop"}}}})
 	data, _ := json.Marshal(geminiInstall{Source: "/elsewhere/zakwas", Type: "link"})
 	writeFile(t, m.geminiInstallPath(), string(data))
@@ -541,6 +553,7 @@ func TestGeminiForeignExtensionFailsThePlan(t *testing.T) {
 }
 
 func TestGeminiNoLongerManaged(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, geminiConfig(t))
 	prepareGemini(t, m)
 	apply(t, plan(t, m))
@@ -567,6 +580,7 @@ func TestGeminiNoLongerManaged(t *testing.T) {
 }
 
 func TestGeminiNoLongerManagedWithoutTheCLI(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, config.Agents{Hooks: &config.AgentHooks{Commands: []config.AgentCommandHook{{Event: "stop", Command: "/bin/stop"}}}})
 	apply(t, plan(t, m))
 	m.Agents = config.Agents{Providers: []string{config.ProviderClaude}}
@@ -598,6 +612,7 @@ func TestGeminiEditedFilesAreBackedUp(t *testing.T) {
 }
 
 func TestGeminiHome(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, geminiConfig(t))
 	prepareGemini(t, m)
 	m.GeminiHome = filepath.Join(t.TempDir(), "gemini-home")
@@ -622,6 +637,7 @@ func TestGeminiHome(t *testing.T) {
 }
 
 func TestGeminiMovedHomeUninstallsTheOldExtension(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	for _, tt := range []struct {
 		name     string
 		from, to func(m *Module) string
@@ -671,6 +687,7 @@ func TestGeminiMovedHomeUninstallsTheOldExtension(t *testing.T) {
 }
 
 func TestGeminiMovedHomeLeavesAnExtensionZakwasDidNotLink(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, geminiConfig(t))
 	prepareGemini(t, m)
 	m.GeminiHome = filepath.Join(t.TempDir(), "a")
@@ -690,6 +707,7 @@ func TestGeminiMovedHomeLeavesAnExtensionZakwasDidNotLink(t *testing.T) {
 }
 
 func TestGeminiMovedHomeSkipsAnOldExtensionItCannotUninstall(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	for name, damage := range map[string]func(t *testing.T, old string){
 		"manifest gone": func(t *testing.T, old string) {
 			if err := os.Remove(filepath.Join(old, ".gemini", geminiExtension, "gemini-extension.json")); err != nil {
@@ -728,6 +746,7 @@ func TestGeminiMovedHomeSkipsAnOldExtensionItCannotUninstall(t *testing.T) {
 }
 
 func TestGeminiMovedHomeWithGeminiDroppedUninstallsTheOldExtension(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, geminiConfig(t))
 	prepareGemini(t, m)
 	m.GeminiHome = filepath.Join(t.TempDir(), "a")
@@ -745,6 +764,7 @@ func TestGeminiMovedHomeWithGeminiDroppedUninstallsTheOldExtension(t *testing.T)
 }
 
 func TestGeminiSharesTheAgentsSkillsLinkWithCodex(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, config.Agents{Providers: []string{config.ProviderCodex, config.ProviderGemini}, Skills: []config.Skill{{Path: "skills/mine"}}})
 	prepareGemini(t, m)
 	changes := plan(t, m)
@@ -777,6 +797,7 @@ func TestGeminiNotNamedPlansNothing(t *testing.T) {
 }
 
 func TestGeminiWithoutAnythingForTheExtensionWritesNone(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, config.Agents{
 		Skills:      []config.Skill{{Path: "skills/mine"}},
 		Permissions: &config.AgentPermissions{Deny: []config.AgentPermission{{Command: "rm -rf", Justification: `don't "rm" it \ ever`}}},
@@ -798,6 +819,7 @@ func TestGeminiWithoutAnythingForTheExtensionWritesNone(t *testing.T) {
 }
 
 func TestGeminiUnlinksWhenTheExtensionEmpties(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, config.Agents{
 		Hooks:       &config.AgentHooks{Commands: []config.AgentCommandHook{{Event: "stop", Command: "/bin/stop"}}},
 		Permissions: &config.AgentPermissions{Allow: []config.AgentPermission{{Command: "git status"}}},
@@ -819,6 +841,7 @@ func TestGeminiUnlinksWhenTheExtensionEmpties(t *testing.T) {
 }
 
 func TestGeminiKeepsTheManifestUntilItCanUnlink(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, r := newGemini(t, config.Agents{Hooks: &config.AgentHooks{Commands: []config.AgentCommandHook{{Event: "stop", Command: "/bin/stop"}}}})
 	apply(t, plan(t, m))
 	manifest := filepath.Join(m.geminiExtDir(), "gemini-extension.json")

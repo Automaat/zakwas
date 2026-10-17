@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/fsutil"
 )
 
 // MaxAge is how long a proposal can be approved after it was made.
@@ -94,7 +95,7 @@ func (s Store) Save(p *Proposal) error {
 		_ = os.Remove(tmp.Name())
 		return err
 	}
-	if err := os.Rename(tmp.Name(), s.path(p.ID)); err != nil {
+	if err := fsutil.Rename(tmp.Name(), s.path(p.ID)); err != nil {
 		_ = os.Remove(tmp.Name())
 		return err
 	}

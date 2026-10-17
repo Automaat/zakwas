@@ -11,6 +11,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 type fixture struct {
@@ -63,6 +64,7 @@ func converge(t *testing.T, m engine.Module) []engine.Change {
 }
 
 func TestLinks(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	tests := []struct {
 		name       string
 		setup      func(t *testing.T, f *fixture)
@@ -143,6 +145,7 @@ func TestLinks(t *testing.T) {
 }
 
 func TestLinksErrors(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	t.Run("missing source", func(t *testing.T) {
 		f := newFixture(t)
 		f.mod.Links[0].Src = "dotfiles/nope"
@@ -183,6 +186,7 @@ func TestLinksErrors(t *testing.T) {
 }
 
 func TestLinkDirectory(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	f := newFixture(t)
 	f.write(t, filepath.Join(f.root, "dotfiles/hammerspoon/init.lua"), "lua")
 	f.mod.Links = []config.Link{{Src: "dotfiles/hammerspoon", Dst: "~/.hammerspoon"}}
@@ -196,6 +200,7 @@ func TestLinkDirectory(t *testing.T) {
 }
 
 func TestTakesOverProtectedFile(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	f := newFixture(t)
 	t.Cleanup(func() { _ = install.Unlock(f.home) })
 	state, err := install.LoadState(install.StatePath(f.home))
@@ -222,6 +227,7 @@ func TestTakesOverProtectedFile(t *testing.T) {
 }
 
 func TestBackupToleratesFileRemovedBeforeApply(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	f := newFixture(t)
 	f.write(t, f.dst(), "managed copy")
 	changes, err := f.mod.Plan(context.Background())

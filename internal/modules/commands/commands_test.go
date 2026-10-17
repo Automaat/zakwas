@@ -11,6 +11,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 var (
@@ -98,11 +99,12 @@ func TestRunFailure(t *testing.T) {
 }
 
 func TestHungCheckTimesOut(t *testing.T) {
+	testutil.SkipOnWindows(t, "the test hangs a check with sh and sleep")
 	defer func(d time.Duration) { CheckTimeout = d }(CheckTimeout)
 	CheckTimeout = 100 * time.Millisecond
 
 	m := &Module{
-		Runner:   runner.NewExec(),
+		Runner:   &runner.Exec{Detached: true, Grace: time.Second},
 		Home:     t.TempDir(),
 		Commands: []config.Command{{Name: "hang", Check: "sleep 10", Run: "true"}},
 	}

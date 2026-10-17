@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func TestGitCloneReplacesWithoutGap(t *testing.T) {
+	testutil.SkipOnWindows(t, "directory swaps are not atomic on Windows: the gap check cannot hold")
 	tests := []struct {
 		name     string
 		existing bool

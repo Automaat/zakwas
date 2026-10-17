@@ -10,6 +10,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/proposal"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 // repoRoot is the zakwas repository, which publishes the zakwas plugin.
@@ -110,6 +111,7 @@ func TestZakwasSkillTeachesTheProposalFlow(t *testing.T) {
 }
 
 func TestZakwasPluginLinksIntoOpencode(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	root := repoRoot(t)
 	m, _ := newOpencode(t, config.Agents{
 		Marketplaces: map[string]config.Marketplace{"zakwas": {Source: root}},

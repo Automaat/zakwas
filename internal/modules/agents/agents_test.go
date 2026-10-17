@@ -15,6 +15,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const (
@@ -154,7 +155,7 @@ func TestConvergeFromScratch(t *testing.T) {
 
 	fake = runnertest.New()
 	m.Runner = fake
-	fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai"},{"name":"local","source":"directory","path":"`+localDir+`"}]`)
+	fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai"},{"name":"local","source":"directory","path":"`+testutil.Esc(localDir)+`"}]`)
 	fake.OnOK(pluginList, `{"installed": [{"id":"humanize@sai","version":"2.5.0","scope":"user","enabled":true}], "available": []}`)
 	if again := plan(t, m); len(again) != 0 {
 		t.Errorf("second plan not empty: %v", targets(again))
@@ -185,7 +186,7 @@ func TestEnableAndUpgrade(t *testing.T) {
 		writeFile(t, filepath.Join(loc, "plugins", "f", ".claude-plugin", "plugin.json"), `{"version":"1.3.0"}`)
 		writeFile(t, filepath.Join(loc, ".claude-plugin", "plugin.json"), `{"version":"5.0.0"}`)
 		writeFile(t, m.claude().knownPath(), knownJSON(map[string]bool{"sai": true}))
-		fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai","installLocation":"`+loc+`"}]`)
+		fake.OnOK(marketList, `[{"name":"sai","source":"github","repo":"o/sai","installLocation":"`+testutil.Esc(loc)+`"}]`)
 		fake.OnOK(pluginList, `{"installed": [
 			{"id":"a@sai","version":"1.0.0","scope":"user","enabled":false},
 			{"id":"b@sai","version":"2.0.0","scope":"user","enabled":true},
@@ -411,7 +412,7 @@ func TestAutoUpdate(t *testing.T) {
 	if !isTrue(parsed.Extra["a"].AutoUpdate) || parsed.Extra["other"].AutoUpdate != nil {
 		t.Errorf("settings autoUpdate = %s", got)
 	}
-	if fi, _ := os.Stat(real); fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(real); !testutil.SamePerm(fi.Mode(), 0o600) {
 		t.Errorf("settings mode = %v", fi.Mode())
 	}
 

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func newInstaller(t *testing.T, immutable bool) (*Installer, string) {
@@ -79,7 +81,7 @@ func assertProtected(t *testing.T, path, body string, perm os.FileMode, immutabl
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != perm {
+	if !testutil.SamePerm(info.Mode(), perm) {
 		t.Errorf("mode = %o, want %o", info.Mode().Perm(), perm)
 	}
 	if locked, _ := isImmutable(path); immutableSupported && locked != immutable {
@@ -196,7 +198,7 @@ func TestUpdates(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantDetail: "mode 644 → 444",
+			wantDetail: "mode " + writableMode() + " → 444",
 		},
 	}
 	for _, tt := range tests {
@@ -223,9 +225,7 @@ func TestUpdates(t *testing.T) {
 }
 
 func TestImmutableToggle(t *testing.T) {
-	if !immutableSupported {
-		t.Skip("no immutable flag on this OS")
-	}
+	testutil.RequireDarwin(t, "the uchg flag")
 	in, home := newInstaller(t, true)
 	dst := filepath.Join(home, "f")
 	converge(t, in, dst, "x", 0o644)
@@ -344,7 +344,7 @@ func TestBackupRefusesSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o444 {
+	if !testutil.SamePerm(info.Mode(), 0o444) {
 		t.Errorf("target mode = %o, want 444", info.Mode().Perm())
 	}
 	if _, err := os.Lstat(backupName(dst, 0)); !errors.Is(err, fs.ErrNotExist) {
@@ -407,7 +407,7 @@ func TestSymlinkedParentRefused(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "is a symlink; remove it") {
 				t.Fatalf("err = %v", err)
 			}
-			if info, err := os.Stat(filepath.Join(repo, "d/f")); err == nil && info.Mode().Perm() != 0o644 {
+			if info, err := os.Stat(filepath.Join(repo, "d/f")); err == nil && !testutil.SamePerm(info.Mode(), 0o644) {
 				t.Errorf("repo source mode changed to %o", info.Mode().Perm())
 			}
 		})
@@ -611,5 +611,92 @@ func TestPlanSharesStateAcrossConcurrentModules(t *testing.T) {
 	wg.Wait()
 	if in.State == nil {
 		t.Error("state not loaded")
+	}
+}
+
+func writableMode() string {
+	if runtime.GOOS == "windows" {
+		return "666"
+	}
+	return "644"
+}
+
+func TestWriteAtomicReplacesAReadOnlyFile(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "sub", "f")
+	if err := WriteAtomic(dst, []byte("one"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteAtomic(dst, []byte("two"), 0o444); err != nil {
+		t.Fatalf("replacing a protected copy: %v", err)
+	}
+
+	if got, _ := os.ReadFile(dst); string(got) != "two" {
+		t.Errorf("content = %q, want two", got)
+	}
+	info, err := os.Stat(dst)
+	if err != nil || !testutil.SamePerm(info.Mode(), 0o444) {
+		t.Errorf("mode = %v, %v; want read-only", info, err)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(dst))
+	if len(entries) != 1 {
+		t.Errorf("temp files left behind: %v", entries)
+	}
+}
+
+func TestBackupMovesAReadOnlyFile(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "f")
+	if err := WriteAtomic(dst, []byte("protected"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	name, err := Backup(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, _ := os.ReadFile(name); string(got) != "protected" {
+		t.Errorf("backup = %q", got)
+	}
+	if _, err := os.Lstat(dst); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the original is still there: %v", err)
+	}
+	if info, err := os.Stat(name); err != nil || !testutil.SamePerm(info.Mode(), 0o644) {
+		t.Errorf("the backup must be writable: %v, %v", info, err)
+	}
+}
+
+func TestExecutableCopyConvergesOnTheSecondPlan(t *testing.T) {
+	in, home := newInstaller(t, false)
+	dst := filepath.Join(home, "g")
+	converge(t, in, dst, "x", 0o755)
+
+	if c := converge(t, in, dst, "x", 0o755); c != nil {
+		t.Errorf("a second plan wants %v", c)
+	}
+}
+
+func TestIsLink(t *testing.T) {
+	dir := t.TempDir()
+	info, err := os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isLink(info) {
+		t.Error("a plain directory is not a link")
+	}
+}
+
+func TestImmutableIsANoOpWithoutTheFlag(t *testing.T) {
+	testutil.RequireLinux(t, "no uchg flag to set")
+	in, home := newInstaller(t, true)
+	dst := filepath.Join(home, "f")
+	converge(t, in, dst, "x", 0o644)
+	info, err := os.Stat(dst)
+	if err != nil || info.Mode().Perm() != 0o444 {
+		t.Fatalf("stat = %v, %v; want a 0444 file", info, err)
+	}
+	if locked, err := isImmutable(dst); err != nil || locked {
+		t.Errorf("isImmutable = %v, %v", locked, err)
 	}
 }

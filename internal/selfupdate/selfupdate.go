@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/Automaat/zakwas/internal/install"
@@ -36,17 +37,35 @@ var versionRE = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$`)
 // Updater downloads releases from BaseURL (ReleasesURL when empty).
 type Updater struct {
 	BaseURL string
-	Arch    string
-	Client  *http.Client
+	// OS and Arch default to this machine's runtime.GOOS and GOARCH.
+	OS     string
+	Arch   string
+	Client *http.Client
 }
+
+var releaseTargets = []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64"}
 
 func (u *Updater) base() string { return strings.TrimSuffix(cmp.Or(u.BaseURL, ReleasesURL), "/") }
 
 func (u *Updater) client() *http.Client { return cmp.Or(u.Client, http.DefaultClient) }
 
-// Asset is the release archive name for version on this machine's arch.
+// Asset is the release archive name for version on this machine's OS and
+// arch, the GoReleaser name_template zakwas_{version}_{os}_{arch}.tar.gz.
 func (u *Updater) Asset(version string) string {
-	return fmt.Sprintf("zakwas_%s_darwin_%s.tar.gz", version, cmp.Or(u.Arch, runtime.GOARCH))
+	return AssetName(version, cmp.Or(u.OS, runtime.GOOS), cmp.Or(u.Arch, runtime.GOARCH))
+}
+
+// AssetName is the release archive name for version, goos and goarch.
+func AssetName(version, goos, goarch string) string {
+	return fmt.Sprintf("zakwas_%s_%s_%s.tar.gz", version, goos, goarch)
+}
+
+func (u *Updater) checkTarget() error {
+	target := cmp.Or(u.OS, runtime.GOOS) + "/" + cmp.Or(u.Arch, runtime.GOARCH)
+	if !slices.Contains(releaseTargets, target) {
+		return fmt.Errorf("no zakwas release for %s; releases cover %s", target, strings.Join(releaseTargets, ", "))
+	}
+	return nil
 }
 
 // NormalizeVersion strips a leading "v" and rejects anything that isn't a
@@ -89,6 +108,9 @@ func (u *Updater) Latest(ctx context.Context) (string, error) {
 // Download fetches version's archive and checks its SHA256 against the
 // release's checksums.txt.
 func (u *Updater) Download(ctx context.Context, version string) ([]byte, error) {
+	if err := u.checkTarget(); err != nil {
+		return nil, err
+	}
 	base := fmt.Sprintf("%s/download/v%s/", u.base(), version)
 	asset := u.Asset(version)
 	sums, err := u.download(ctx, base+"checksums.txt")

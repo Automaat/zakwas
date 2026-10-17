@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -187,5 +188,6 @@ func (s LaunchdSchedule) validate(what string) []error {
 }
 
 func isAbs(paths Paths, p string) bool {
-	return strings.HasPrefix(paths.Dst(p), "/")
+	p = paths.Dst(p)
+	return strings.HasPrefix(p, "/") || filepath.IsAbs(p)
 }

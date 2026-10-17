@@ -7,13 +7,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
+	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const (
@@ -105,7 +108,7 @@ func TestInit(t *testing.T) {
 	}
 	before := snapshot(t, home)
 
-	r := invoke(Env{Home: home, Cwd: work, Runner: fake}, "", "init", "repo", "--add", "~/.zshrc", "--add", filepath.Join(home, ".config/git"), "--add", "../"+filepath.Base(home)+"/.local/bin/tool with space")
+	r := invoke(Env{Home: home, Cwd: work, Runner: fake, GOOS: platform.Darwin}, "", "init", "repo", "--add", "~/.zshrc", "--add", filepath.Join(home, ".config/git"), "--add", "../"+filepath.Base(home)+"/.local/bin/tool with space")
 	if r.code != ExitOK {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
 	}
@@ -153,7 +156,7 @@ mise:
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
-	if info, err := os.Stat(filepath.Join(repo, "dotfiles/local/bin/tool with space")); err != nil || info.Mode().Perm() != 0o755 {
+	if info, err := os.Stat(filepath.Join(repo, "dotfiles/local/bin/tool with space")); err != nil || !testutil.SamePerm(info.Mode(), 0o755) {
 		t.Errorf("executable bit not kept: %v %v", info, err)
 	}
 	for _, skipped := range []string{"dotfiles/config/git/.git", "dotfiles/config/git/link"} {
@@ -184,7 +187,7 @@ mise:
 		}
 	}
 
-	cfg, err := config.Load(filepath.Join(repo, "zakwas.yaml"), home)
+	cfg, err := config.LoadFor(filepath.Join(repo, "zakwas.yaml"), home, platform.Darwin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +203,7 @@ func TestInitWithoutBrewAndMise(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := runnertest.New().Missing("brew", "mise").OnOK(gitInit, "")
-	r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo, "--add", "~/.config/mise/config.toml")
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo, "--add", "~/.config/mise/config.toml")
 	if r.code != ExitOK {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
 	}
@@ -227,7 +230,7 @@ func TestInitTrustsDumpedTaps(t *testing.T) {
 		brewfile: brewfile,
 		content:  "tap \"acme/tools\"\nbrew \"jq\"\n",
 	}
-	r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo)
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo)
 	if r.code != ExitOK {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
 	}
@@ -273,9 +276,9 @@ func TestInitRejects(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, "not a directory"},
-		{"outside home", func(_, repo string) []string { return []string{repo, "--add", "/etc/hosts"} }, nil, "not inside $HOME"},
+		{"outside home", func(_, repo string) []string { return []string{repo, "--add", testutil.Abs("/etc/hosts")} }, nil, "not inside $HOME"},
 		{"home itself", func(home, repo string) []string { return []string{repo, "--add", home} }, nil, "not inside $HOME"},
-		{"missing", func(_, repo string) []string { return []string{repo, "--add", "~/.nope"} }, nil, "no such file"},
+		{"missing", func(_, repo string) []string { return []string{repo, "--add", "~/.nope"} }, nil, noSuchFile},
 		{"dot twins", func(_, repo string) []string { return []string{repo, "--add", "~/.zshrc", "--add", "~/zshrc"} }, func(t *testing.T, home, _ string) {
 			if err := os.WriteFile(filepath.Join(home, "zshrc"), nil, 0o644); err != nil {
 				t.Fatal(err)
@@ -306,7 +309,7 @@ func TestInitRejects(t *testing.T) {
 			}
 			before := snapshot(t, filepath.Dir(repo))
 			fake := runnertest.New()
-			r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", append([]string{"init"}, tt.args(home, repo)...)...)
+			r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", append([]string{"init"}, tt.args(home, repo)...)...)
 			if r.code != ExitUsage {
 				t.Errorf("exit %d, want %d\nstderr: %s", r.code, ExitUsage, r.stderr)
 			}
@@ -347,7 +350,7 @@ func TestInitCleansUpAfterFailure(t *testing.T) {
 			fake := runnertest.New().
 				OnOK(miseLs, `{}`).
 				On(brewDump+filepath.Join(repo, "Brewfile"), runner.Result{ExitCode: 1, Stderr: "boom"})
-			r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo, "--add", "~/.zshrc")
+			r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo, "--add", "~/.zshrc")
 			if r.code != ExitErr || !strings.Contains(r.stderr, "boom") {
 				t.Errorf("exit %d, stderr %q", r.code, r.stderr)
 			}
@@ -380,11 +383,33 @@ func TestInitRollsBackInvalidMiseConfig(t *testing.T) {
 	}
 	repo := filepath.Join(t.TempDir(), "new/repo")
 	fake := runnertest.New().Missing("brew").OnOK(miseLs, `{}`)
-	r := invoke(Env{Home: home, Cwd: home, Runner: fake}, "", "init", repo)
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Darwin}, "", "init", repo)
 	if r.code != ExitErr || !strings.Contains(r.stderr, "not valid TOML") {
 		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
 	}
 	if _, err := os.Stat(filepath.Dir(repo)); err == nil {
 		t.Errorf("%s left behind", filepath.Dir(repo))
+	}
+}
+
+var noSuchFile = func() string {
+	if runtime.GOOS == "windows" {
+		return "cannot find the file"
+	}
+	return "no such file"
+}()
+
+func TestInitPointsWindowsAtInstallPS1(t *testing.T) {
+	home := initHome(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	fake := runnertest.New().OnOK(gitInit, "")
+
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Windows}, "", "init", repo)
+
+	if r.code != ExitOK {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "install.ps1") || strings.Contains(r.stdout, "install.sh") || strings.Contains(r.stdout, "curl") {
+		t.Errorf("the next steps are not for Windows:\n%s", r.stdout)
 	}
 }

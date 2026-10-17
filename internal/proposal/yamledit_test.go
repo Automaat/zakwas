@@ -162,8 +162,23 @@ func TestScalar(t *testing.T) {
 		{"a,b", true, `"a,b"`},
 		{"a,b", false, "a,b"},
 		{"say \"hi\"", false, `say "hi"`},
+		{"<<", false, `"<<"`},
+		{"<<", true, `"<<"`},
+		{"~", false, `"~"`},
+		{"null", false, `"null"`},
+		{"NULL", false, `"NULL"`},
+		{"No", false, `"No"`},
+		{"2001-01-01", false, `"2001-01-01"`},
+		{"0x1f", false, `"0x1f"`},
+		{"1e3", false, `"1e3"`},
+		{".inf", false, `".inf"`},
+		{"a #b", false, `"a #b"`},
+		{"<<x", false, "<<x"},
 		{"tab\there", false, `"tab\there"`},
 		{"https://example.com/mcp", false, "https://example.com/mcp"},
+		{"~/.local/bin/x", false, "~/.local/bin/x"},
+		{"~", false, `"~"`},
+		{"~", true, `"~"`},
 	}
 	for _, tt := range tests {
 		if got := scalar(tt.in, tt.flow); got != tt.want {
@@ -189,6 +204,13 @@ func TestParseYAMLRejectsMoreThanOneDocument(t *testing.T) {
 
 func TestParseYAMLRejectsADocumentEndMarker(t *testing.T) {
 	if _, err := parseYAML([]byte("agents:\n  plugins:\n    - p1@mkt\n...\n")); err == nil || !strings.Contains(err.Error(), "document end marker") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestParseYAMLErrorLeavesOutAnchorNames(t *testing.T) {
+	_, err := parseYAML([]byte("agents:\n  mcp:\n    a: *ghp_SECRET\n"))
+	if err == nil || strings.Contains(err.Error(), "ghp_SECRET") || !strings.Contains(err.Error(), "unknown anchor") {
 		t.Errorf("err = %v", err)
 	}
 }

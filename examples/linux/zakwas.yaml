@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Automaat/zakwas/main/schema/zakwas.schema.json
+files:
+  - {src: ../dotfiles/zsh/zshrc, dst: ~/.zshrc}
+  - {src: ../dotfiles/git/config, dst: ~/.config/git/config}
+
+templates:
+  vars:
+    name: Your Name
+  files:
+    - {src: ../dotfiles/git/user.tmpl, dst: ~/.config/git/user}
+
+agents:
+  providers: [claude, codex]
+  instructions: [../dotfiles/agents/AGENTS.md]
+  mcp:
+    docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
+    search: {url: "https://mcp.example.com/mcp", bearerTokenEnv: SEARCH_TOKEN}
+  skills:
+    - ../dotfiles/agents/skills/review
+  profiles:
+    review:
+      description: Read-only change review
+      prompt: ../dotfiles/agents/review.md
+      edit: deny
+      shell: ask
+
+system:
+  dirs:
+    - {path: ~/.ssh, mode: 0o700}
+  sshKey:
+    path: ~/.ssh/id_ed25519
+    comment: you@example.com
+
+commands:
+  - name: local bin
+    check: test -d ~/.local/bin
+    run: mkdir -p ~/.local/bin

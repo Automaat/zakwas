@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func sample(id string, created time.Time) *Proposal {
@@ -27,7 +28,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		}
 	}
 	info, err := os.Stat(s.Dir)
-	if err != nil || info.Mode().Perm() != 0o700 {
+	if err != nil || !testutil.SamePerm(info.Mode(), 0o700) {
 		t.Errorf("dir mode = %v, %v", info.Mode(), err)
 	}
 	all, err := s.List()

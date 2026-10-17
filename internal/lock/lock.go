@@ -1,8 +1,8 @@
 // Package lock serializes the zakwas runs that change the system.
 //
-// It is an flock(2) on a file under the state dir: the kernel drops the lock
-// when the holder exits, however it exits, so a crashed or killed run never
-// leaves a stale lock to clean up.
+// It is an flock(2) (LockFileEx on Windows) on a file under the state dir: the
+// kernel drops the lock when the holder exits, however it exits, so a crashed
+// or killed run never leaves a stale lock to clean up.
 package lock
 
 import (
@@ -14,10 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // The holder writes its identity right after locking, so a blocked run waits
@@ -99,14 +96,6 @@ func (e *FileError) Error() string {
 
 func (e *FileError) Unwrap() error { return e.Err }
 
-func dirWritable(dir string) bool {
-	return unix.Access(dir, unix.W_OK) == nil
-}
-
-func denied(err error) bool {
-	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.EROFS)
-}
-
 // Lock is a held lock; Release it when the run is done. Releasing a nil
 // Lock is a no-op.
 type Lock struct {
@@ -153,12 +142,12 @@ func Acquire(ctx context.Context, home, command string, opts Options) (*Lock, er
 	}
 	waited := false
 	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+		busy, err := tryLock(f)
+		if err != nil {
 			return nil, errors.Join(err, f.Close())
+		}
+		if !busy {
+			break
 		}
 		if !waited {
 			var h Holder
@@ -202,7 +191,7 @@ func (l *Lock) Release() error {
 	if l == nil {
 		return nil
 	}
-	return l.f.Close()
+	return errors.Join(unlock(l.f), l.f.Close())
 }
 
 func settledHolder(path string) Holder {
@@ -214,11 +203,6 @@ func settledHolder(path string) Holder {
 		}
 	}
 	return h
-}
-
-func alive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func readHolder(path string) Holder {

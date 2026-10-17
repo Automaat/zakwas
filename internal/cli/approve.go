@@ -14,6 +14,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
+	"github.com/Automaat/zakwas/internal/fsutil"
 	"github.com/Automaat/zakwas/internal/install"
 	"github.com/Automaat/zakwas/internal/modules/agents"
 	"github.com/Automaat/zakwas/internal/proposal"
@@ -30,7 +31,7 @@ func runApprove(ctx context.Context, env Env, args []string, out, errOut *consol
 		fs.Usage()
 		return ExitUsage
 	}
-	cfg, err := loadConfig(o.cfgPath, env.Cwd, env.Home)
+	cfg, err := loadConfig(o.cfgPath, env)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr
@@ -274,14 +275,14 @@ func (a *approval) checkGit(ctx context.Context, rels []string) (string, error) 
 // are already on disk, so the plan is made again and must match the one that
 // was reviewed.
 func (a *approval) apply(ctx context.Context, ev *evaluation, style engine.Style) int {
-	cfg, err := config.Load(a.cfg.Path, a.env.Home)
+	cfg, err := config.LoadFor(a.cfg.Path, a.env.Home, a.env.GOOS)
 	if err != nil {
 		a.errOut.fail(err)
 		return ExitErr
 	}
 	var plan engine.Plan
 	if len(ev.modules) > 0 {
-		mods, err := selectModules(Modules(cfg, a.env), strings.Join(ev.modules, ","))
+		mods, err := selectModules(Modules(cfg, a.env), strings.Join(ev.modules, ","), a.env.goos())
 		if err != nil {
 			a.errOut.fail(err)
 			return ExitErr
@@ -407,7 +408,7 @@ func replaceFile(path string, want, data []byte) error {
 		_ = os.Remove(tmp.Name())
 		return err
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := fsutil.Rename(tmp.Name(), path); err != nil {
 		_ = os.Remove(tmp.Name())
 		return err
 	}

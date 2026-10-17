@@ -13,6 +13,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func permissionsModule(t *testing.T, providers []string, p *config.AgentPermissions) *Module {
@@ -114,7 +115,7 @@ func TestClaudePermissionsCreateAndDropSettings(t *testing.T) {
 	if got, want := readFile(t, settings), "{\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(git status:*)\"\n    ]\n  }\n}\n"; got != want {
 		t.Errorf("settings = %q, want %q", got, want)
 	}
-	if info, err := os.Stat(settings); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(settings); err != nil || !testutil.SamePerm(info.Mode(), 0o600) {
 		t.Errorf("settings mode = %v, %v", info, err)
 	}
 	assertConverged(t, m)

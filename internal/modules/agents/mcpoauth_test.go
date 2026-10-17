@@ -10,6 +10,7 @@ import (
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const oauthClientID = "0oa1abcdEXAMPLE"
@@ -294,6 +295,7 @@ func TestMCPOAuthTrueRegistersNothingExtra(t *testing.T) {
 }
 
 func TestGeminiOAuthClient(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	m, _ := newGemini(t, config.Agents{MCP: map[string]config.MCPServer{
 		"slack":  oauthServer(config.MCPOAuth{ClientID: oauthClientID, CallbackPort: 54661, Scope: "read write"}),
 		"bare":   {URL: "https://mcp.example.com/bare", OAuth: config.MCPOAuth{ClientID: oauthClientID}},
@@ -456,6 +458,7 @@ callback_url = "http://localhost:54661/cb"
 }
 
 func TestMCPOAuthQuotesInClientAndScope(t *testing.T) {
+	testutil.SkipOnWindows(t, "symlinks are not supported on Windows yet")
 	const client = `a'b"c\d`
 	const scope = `it's:ok a'b`
 	oauth := config.MCPOAuth{ClientID: client, CallbackPort: 1234, Scope: scope}

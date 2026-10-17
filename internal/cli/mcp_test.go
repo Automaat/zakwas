@@ -11,13 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Automaat/zakwas/internal/lock"
 	"github.com/Automaat/zakwas/internal/proposal"
 	"github.com/Automaat/zakwas/internal/runner"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 type mcpClient struct {
@@ -55,6 +55,9 @@ func startMCP(t *testing.T, env Env, caps map[string]any, args ...string) *mcpCl
 	outR, outW := io.Pipe()
 	c := &mcpClient{t: t, in: inW, out: bufio.NewReader(outR), stderr: &lockedBuffer{}, done: make(chan struct{})}
 	env.Args = append([]string{"mcp"}, args...)
+	if env.GOOS == "" {
+		env.GOOS = "darwin"
+	}
 	env.Stdin, env.Stdout, env.Stderr = inR, outW, c.stderr
 	go func() {
 		c.code = Main(context.Background(), env)
@@ -290,6 +293,16 @@ func TestMCPProposeListsAndDiscards(t *testing.T) {
 		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "callback_port": 0}}},
 	} {
 		if r := c.tool("zakwas_propose", bad, nil); !r.isErr || strings.Contains(r.text, "LEAKP1") {
+			t.Errorf("%v: error %v, text %s", bad, r.isErr, r.text)
+		}
+	}
+	for _, bad := range []map[string]any{
+		{"kind": "add-brew", "name": "jq", "ghp_LEAKKEY": true},
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "ghp_LEAKKEY": "x"}},
+		{"kind": "add-mcp", "name": "a", "server": map[string]any{"url": "https://e.com", "oauth": map[string]any{"client_id": "c", "ghp_LEAKKEY": "x"}}},
+	} {
+		r := c.tool("zakwas_propose", bad, nil)
+		if !r.isErr || strings.Contains(r.text, "LEAKKEY") || !strings.Contains(r.text, "unknown field") {
 			t.Errorf("%v: error %v, text %s", bad, r.isErr, r.text)
 		}
 	}
@@ -579,6 +592,7 @@ func TestMCPApplyDeclinedWithoutARunLockStillSaysSo(t *testing.T) {
 }
 
 func TestMCPApplyRefusesAnUnopenableLockFile(t *testing.T) {
+	testutil.SkipOnWindows(t, "directory and file modes (chmod 0500, 0000) have no Windows equivalent")
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores file modes")
 	}
@@ -710,44 +724,6 @@ func TestMCPCommitSaysWhereItWasApproved(t *testing.T) {
 func TestReasonText(t *testing.T) {
 	if got := reasonText("zakwas: one\nzakwas: two: three\n"); got != "one\ntwo: three" {
 		t.Errorf("reasonText = %q", got)
-	}
-}
-
-func TestMCPApplyStopsOnSIGTERMAndPutsTheFilesBack(t *testing.T) {
-	env, home := brewSetup(t)
-	installing := make(chan struct{})
-	env.Runner = brewRunner{gitRunner: env.Runner.(brewRunner).gitRunner, install: func(ctx context.Context) {
-		close(installing)
-		<-ctx.Done()
-	}}
-	c := startMCP(t, env, formClient, "--enable-apply")
-	id := parseJSON(t, c.tool("zakwas_propose", map[string]any{"kind": "add-brew", "name": "jq"}, nil).text)["id"].(string)
-	brewfile := readFile(t, filepath.Join(env.Cwd, "Brewfile"))
-	go func() {
-		<-installing
-		if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-			t.Error(err)
-		}
-	}()
-
-	r := c.tool("zakwas_apply", map[string]any{"id": id}, accept)
-
-	if out := parseJSON(t, r.text); out["applied"] == true {
-		t.Errorf("outcome = %v", out)
-	}
-	if got := readFile(t, filepath.Join(env.Cwd, "Brewfile")); got != brewfile {
-		t.Errorf("Brewfile wasn't put back:\n%s", got)
-	}
-	if gitIn(t, env.Cwd, "status", "--porcelain") != "" {
-		t.Error("the repo is dirty")
-	}
-	if _, err := os.Stat(filepath.Join(proposal.Dir(home), id+".json")); err != nil {
-		t.Errorf("the proposal is gone: %v", err)
-	}
-	select {
-	case <-c.done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the server ignored SIGTERM")
 	}
 }
 

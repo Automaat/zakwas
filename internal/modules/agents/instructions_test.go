@@ -12,6 +12,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func newInstructions(t *testing.T, providers ...string) (*Module, *runnertest.Fake, string) {
@@ -41,7 +42,7 @@ func assertCopy(t *testing.T, path, want string) {
 		t.Errorf("%s is %v, want a regular file", path, info.Mode())
 		return
 	}
-	if info.Mode().Perm() != 0o444 {
+	if !testutil.SamePerm(info.Mode(), 0o444) {
 		t.Errorf("%s mode = %o, want 444", path, info.Mode().Perm())
 	}
 	if got := readFile(t, path); got != want {

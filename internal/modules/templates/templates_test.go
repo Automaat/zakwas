@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/engine/enginetest"
 	"github.com/Automaat/zakwas/internal/install"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func setup(t *testing.T, tmpl string, mode os.FileMode) (*Module, string) {
@@ -69,7 +71,7 @@ func TestRenderAndConverge(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("rendered %q, want %q", got, want)
 	}
-	if info, _ := os.Stat(dst); info.Mode().Perm() != 0o400 {
+	if info, _ := os.Stat(dst); !testutil.SamePerm(info.Mode(), 0o400) {
 		t.Errorf("mode = %o", info.Mode().Perm())
 	}
 	if again := plan(t, m); len(again) != 0 {
@@ -95,7 +97,7 @@ func TestDrift(t *testing.T) {
 			if err := os.Chmod(dst, 0o644); err != nil {
 				t.Fatal(err)
 			}
-		}, "mode 644 → 444"},
+		}, "mode " + writableMode + " → 444"},
 		{"home-manager symlink", func(t *testing.T, dst string) {
 			if err := os.Remove(dst); err != nil {
 				t.Fatal(err)
@@ -271,7 +273,7 @@ func TestAgentMCP(t *testing.T) {
 		"oauth": {URL: "https://o.com/mcp", OAuth: config.MCPOAuth{Enabled: true}},
 		"other": {Command: "other", Providers: []string{config.ProviderClaude}},
 	}}
-	got, err := agentMCP(agents, config.ProviderOpencode)
+	got, err := agentMCP(agents, config.ProviderOpencode, "/home/me")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +296,7 @@ func TestAgentMCPOAuthClient(t *testing.T) {
 		"hint":    {URL: "https://mcp.example.com/hint", OAuth: config.MCPOAuth{Enabled: true}},
 		"off":     {URL: "https://mcp.example.com/off", Headers: map[string]string{"X-Org": "acme"}},
 	}}
-	got, err := agentMCP(agents, config.ProviderOpencode)
+	got, err := agentMCP(agents, config.ProviderOpencode, "/home/me")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,17 +308,17 @@ func TestAgentMCPOAuthClient(t *testing.T) {
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
-	again, err := agentMCP(agents, config.ProviderOpencode)
+	again, err := agentMCP(agents, config.ProviderOpencode, "/home/me")
 	if err != nil || again != got {
 		t.Errorf("not deterministic: %s, %v", again, err)
 	}
 }
 
 func TestAgentMCPEdgeCases(t *testing.T) {
-	if got, err := agentMCP(nil, config.ProviderOpencode); err != nil || got != "{}" {
+	if got, err := agentMCP(nil, config.ProviderOpencode, "/home/me"); err != nil || got != "{}" {
 		t.Errorf("no agents = %q, %v", got, err)
 	}
-	if _, err := agentMCP(nil, config.ProviderClaude); err == nil || !strings.Contains(err.Error(), `agentMCP: provider "claude" is not supported, only opencode`) {
+	if _, err := agentMCP(nil, config.ProviderClaude, "/home/me"); err == nil || !strings.Contains(err.Error(), `agentMCP: provider "claude" is not supported, only opencode`) {
 		t.Errorf("claude: %v", err)
 	}
 }
@@ -343,3 +345,48 @@ func TestAgentMCPInTemplate(t *testing.T) {
 		t.Errorf("rendered = %q, want %q", data, want)
 	}
 }
+
+func TestAgentMCPRelativeHome(t *testing.T) {
+	agents := &config.Agents{MCP: map[string]config.MCPServer{"tool": {Command: "~/bin/x"}, "plain": {Command: "npx"}}}
+	_, err := agentMCP(agents, config.ProviderOpencode, "rel2")
+	if err == nil || !strings.Contains(err.Error(), "agents.mcp.tool") || !strings.Contains(err.Error(), "HOME must be an absolute path") {
+		t.Fatalf("err = %v", err)
+	}
+	plain := &config.Agents{MCP: map[string]config.MCPServer{"plain": {Command: "npx"}}}
+	if _, err := agentMCP(plain, config.ProviderOpencode, "rel2"); err != nil {
+		t.Errorf("a server without a ~ failed: %v", err)
+	}
+}
+
+func TestAgentMCPExpandsHome(t *testing.T) {
+	agents := &config.Agents{MCP: map[string]config.MCPServer{
+		"tool": {
+			Command: "~/.local/bin/tool",
+			Args:    []string{"~/cfg", "--dir=~/keep", "~other/x", "~"},
+			Env:     map[string]string{"DATA": "~/data", "LITERAL": "a~/b"},
+		},
+		"web": {URL: "https://example.com/~/mcp", Headers: map[string]string{"X-Path": "~/h"}},
+	}}
+	home := testutil.Abs("/Users/zażółć me")
+	got, err := agentMCP(agents, config.ProviderOpencode, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	esc := testutil.Esc(home)
+	want := `{"tool": {"type":"local","command":["` + esc + `/.local/bin/tool","` + esc + `/cfg","--dir=~/keep","~other/x","` + esc + `"],` +
+		`"environment":{"DATA":"` + esc + `/data","LITERAL":"a~/b"},"enabled":true}, ` +
+		`"web": {"type":"remote","url":"https://example.com/~/mcp","headers":{"X-Path":"~/h"},"oauth":false,"enabled":true}}`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	if agents.MCP["tool"].Command != "~/.local/bin/tool" {
+		t.Error("agentMCP changed the declared server")
+	}
+}
+
+var writableMode = func() string {
+	if runtime.GOOS == "windows" {
+		return "666"
+	}
+	return "644"
+}()
