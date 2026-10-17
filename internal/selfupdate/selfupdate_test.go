@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -116,6 +117,8 @@ func TestAssetName(t *testing.T) {
 		{"darwin", "amd64", "zakwas_1.2.3_darwin_amd64.tar.gz"},
 		{"linux", "amd64", "zakwas_1.2.3_linux_amd64.tar.gz"},
 		{"linux", "arm64", "zakwas_1.2.3_linux_arm64.tar.gz"},
+		{"windows", "amd64", "zakwas_1.2.3_windows_amd64.zip"},
+		{"windows", "arm64", "zakwas_1.2.3_windows_arm64.zip"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos+"/"+tt.arch, func(t *testing.T) {
@@ -138,7 +141,7 @@ func TestAssetDefaultsToThisMachine(t *testing.T) {
 }
 
 func TestFetchUnsupportedTarget(t *testing.T) {
-	for _, target := range [][2]string{{"windows", "amd64"}, {"linux", "386"}, {"freebsd", "arm64"}} {
+	for _, target := range [][2]string{{"windows", "386"}, {"linux", "386"}, {"freebsd", "arm64"}} {
 		u := &Updater{BaseURL: "http://127.0.0.1:1/releases", OS: target[0], Arch: target[1]}
 		_, err := u.Fetch(context.Background(), "1.2.3")
 		if err == nil || !strings.Contains(err.Error(), "no zakwas release for "+target[0]+"/"+target[1]) {
@@ -157,6 +160,76 @@ func TestFetchLinux(t *testing.T) {
 	other := &Updater{BaseURL: base, OS: "darwin", Arch: "amd64"}
 	if _, err := other.Fetch(context.Background(), "1.2.3"); err == nil || !strings.Contains(err.Error(), "no entry for zakwas_1.2.3_darwin_amd64.tar.gz") {
 		t.Errorf("darwin asset served from a linux release: %v", err)
+	}
+}
+
+func TestFetchWindows(t *testing.T) {
+	base := selfupdatetest.ServeFor(t, "1.2.3", "windows", "arm64", "windows binary")
+	u := &Updater{BaseURL: base, OS: "windows", Arch: "arm64"}
+	got, err := u.Fetch(context.Background(), "1.2.3")
+	if err != nil || string(got) != "windows binary" {
+		t.Errorf("Fetch = %q, %v", got, err)
+	}
+	if _, err := (&Updater{BaseURL: base, OS: "windows", Arch: "amd64"}).Fetch(context.Background(), "1.2.3"); err == nil || !strings.Contains(err.Error(), "no entry for zakwas_1.2.3_windows_amd64.zip") {
+		t.Errorf("amd64 asset served from an arm64 release: %v", err)
+	}
+}
+
+func TestFetchWindowsChecksTheZipAgainstChecksums(t *testing.T) {
+	zipped := selfupdatetest.ZipArchive(t, map[string]string{"zakwas.exe": "windows binary"})
+	srv := serveAsset(t, "zakwas_1.2.3_windows_amd64.zip", zipped, selfupdatetest.SHA256([]byte("other")))
+	u := &Updater{BaseURL: srv.URL + "/releases", OS: "windows", Arch: "amd64"}
+	if _, err := u.Fetch(context.Background(), "1.2.3"); err == nil || !strings.Contains(err.Error(), "sha256") {
+		t.Errorf("err = %v, want a checksum mismatch", err)
+	}
+}
+
+func serveAsset(t *testing.T, asset string, archive []byte, checksum string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/releases/download/v1.2.3/checksums.txt", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(checksum + "  " + asset + "\n"))
+	})
+	mux.HandleFunc("/releases/download/v1.2.3/"+asset, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestExtract(t *testing.T) {
+	tests := []struct {
+		name    string
+		archive []byte
+		want    string
+		err     string
+	}{
+		{"tar", selfupdatetest.Archive(t, map[string]string{"LICENSE": "MIT", "zakwas": "unix binary"}), "unix binary", ""},
+		{"zip", selfupdatetest.ZipArchive(t, map[string]string{"LICENSE": "MIT", "zakwas.exe": "windows binary"}), "windows binary", ""},
+		{"zip with a dot slash", selfupdatetest.ZipArchive(t, map[string]string{"./zakwas.exe": "windows binary"}), "windows binary", ""},
+		{"zip with backslashes", selfupdatetest.ZipArchive(t, map[string]string{`.\zakwas.exe`: "windows binary"}), "windows binary", ""},
+		{"zip without the binary", selfupdatetest.ZipArchive(t, map[string]string{"LICENSE": "MIT"}), "", "no zakwas binary"},
+		{"zip with the unix name", selfupdatetest.ZipArchive(t, map[string]string{"zakwas": "unix binary"}), "", "no zakwas binary"},
+		{"zip with a nested binary", selfupdatetest.ZipArchive(t, map[string]string{"dist/zakwas.exe": "windows binary"}), "", "no zakwas binary"},
+		{"tar with the windows name", selfupdatetest.Archive(t, map[string]string{"zakwas.exe": "windows binary"}), "", "no zakwas binary"},
+		{"truncated zip", selfupdatetest.ZipArchive(t, map[string]string{"zakwas.exe": "windows binary"})[:20], "", ""},
+		{"neither", []byte("not an archive"), "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Extract(tt.archive)
+			switch {
+			case tt.want != "":
+				if err != nil || string(got) != tt.want {
+					t.Errorf("Extract = %q, %v; want %q", got, err, tt.want)
+				}
+			case err == nil:
+				t.Errorf("Extract = %q, want an error", got)
+			case !strings.Contains(err.Error(), tt.err):
+				t.Errorf("err = %v, want %q", err, tt.err)
+			}
+		})
 	}
 }
 
@@ -186,6 +259,157 @@ func TestReplace(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Dir(exe))
 	if len(entries) != 1 {
 		t.Errorf("temp files left: %v", entries)
+	}
+}
+
+func TestReplaceRunning(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "zakwas.exe")
+	write(t, exe, "old")
+
+	if err := ReplaceRunning(exe, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := read(t, exe); got != "new" {
+		t.Errorf("exe = %q, want new", got)
+	}
+	if got := read(t, exe+OldSuffix); got != "old" {
+		t.Errorf("the old binary = %q, want it kept as %s", got, OldSuffix)
+	}
+	if _, err := os.Lstat(exe + ".new"); !os.IsNotExist(err) {
+		t.Errorf("the staged file is left behind: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 2 {
+		t.Errorf("files left in %s: %v", dir, entries)
+	}
+}
+
+func TestReplaceRunningReplacesTheOldBinaryOfTheLastUpdate(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "zakwas.exe")
+	write(t, exe, "v2")
+	write(t, exe+OldSuffix, "v1")
+
+	if err := ReplaceRunning(exe, []byte("v3")); err != nil {
+		t.Fatal(err)
+	}
+
+	if read(t, exe) != "v3" || read(t, exe+OldSuffix) != "v2" {
+		t.Errorf("exe = %q, old = %q", read(t, exe), read(t, exe+OldSuffix))
+	}
+}
+
+func TestReplaceRunningRollsBack(t *testing.T) {
+	steps := []struct {
+		name string
+		fail func(from, to string) bool
+		want string
+	}{
+		{"moving the binary aside", func(_, to string) bool { return strings.HasSuffix(to, OldSuffix) }, "move aside"},
+		{"moving the new binary in", func(from, _ string) bool { return strings.HasSuffix(from, ".new") }, "move in"},
+	}
+	for _, tt := range steps {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			exe := filepath.Join(dir, "zakwas.exe")
+			write(t, exe, "old")
+			saved := rename
+			rename = func(from, to string) error {
+				if tt.fail(from, to) {
+					return errors.New(tt.want)
+				}
+				return saved(from, to)
+			}
+			t.Cleanup(func() { rename = saved })
+
+			err := ReplaceRunning(exe, []byte("new"))
+
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+			if got := read(t, exe); got != "old" {
+				t.Errorf("exe = %q, want the old binary back", got)
+			}
+			entries, _ := os.ReadDir(dir)
+			if len(entries) != 1 {
+				t.Errorf("files left in %s: %v", dir, entries)
+			}
+		})
+	}
+}
+
+func TestReplaceRunningSaysWhereTheOldBinaryIsWhenRollbackFails(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "zakwas.exe")
+	write(t, exe, "old")
+	saved := rename
+	rename = func(from, to string) error {
+		if strings.HasSuffix(from, ".new") || to == exe {
+			return errors.New("blocked")
+		}
+		return saved(from, to)
+	}
+	t.Cleanup(func() { rename = saved })
+
+	err := ReplaceRunning(exe, []byte("new"))
+
+	if err == nil || !strings.Contains(err.Error(), "the old binary is at "+exe+OldSuffix) {
+		t.Errorf("err = %v", err)
+	}
+	if read(t, exe+OldSuffix) != "old" {
+		t.Errorf("the old binary was lost")
+	}
+}
+
+func TestCleanupOld(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := exe + OldSuffix
+	write(t, old, "old")
+	t.Cleanup(func() { _ = os.Remove(old) })
+
+	CleanupOld()
+
+	if _, err := os.Lstat(old); !os.IsNotExist(err) {
+		t.Errorf("%s is still there: %v", old, err)
+	}
+	CleanupOld()
+}
+
+func write(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func read(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestManagedByMiseOnWindows(t *testing.T) {
+	local := filepath.Join(t.TempDir(), "AppData", "Local")
+	home := t.TempDir()
+	env := map[string]string{"LOCALAPPDATA": local}
+	getenv := func(k string) string { return env[k] }
+	if got := ManagedBy(filepath.Join(local, "mise", "installs", "github-automaat-zakwas", "1.0.0", "zakwas.exe"), home, getenv); !strings.Contains(got, "mise") {
+		t.Errorf("ManagedBy(mise install) = %q", got)
+	}
+	for _, exe := range []string{
+		filepath.Join(local, "Programs", "zakwas", "zakwas.exe"),
+		filepath.Join(local, "mise", "shims", "zakwas.exe"),
+	} {
+		if got := ManagedBy(exe, home, getenv); got != "" {
+			t.Errorf("ManagedBy(%q) = %q, want none", exe, got)
+		}
 	}
 }
 

@@ -367,21 +367,21 @@ If zakwas already manages files on this Mac from another config, init warns: `pl
 zakwas self-update [--version X.Y.Z]
 ```
 
-On Windows `self-update` exits 64 with "not supported on Windows yet": download the newer zip from the releases page or run `install.ps1` again.
-
 | Flag | Meaning |
 |---|---|
 | `--version X.Y.Z` | release to install (a leading `v` is fine); default: latest |
 
-Resolves the latest release from the `https://github.com/Automaat/zakwas/releases/latest` redirect (not the rate-limited API), downloads `zakwas_<version>_<darwin|linux>_<arm64|amd64>.tar.gz` for the running system and `checksums.txt`, verifies the SHA256, and replaces the running binary atomically (temp file in the same directory, `chmod 0755`, rename). Prints a message and does nothing when that version is already running.
+Resolves the latest release from the `https://github.com/Automaat/zakwas/releases/latest` redirect (not the rate-limited API), downloads `zakwas_<version>_<darwin|linux>_<arm64|amd64>.tar.gz` (`zakwas_<version>_windows_<arm64|amd64>.zip` on Windows) for the running system and `checksums.txt`, verifies the SHA256, and replaces the running binary atomically (temp file in the same directory, `chmod 0755`, rename). Prints a message and does nothing when that version is already running.
+
+On Windows the same checksum and attestation checks run on the zip, and zakwas extracts `zakwas.exe` from it. Windows can rename a running program but not overwrite it, so the update moves the running `zakwas.exe` to `zakwas.exe.old`, puts the new file in its place and moves the old one back if that fails. The next zakwas that starts removes `zakwas.exe.old`; a copy still running from it keeps it until that process exits, and a second update stops until then.
 
 Build provenance is checked the way `install.sh` does it (see [security.md](security.md)): when `gh` is installed, logged in (`gh auth status`) and supports `--source-ref`, self-update runs `gh attestation verify <archive> --repo Automaat/zakwas --signer-workflow Automaat/zakwas/.github/workflows/release.yml --source-ref refs/tags/v<version>` and stops (exit 1) if it fails. Without such a `gh` it prints the command to verify by hand and continues. Versions before 0.4.0 carry no attestation and skip the check.
 
-It refuses (exit 64) when a package manager owns the binary (the path after resolving symlinks):
+It refuses (exit 64) when a package manager owns the binary (the path after resolving symlinks, compared without regard to case on Windows):
 
 | Binary under | Update with |
 |---|---|
-| `$MISE_DATA_DIR/installs`, `$XDG_DATA_HOME/mise/installs`, `~/.local/share/mise/installs` | bump `"github:Automaat/zakwas"` in your mise config |
+| `$MISE_DATA_DIR/installs`, `$XDG_DATA_HOME/mise/installs`, `%LOCALAPPDATA%\mise\installs`, `~/.local/share/mise/installs` | bump `"github:Automaat/zakwas"` in your mise config |
 | `Caskroom` or `Cellar` of `$HOMEBREW_PREFIX`, `/opt/homebrew`, `/usr/local` | `brew upgrade zakwas` |
 
 `install.sh --no-apply` also updates a `~/.local/bin/zakwas` install.
@@ -460,5 +460,5 @@ Prints `zakwas <version>` (`dev` for builds outside a release).
 |---|---|---|
 | `ZAKWAS_CONFIG` | config commands | config path when no `zakwas.yaml` is found upward from the current directory; `-c` overrides both |
 | `NO_COLOR` | config commands | set to anything to disable colors ([no-color.org](https://no-color.org)) |
-| `MISE_DATA_DIR`, `XDG_DATA_HOME` | `self-update` | where mise installs live, to detect a mise-managed zakwas |
+| `MISE_DATA_DIR`, `XDG_DATA_HOME`, `LOCALAPPDATA` | `self-update` | where mise installs live, to detect a mise-managed zakwas |
 | `HOMEBREW_PREFIX` | `self-update` | extra Homebrew prefix to detect a Homebrew-managed zakwas |

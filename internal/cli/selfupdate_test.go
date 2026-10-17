@@ -16,7 +16,6 @@ import (
 )
 
 func TestSelfUpdate(t *testing.T) {
-	testutil.SkipOnWindows(t, "self-update is not supported on Windows yet; see TestSelfUpdateIsNotSupportedOnWindowsYet")
 	base := selfupdatetest.Serve(t, "1.2.3", runtime.GOARCH, "new binary")
 	tests := []struct {
 		name    string
@@ -121,7 +120,6 @@ func (g *ghFake) Run(_ context.Context, c runner.Cmd) (runner.Result, error) {
 }
 
 func TestSelfUpdateAttestation(t *testing.T) {
-	testutil.SkipOnWindows(t, "self-update is not supported on Windows yet; see TestSelfUpdateIsNotSupportedOnWindowsYet")
 	tests := []struct {
 		name     string
 		version  string
@@ -168,20 +166,85 @@ func selfUpdateAs(t *testing.T, goos string) {
 	t.Cleanup(func() { selfUpdateGOOS = saved })
 }
 
-func TestSelfUpdateIsNotSupportedOnWindowsYet(t *testing.T) {
+func TestSelfUpdateInstallsTheWindowsZip(t *testing.T) {
 	selfUpdateAs(t, "windows")
+	base := selfupdatetest.ServeFor(t, "1.2.3", "windows", runtime.GOARCH, "new binary")
+	tests := []struct {
+		name     string
+		gh       ghFake
+		want     int
+		binary   string
+		msg      string
+		verified bool
+	}{
+		{"verified", ghFake{installed: true, loggedIn: true}, ExitOK, "new binary", "Verified build provenance of zakwas_1.2.3_windows_" + runtime.GOARCH + ".zip", true},
+		{"verification fails", ghFake{installed: true, loggedIn: true, verifyExit: 1}, ExitErr, "old binary", "attestation verification failed", true},
+		{"gh missing", ghFake{}, ExitOK, "new binary", "gh release download v1.2.3 -R Automaat/zakwas -p zakwas_1.2.3_windows_" + runtime.GOARCH + ".zip", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exe := filepath.Join(t.TempDir(), "zakwas.exe")
+			if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			gh := tt.gh
+			env := Env{Home: t.TempDir(), Runner: &gh, Version: "1.0.0", Executable: exe, ReleaseURL: base}
+
+			r := invoke(env, "", "self-update")
+
+			if r.code != tt.want || !strings.Contains(r.stdout+r.stderr, tt.msg) {
+				t.Errorf("exit %d, want %d mentioning %q\nstdout: %s\nstderr: %s", r.code, tt.want, tt.msg, r.stdout, r.stderr)
+			}
+			if got := read(t, exe); got != tt.binary {
+				t.Errorf("binary = %q, want %q", got, tt.binary)
+			}
+			if tt.verified != (len(gh.verified) == 1) {
+				t.Errorf("verify calls = %q, want one: %v", gh.verified, tt.verified)
+			}
+		})
+	}
+}
+
+func TestSelfUpdateOnWindowsNeedsTheWindowsAsset(t *testing.T) {
+	selfUpdateAs(t, "windows")
+	base := selfupdatetest.ServeFor(t, "1.2.3", "linux", runtime.GOARCH, "linux binary")
 	exe := filepath.Join(t.TempDir(), "zakwas.exe")
 	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env := Env{Home: t.TempDir(), Runner: runnertest.New(), Version: "1.0.0", Executable: exe}
+	env := Env{Home: t.TempDir(), Runner: runnertest.New().Missing("gh"), Version: "1.0.0", Executable: exe, ReleaseURL: base}
 
 	r := invoke(env, "", "self-update")
 
-	if r.code != ExitUsage || !strings.Contains(r.stderr, "not supported on Windows yet") || !strings.Contains(r.stderr, "releases") {
+	if r.code != ExitErr || !strings.Contains(r.stderr, "zakwas_1.2.3_windows_"+runtime.GOARCH+".zip") {
 		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
 	}
 	if got := read(t, exe); got != "old binary" {
 		t.Errorf("binary = %q", got)
+	}
+}
+
+func TestSelfUpdateRefusesMiseOnWindows(t *testing.T) {
+	selfUpdateAs(t, "windows")
+	local, home := t.TempDir(), t.TempDir()
+	t.Setenv("LOCALAPPDATA", local)
+	t.Setenv("MISE_DATA_DIR", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	exe := filepath.Join(local, "mise", "installs", "github-automaat-zakwas", "1.0.0", "zakwas.exe")
+	if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(exe, []byte("old binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := Env{Home: home, Runner: runnertest.New(), Version: "1.0.0", Executable: exe, ReleaseURL: "http://127.0.0.1:1/unreachable"}
+
+	r := invoke(env, "", "self-update")
+
+	if r.code != ExitUsage || !strings.Contains(r.stderr, `bump "github:Automaat/zakwas" in your mise config`) {
+		t.Errorf("exit %d, stderr %q", r.code, r.stderr)
+	}
+	if got := read(t, exe); got != "old binary" {
+		t.Errorf("binary replaced: %q", got)
 	}
 }

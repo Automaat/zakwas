@@ -15,6 +15,7 @@ import (
 	"github.com/Automaat/zakwas/internal/cli"
 	"github.com/Automaat/zakwas/internal/platform"
 	"github.com/Automaat/zakwas/internal/runner"
+	"github.com/Automaat/zakwas/internal/selfupdate"
 )
 
 // version is set by the release build.
@@ -44,6 +45,9 @@ func run() int {
 		return cli.ExitErr
 	}
 	extendPath(home)
+	if runtime.GOOS == "windows" {
+		selfupdate.CleanupOld()
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "zakwas:", err)

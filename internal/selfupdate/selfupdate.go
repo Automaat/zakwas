@@ -4,6 +4,7 @@ package selfupdate
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"cmp"
@@ -14,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path"
@@ -23,6 +25,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Automaat/zakwas/internal/fsutil"
 	"github.com/Automaat/zakwas/internal/install"
 )
 
@@ -43,21 +46,26 @@ type Updater struct {
 	Client *http.Client
 }
 
-var releaseTargets = []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64"}
+var releaseTargets = []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"}
 
 func (u *Updater) base() string { return strings.TrimSuffix(cmp.Or(u.BaseURL, ReleasesURL), "/") }
 
 func (u *Updater) client() *http.Client { return cmp.Or(u.Client, http.DefaultClient) }
 
 // Asset is the release archive name for version on this machine's OS and
-// arch, the GoReleaser name_template zakwas_{version}_{os}_{arch}.tar.gz.
+// arch, the GoReleaser name_template zakwas_{version}_{os}_{arch}, with
+// .tar.gz, or .zip on Windows.
 func (u *Updater) Asset(version string) string {
 	return AssetName(version, cmp.Or(u.OS, runtime.GOOS), cmp.Or(u.Arch, runtime.GOARCH))
 }
 
 // AssetName is the release archive name for version, goos and goarch.
 func AssetName(version, goos, goarch string) string {
-	return fmt.Sprintf("zakwas_%s_%s_%s.tar.gz", version, goos, goarch)
+	ext := "tar.gz"
+	if goos == "windows" {
+		ext = "zip"
+	}
+	return fmt.Sprintf("zakwas_%s_%s_%s.%s", version, goos, goarch, ext)
 }
 
 func (u *Updater) checkTarget() error {
@@ -171,8 +179,12 @@ func checksum(sums []byte, asset string) (string, error) {
 	return "", fmt.Errorf("checksums.txt has no entry for %s", asset)
 }
 
-// Extract returns the zakwas binary from a release archive.
+// Extract returns the zakwas binary from a release archive: zakwas from a
+// tar.gz, zakwas.exe from the zip of a Windows release.
 func Extract(archive []byte) ([]byte, error) {
+	if bytes.HasPrefix(archive, []byte("PK\x03\x04")) {
+		return extractZip(archive)
+	}
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, err
@@ -192,10 +204,82 @@ func Extract(archive []byte) ([]byte, error) {
 	}
 }
 
-// Replace swaps exe for bin atomically: a temp file in the same directory,
-// renamed over it, so a failed update leaves the old binary working.
+func extractZip(archive []byte) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range zr.File {
+		if f.Mode().IsRegular() && path.Clean(strings.ReplaceAll(f.Name, `\`, "/")) == "zakwas.exe" {
+			return readZipFile(f)
+		}
+	}
+	return nil, errors.New("release archive has no zakwas binary")
+}
+
+func readZipFile(f *zip.File) ([]byte, error) {
+	if f.UncompressedSize64 > maxDownload {
+		return nil, fmt.Errorf("%s in the release archive is %d bytes, over the %d limit", f.Name, f.UncompressedSize64, maxDownload)
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(rc, maxDownload))
+	return data, errors.Join(err, rc.Close())
+}
+
+// Replace swaps exe for bin. A failed update leaves the old binary
+// working: on Unix through a temp file renamed over exe, on Windows, which
+// can't overwrite a running program but can rename it, through ReplaceRunning.
 func Replace(exe string, bin []byte) error {
+	if runtime.GOOS == "windows" {
+		return ReplaceRunning(exe, bin)
+	}
 	return install.WriteAtomic(exe, bin, 0o755)
+}
+
+// OldSuffix is appended to the name of the binary an update moved aside.
+const OldSuffix = ".old"
+
+// ReplaceRunning swaps exe for bin when exe may be running: it stages bin
+// next to exe, renames exe to exe+OldSuffix, then renames the staged file
+// into place, and moves the old binary back if that fails. The old file stays
+// until CleanupOld removes it, since Windows refuses to delete a running
+// program.
+func ReplaceRunning(exe string, bin []byte) error {
+	old, staged := exe+OldSuffix, exe+".new"
+	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("the previous update's %s is still in use; close the zakwas that runs from it and retry: %w", old, err)
+	}
+	if err := install.WriteAtomic(staged, bin, 0o755); err != nil {
+		return err
+	}
+	if err := rename(exe, old); err != nil {
+		return errors.Join(err, os.Remove(staged))
+	}
+	if err := rename(staged, exe); err != nil {
+		err = errors.Join(err, os.Remove(staged))
+		if back := rename(old, exe); back != nil {
+			err = errors.Join(err, fmt.Errorf("the old binary is at %s, move it back by hand: %w", old, back))
+		}
+		return err
+	}
+	return nil
+}
+
+// rename is fsutil.Rename, replaced in tests to fail a step.
+var rename = fsutil.Rename
+
+// CleanupOld removes the binary the last update moved aside, once nothing
+// runs from it. It is best effort: a file still in use stays for the next
+// start.
+func CleanupOld() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(exe + OldSuffix)
 }
 
 // Executable returns the running binary's path with symlinks resolved, so a
@@ -216,6 +300,9 @@ func ManagedBy(exe, home string, getenv func(string) string) string {
 		miseDirs = append(miseDirs, d)
 	}
 	if d := getenv("XDG_DATA_HOME"); d != "" {
+		miseDirs = append(miseDirs, filepath.Join(d, "mise"))
+	}
+	if d := getenv("LOCALAPPDATA"); d != "" {
 		miseDirs = append(miseDirs, filepath.Join(d, "mise"))
 	}
 	miseDirs = append(miseDirs, filepath.Join(home, ".local", "share", "mise"))
@@ -246,7 +333,15 @@ func within(path, dir string) bool {
 		dirs = append(dirs, resolved)
 	}
 	for _, d := range dirs {
-		if strings.HasPrefix(path, d+string(filepath.Separator)) {
+		prefix := d + string(filepath.Separator)
+		if runtime.GOOS == "windows" {
+			// Windows paths are case-insensitive.
+			if len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix) {
+				return true
+			}
+			continue
+		}
+		if strings.HasPrefix(path, prefix) {
 			return true
 		}
 	}
