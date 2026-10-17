@@ -127,6 +127,9 @@ Windows support is early; the agent features and the portable core run, see [age
 - `Access is denied` replacing a file: another program holds it open, such as an editor or the agent itself. zakwas retries briefly, then fails; close the program and apply again.
 - A managed file is read-only because zakwas set the read-only attribute. `protect.immutable` has no effect on Windows and `plan` says so. Clear it with `attrib -r <file>` only for a quick experiment.
 - Paths in `zakwas.yaml` keep `~/` and `/`; `~\` and `C:\...` also work. A template that writes `{{ .Home }}` into JSON gets backslashes: use `{{ .Home | printf "%q" }}` or write the path with forward slashes.
+- A destination under a OneDrive folder, or any other directory that is a reparse point but not a symlink, can be refused with "is a symlink; remove it": the parent checks treat every reparse point as a link, because Go reports junctions the same way. Unverified for OneDrive placeholders; move the destination out of the synced folder.
+- The guard's `Edit(...)` deny rule for a config repo outside your home on another drive is written as `/D:/repo`. It is not confirmed against Claude Code on Windows (it may want `//d/repo`), so that edit denial may never match; a repo under your home uses `~/` and is fine. Phase 2.
+- When a command is cancelled, zakwas kills the command and what it started (`taskkill /T`), so an npm `.cmd` shim does not keep the output pipes open.
 - Long paths: zakwas does not add the `\\?\` prefix. Turn on long path support in Windows if a state or cache path fails with a file name error.
 
 ## Where zakwas keeps its state

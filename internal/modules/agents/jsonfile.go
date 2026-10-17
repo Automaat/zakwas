@@ -225,9 +225,10 @@ func writeBytesIf(path string, out, read []byte) error {
 
 // withLineEnding converts rendered LF text to the line ending of the file it
 // replaces, so an edit on Windows doesn't turn a CRLF file into a mixed or
-// LF one. A new or LF file keeps LF.
+// LF one. A new or LF file keeps LF, and so does every file off Windows,
+// where the rewrite has always been LF.
 func withLineEnding(out, existing []byte) []byte {
-	if lineEnding(existing) != "\r\n" {
+	if hostOS != "windows" || lineEnding(existing) != "\r\n" {
 		return out
 	}
 	return bytes.ReplaceAll(bytes.ReplaceAll(out, []byte("\r\n"), []byte("\n")), []byte("\n"), []byte("\r\n"))

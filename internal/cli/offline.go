@@ -58,6 +58,9 @@ func offlineSkippedOn(goos string) []string {
 func offlineNotChecked(ran []engine.Module, goos string) []string {
 	out := offlineSkippedOn(goos)
 	for _, name := range offlineChecked {
+		if !platform.Supported(name, goos) {
+			continue
+		}
 		if !slices.ContainsFunc(ran, func(m engine.Module) bool { return m.Name() == name }) {
 			out = append(out, name)
 		}

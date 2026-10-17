@@ -59,3 +59,19 @@ func TestExecCancelKillsChildOnWindows(t *testing.T) {
 		t.Errorf("took %s; the child should be killed when the context ends", d)
 	}
 }
+
+func TestExecCancelKillsGrandchildrenOnWindows(t *testing.T) {
+	shimDir(t, map[string]string{"zakwas-fake-agent.cmd": "@echo off\r\nping -n 60 127.0.0.1\r\n"})
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := NewExec().Run(ctx, Cmd{Name: "zakwas-fake-agent"})
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want the deadline", err)
+	}
+	if d := time.Since(start); d >= 10*time.Second {
+		t.Errorf("took %s; ping, the shim's child, kept the output pipes open", d)
+	}
+}

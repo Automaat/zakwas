@@ -147,9 +147,12 @@ func TestClaudeMCPCreatesAndDropsConfig(t *testing.T) {
 	assertConverged(t, m)
 }
 
-func TestClaudeMCPEditsKeepCRLFAndLFFiles(t *testing.T) {
+func TestClaudeMCPEditsKeepCRLFAndLFFilesOnWindows(t *testing.T) {
 	for _, tt := range []struct{ name, eol string }{{"CRLF", "\r\n"}, {"LF", "\n"}} {
 		t.Run(tt.name, func(t *testing.T) {
+			saved := hostOS
+			hostOS = "windows"
+			defer func() { hostOS = saved }()
 			m := mcpModule(t, []string{config.ProviderClaude}, map[string]config.MCPServer{"a": stdioServer("a")})
 			cfg := filepath.Join(m.Paths.Home, ".claude.json")
 			existing := strings.ReplaceAll("{\n  \"numStartups\": 3\n}\n", "\n", tt.eol)
@@ -631,5 +634,40 @@ func TestClaudeMCPEntryCarriesNoToolApproval(t *testing.T) {
 	got := readFile(t, filepath.Join(m.Paths.Home, ".claude.json"))
 	if strings.Contains(got, "approval") {
 		t.Errorf("claude.json mentions an approval mode:\n%s", got)
+	}
+}
+
+func TestJSONEditsKeepCRLFOnlyOnWindows(t *testing.T) {
+	existing := "{\r\n  \"theme\": \"dark\",\r\n  \"permissions\": {\r\n    \"allow\": [\"Bash(ls)\"]\r\n  }\r\n}\r\n"
+	for _, tt := range []struct {
+		goos string
+		crlf bool
+	}{{"darwin", false}, {"linux", false}, {"windows", true}} {
+		t.Run(tt.goos, func(t *testing.T) {
+			saved := hostOS
+			hostOS = tt.goos
+			defer func() { hostOS = saved }()
+			path := filepath.Join(t.TempDir(), "settings.json")
+			writeFile(t, path, existing)
+			o, _, err := readObject(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := o.set("model", "x"); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := writeObject(path, o); err != nil {
+				t.Fatal(err)
+			}
+
+			got := readFile(t, path)
+			if has := strings.Contains(got, "\r"); has != tt.crlf {
+				t.Errorf("on %s CRLF kept = %v, want %v:\n%q", tt.goos, has, tt.crlf, got)
+			}
+			if tt.crlf && strings.Count(got, "\n") != strings.Count(got, "\r\n") {
+				t.Errorf("mixed endings: %q", got)
+			}
+		})
 	}
 }

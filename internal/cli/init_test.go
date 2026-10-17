@@ -398,3 +398,18 @@ var noSuchFile = func() string {
 	}
 	return "no such file"
 }()
+
+func TestInitPointsWindowsAtInstallPS1(t *testing.T) {
+	home := initHome(t)
+	repo := filepath.Join(t.TempDir(), "repo")
+	fake := runnertest.New().OnOK(gitInit, "")
+
+	r := invoke(Env{Home: home, Cwd: home, Runner: fake, GOOS: platform.Windows}, "", "init", repo)
+
+	if r.code != ExitOK {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+	if !strings.Contains(r.stdout, "install.ps1") || strings.Contains(r.stdout, "install.sh") || strings.Contains(r.stdout, "curl") {
+		t.Errorf("the next steps are not for Windows:\n%s", r.stdout)
+	}
+}

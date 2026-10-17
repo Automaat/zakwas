@@ -5,10 +5,20 @@ package runner
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 )
 
-func interrupt(p *os.Process) error { return p.Kill() }
+// interrupt kills the command and what it started. A Windows child can't be
+// sent SIGINT, and an npm .cmd shim runs cmd.exe, which runs node: killing
+// only the shim leaves node holding the output pipes, so Run would wait out
+// the whole WaitDelay.
+func interrupt(p *os.Process) error {
+	if err := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid)).Run(); err == nil {
+		return nil
+	}
+	return p.Kill()
+}
 
 func hasTerminal() bool { return false }
 

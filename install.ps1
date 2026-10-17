@@ -15,7 +15,8 @@ Release to install, X.Y.Z (default: the latest release).
 Where to put zakwas.exe (default: %LOCALAPPDATA%\Programs\zakwas).
 
 .PARAMETER BaseUrl
-Where releases are published. Only tests override it.
+Where releases are published. Only tests and mirrors override it. It must be
+https, or http on localhost or 127.0.0.1, and may not contain credentials.
 
 .PARAMETER AddToPath
 Add Dir to your user PATH.
@@ -53,13 +54,59 @@ function Get-LatestVersion([string]$Base) {
 }
 
 function Get-Architecture {
-    switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-        'X64' { return 'amd64' }
-        'Arm64' { return 'arm64' }
-        default { throw "zakwas has no Windows build for $_" }
+    $arch = $null
+    try {
+        $arch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    } catch {
+        $arch = $null
+    }
+    if (-not $arch) {
+        $arch = $env:PROCESSOR_ARCHITEW6432
+        if (-not $arch) {
+            $arch = $env:PROCESSOR_ARCHITECTURE
+        }
+    }
+    switch ($arch) {
+        { $_ -in 'X64', 'AMD64' } { return 'amd64' }
+        { $_ -in 'Arm64', 'ARM64' } { return 'arm64' }
+        default { throw "zakwas has no Windows build for '$arch'" }
     }
 }
 
+function Assert-BaseUrl([string]$Url) {
+    $uri = $null
+    if (-not [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri)) {
+        throw "-BaseUrl '$Url' is not an absolute URL"
+    }
+    if ($Url.Contains('@')) {
+        throw '-BaseUrl must not contain credentials'
+    }
+    $local = $uri.Host -in 'localhost', '127.0.0.1'
+    if ($uri.Scheme -eq 'http' -and -not $local) {
+        throw '-BaseUrl must be https, or http on localhost or 127.0.0.1'
+    }
+    if ($uri.Scheme -notin 'http', 'https') {
+        throw "-BaseUrl scheme '$($uri.Scheme)' is not allowed: use https"
+    }
+}
+
+function Save-Download([string]$Url, [string]$OutFile) {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile -PassThru
+    $final = $response.BaseResponse.ResponseUri
+    if (-not $final -and $response.BaseResponse.RequestMessage) {
+        $final = $response.BaseResponse.RequestMessage.RequestUri
+    }
+    if ($Url.StartsWith('https:') -and $final -and $final.Scheme -ne 'https') {
+        Remove-Item -Force -Path $OutFile -ErrorAction SilentlyContinue
+        throw "$Url redirected to $final, which is not https"
+    }
+}
+
+function Get-PathEntries([string]$Path) {
+    return @($Path -split ';' | ForEach-Object { $_.Trim().TrimEnd('\') } | Where-Object { $_ })
+}
+
+Assert-BaseUrl $BaseUrl
 $Base = $BaseUrl.TrimEnd('/')
 if ($Version -eq 'latest') {
     $Version = Get-LatestVersion $Base
@@ -75,8 +122,8 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
     Write-Step "Downloading $asset"
     $release = "$Base/download/v$Version"
-    Invoke-WebRequest -UseBasicParsing -Uri "$release/checksums.txt" -OutFile (Join-Path $tmp 'checksums.txt')
-    Invoke-WebRequest -UseBasicParsing -Uri "$release/$asset" -OutFile (Join-Path $tmp $asset)
+    Save-Download "$release/checksums.txt" (Join-Path $tmp 'checksums.txt')
+    Save-Download "$release/$asset" (Join-Path $tmp $asset)
 
     $line = Get-Content (Join-Path $tmp 'checksums.txt') | Where-Object { $_ -match "^[0-9a-fA-F]{64}\s+\*?$([regex]::Escape($asset))$" } | Select-Object -First 1
     if (-not $line) {
@@ -91,18 +138,38 @@ try {
     Expand-Archive -Path (Join-Path $tmp $asset) -DestinationPath (Join-Path $tmp 'out')
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
     $target = Join-Path $Dir 'zakwas.exe'
-    Copy-Item -Force -Path (Join-Path $tmp 'out\zakwas.exe') -Destination $target
+    $staged = Join-Path $Dir ("zakwas.exe.new-" + [Guid]::NewGuid().ToString('N'))
+    try {
+        Copy-Item -Force -Path (Join-Path $tmp 'out\zakwas.exe') -Destination $staged
+        Move-Item -Force -Path $staged -Destination $target
+    } catch {
+        throw "can't replace $target (is zakwas running? close it and run the installer again): $($_.Exception.Message)"
+    } finally {
+        Remove-Item -Force -Path $staged -ErrorAction SilentlyContinue
+    }
     Write-Step "Installed zakwas $Version to $target"
 } finally {
     Remove-Item -Recurse -Force -Path $tmp -ErrorAction SilentlyContinue
 }
 
-$onPath = ($env:Path -split ';') -contains $Dir
+$wanted = $Dir.Trim().TrimEnd('\')
+$onPath = (Get-PathEntries $env:Path) -contains $wanted
 if ($AddToPath) {
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (($userPath -split ';') -notcontains $Dir) {
-        [Environment]::SetEnvironmentVariable('Path', (($userPath, $Dir) -join ';').Trim(';'), 'User')
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+        if ($key.GetValueNames() -contains 'Path') {
+            $kind = $key.GetValueKind('Path')
+        }
+        $entries = @($raw -split ';' | Where-Object { $_.Trim() })
+        if (-not ((Get-PathEntries $raw) -contains $wanted)) {
+            $key.SetValue('Path', (($entries + $Dir) -join ';'), $kind)
+        }
+    } finally {
+        $key.Close()
     }
+    [Environment]::SetEnvironmentVariable('ZAKWAS_PATH_REFRESH', $null, 'User')
     Write-Step 'Added the install directory to your user PATH; open a new terminal to use zakwas'
 } elseif (-not $onPath) {
     Write-Step "Add $Dir to your PATH, or run the installer again with -AddToPath"

@@ -105,8 +105,10 @@ Windows runs the agent features and the portable core: `agents` (plugins, market
 
 ```powershell
 irm https://raw.githubusercontent.com/Automaat/zakwas/main/install.ps1 -OutFile install.ps1
-.\install.ps1 -AddToPath
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -AddToPath
 ```
+
+Windows PowerShell 5.1 blocks scripts by default (`Restricted`), so the command above lifts the policy for that one process only and changes nothing on the machine. PowerShell 7 runs `.\install.ps1 -AddToPath` directly.
 
 `install.ps1` checks the release zip against `checksums.txt` and installs `zakwas.exe` to `%LOCALAPPDATA%\Programs\zakwas`. You can also unzip a `zakwas_X.Y.Z_windows_<arch>.zip` from the [releases](https://github.com/Automaat/zakwas/releases) yourself.
 

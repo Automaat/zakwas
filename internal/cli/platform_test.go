@@ -200,6 +200,7 @@ func TestAdvertisedSurfaceFollowsThePlatform(t *testing.T) {
 	}{
 		{platform.Darwin, true, 7},
 		{platform.Linux, false, 5},
+		{platform.Windows, false, 5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.goos, func(t *testing.T) {
@@ -308,5 +309,30 @@ func TestWindowsPlansTheAgentAndFileModules(t *testing.T) {
 
 	if r.code != ExitOK || !strings.Contains(r.stdout, "+ ~/.zshrc") {
 		t.Errorf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+}
+
+func TestOfflineNotCheckedSkipsWhatThePlatformDoesNotHave(t *testing.T) {
+	tests := []struct {
+		goos string
+		want []string
+	}{
+		{platform.Darwin, []string{"system", "brew", "mise", "agents", "commands", "launchd", "defaults"}},
+		{platform.Linux, []string{"system", "agents", "commands"}},
+		{platform.Windows, []string{"agents"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			var ran []engine.Module
+			cfg := &config.Config{Root: t.TempDir()}
+			for _, m := range Modules(cfg, Env{Home: t.TempDir(), Runner: runnertest.New(), GOOS: tt.goos}) {
+				if slices.Contains(offlineChecked, m.Name()) {
+					ran = append(ran, m)
+				}
+			}
+			if got := offlineNotChecked(ran, tt.goos); !slices.Equal(got, tt.want) {
+				t.Errorf("not checked on %s = %v, want %v", tt.goos, got, tt.want)
+			}
+		})
 	}
 }
