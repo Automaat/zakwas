@@ -95,10 +95,11 @@ func TestPowerShellExitCodes(t *testing.T) {
 }
 
 func TestPowerShellKeepsLeadingUsingStatements(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("ZK_USING_DIR", dir)
 	script := "# a note\nusing namespace System.Text\n\n[StringBuilder]::new() | Out-Null\nNew-Item -ItemType File -Path (Join-Path $env:ZK_USING_DIR ok) | Out-Null"
 	eachPowerShell(t, func(t *testing.T, shell string) {
+		dir := t.TempDir()
+		t.Setenv("ZK_USING_DIR", dir)
+
 		res := runPowerShell(t, shell, script)
 
 		if res.ExitCode != 0 {
