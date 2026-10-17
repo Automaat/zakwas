@@ -102,7 +102,7 @@ function Save-Download([string]$Url, [string]$OutFile) {
     }
 }
 
-function Get-PathEntries([string]$Path) {
+function Get-PathEntry([string]$Path) {
     return @($Path -split ';' | ForEach-Object { $_.Trim().TrimEnd('\') } | Where-Object { $_ })
 }
 
@@ -153,7 +153,7 @@ try {
 }
 
 $wanted = $Dir.Trim().TrimEnd('\')
-$onPath = (Get-PathEntries $env:Path) -contains $wanted
+$onPath = (Get-PathEntry $env:Path) -contains $wanted
 if ($AddToPath) {
     $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
     try {
@@ -163,7 +163,7 @@ if ($AddToPath) {
             $kind = $key.GetValueKind('Path')
         }
         $entries = @($raw -split ';' | Where-Object { $_.Trim() })
-        if (-not ((Get-PathEntries $raw) -contains $wanted)) {
+        if (-not ((Get-PathEntry $raw) -contains $wanted)) {
             $key.SetValue('Path', (($entries + $Dir) -join ';'), $kind)
         }
     } finally {
