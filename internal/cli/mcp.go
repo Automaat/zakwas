@@ -163,12 +163,12 @@ func (t *mcpTools) tools() []mcp.Tool {
 		{
 			Name: "zakwas_capture", Title: "Scan for undeclared agent changes", ReadOnly: true,
 			Description: "What the managed agents have that zakwas.yaml doesn't declare: plugins, marketplaces and MCP servers added in the agents, Claude allow rules and Codex approvals. " +
-				"Returns the findings, the ones that can't be declared with the reason, and in \"ops\" the proposal operations that declare the rest, each valid for zakwas_propose. Changes nothing.",
+				"Returns the findings, the ones that can't be declared with the reason, and in \"ops\" the proposal operations that declare the rest, each valid for zakwas_propose; pass them together as {\"ops\": [...]}. Changes nothing.",
 			Handler: t.capture,
 		},
 		{
-			Name: "zakwas_propose", Title: "Propose a config change", Schema: proposeSchema(t.env.goos()),
-			Description: "Saves a change to the config repo as a proposal, with its diff, plan and risk tier, and changes nothing else. Operations: " +
+			Name: "zakwas_propose", Title: "Propose a config change", Schema: proposalRequestSchema(t.env.goos()),
+			Description: "Saves a change to the config repo as a proposal, with its diff, plan and risk tier, and changes nothing else. Pass one operation or {\"ops\": [operation, ...]} for one combined proposal. Operations: " +
 				strings.Join(proposal.KindsFor(t.env.goos()), ", ") + ". Returns the proposal and what to do next.",
 			Handler: t.propose,
 		},
@@ -192,6 +192,18 @@ func (t *mcpTools) tools() []mcp.Tool {
 		})
 	}
 	return tools
+}
+
+func proposalRequestSchema(goos string) map[string]any {
+	single := proposeSchema(goos)
+	props := maps.Clone(single["properties"].(map[string]any))
+	props["ops"] = map[string]any{
+		"type": "array", "minItems": 1, "items": single,
+		"description": "Ordered operations saved and approved as one proposal. Do not combine with single-operation fields.",
+	}
+	schema := objectSchema(props)
+	schema["oneOf"] = []any{map[string]any{"required": []string{"kind"}}, map[string]any{"required": []string{"ops"}}}
+	return schema
 }
 
 func proposeSchema(goos string) map[string]any {
@@ -342,18 +354,35 @@ func (t *mcpTools) next(p *proposal.Proposal) string {
 }
 
 func (t *mcpTools) propose(ctx context.Context, c *mcp.Call) (mcp.Result, error) {
-	var op proposal.Op
-	if err := c.Decode(&op); err != nil {
+	var fields map[string]json.RawMessage
+	if err := c.Decode(&fields); err != nil {
 		return mcp.Result{}, err
 	}
-	if err := op.Validate(); err != nil {
+	var ops []proposal.Op
+	if data, batch := fields["ops"]; batch {
+		if len(fields) != 1 {
+			return mcp.Result{}, errors.New("ops cannot be combined with single-operation fields")
+		}
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&ops); err != nil {
+			return mcp.Result{}, fmt.Errorf("ops must be an array of operations: %w", err)
+		}
+	} else {
+		var op proposal.Op
+		if err := c.Decode(&op); err != nil {
+			return mcp.Result{}, err
+		}
+		ops = []proposal.Op{op}
+	}
+	if err := proposal.ValidateOps(ops); err != nil {
 		return mcp.Result{}, err
 	}
 	cfg, err := t.load()
 	if err != nil {
 		return mcp.Result{}, err
 	}
-	p, _, err := saveProposal(ctx, t.env, cfg, op)
+	p, _, err := saveProposal(ctx, t.env, cfg, ops...)
 	if err != nil {
 		return mcp.Result{}, err
 	}

@@ -17,10 +17,10 @@ zakwas converges this machine (macOS or Linux) to a `zakwas.yaml` in a config re
 ## Propose a change
 
 1. Read the current state: `zakwas_config` and `zakwas_plan`, or `zakwas plan` in a shell. Skip an operation the config already covers.
-2. Save the proposal. Prefer the MCP tool `zakwas_propose`; without the zakwas MCP server, run `zakwas propose -json OPERATION ...` in a shell. Proposing changes nothing on disk except the saved proposal.
+2. Save related changes as one proposal: call `zakwas_propose` with `{"ops": [operation, ...]}`, or run `zakwas propose -json batch operations.json` (a JSON array; `-` reads stdin). Each target may be edited only once; order a new marketplace before its plugins. The whole batch gets one diff, plan and risk tier, and any high-risk operation requires terminal approval. Single changes retain their existing form. Prefer the MCP tool `zakwas_propose`; without the zakwas MCP server, run `zakwas propose -json OPERATION ...` in a shell. Proposing changes nothing on disk except the saved proposal.
 3. Report the proposal's `id`, `tier`, `summary` and `reasons` to the user, then follow the tier below.
 4. Remove a proposal the user no longer wants with `zakwas_discard`, or `zakwas proposals` to list them.
-5. To record what the user installed or approved in an agent by hand, call `zakwas_capture` (or `zakwas capture` in a shell) and pass the `ops` it returns to `zakwas_propose` one by one; the user can also run `zakwas capture --write` for one proposal. Never copy a value the scan skipped as a credential.
+5. To record what the user installed or approved in an agent by hand, call `zakwas_capture` (or `zakwas capture` in a shell) and pass the `ops` it returns as `{"ops": [...]}` to `zakwas_propose` for one proposal; the user can also run `zakwas capture --write` for one proposal. Never copy a value the scan skipped as a credential.
 6. Say "proposed", not "installed", until the user has applied it. Confirm afterwards with `zakwas_check`.
 
 | Operation | MCP `kind` | Shell |

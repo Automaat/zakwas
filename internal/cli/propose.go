@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,6 +29,7 @@ Nothing is edited: review it with 'zakwas proposals' and apply it with
 'zakwas approve ID' in a terminal.
 
 Operations:
+  batch FILE (JSON array of operations; - reads stdin)
   add-marketplace NAME SOURCE [--providers claude,codex]
   add-plugin NAME@MARKETPLACE [--providers claude,codex]
   add-permission allow|review|deny COMMAND... [--providers ...] [--justification TEXT]
@@ -266,13 +268,59 @@ func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string, goos string) 
 	return op, op.Validate()
 }
 
+func proposalOps(fs *flag.FlagSet, o *proposeOptions, pos []string, env Env) ([]proposal.Op, error) {
+	if len(pos) == 0 || pos[0] != "batch" {
+		op, err := opFromArgs(fs, o, pos, env.goos())
+		return []proposal.Op{op}, err
+	}
+	if len(pos) != 2 {
+		return nil, errors.New("usage: zakwas propose batch FILE (JSON array; - reads stdin)")
+	}
+	var stray []string
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name != "c" && f.Name != "json" {
+			stray = append(stray, "-"+f.Name)
+		}
+	})
+	if len(stray) > 0 {
+		return nil, fmt.Errorf("batch doesn't take %s; set operation fields in the JSON array", strings.Join(stray, ", "))
+	}
+	input := env.Stdin
+	if pos[1] != "-" {
+		f, err := os.Open(absFromCwd(env, pos[1]))
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = f.Close() }()
+		input = f
+	}
+	var ops []proposal.Op
+	dec := json.NewDecoder(input)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&ops); err != nil {
+		return nil, fmt.Errorf("batch must be a JSON array of operations: %w", err)
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, errors.New("batch must contain exactly one JSON array")
+	}
+	if err := proposal.ValidateOps(ops); err != nil {
+		return nil, err
+	}
+	for _, op := range ops {
+		if err := proposal.KindError(op.Kind, env.goos()); err != nil {
+			return nil, err
+		}
+	}
+	return ops, nil
+}
+
 func runPropose(ctx context.Context, env Env, args []string, out, errOut *console) int {
 	fs, o := newProposeFlags(errOut)
 	pos, code, ok := parseSub(fs, out, args)
 	if !ok {
 		return code
 	}
-	op, err := opFromArgs(fs, o, pos, env.goos())
+	ops, err := proposalOps(fs, o, pos, env)
 	if err != nil {
 		if errors.Is(err, errUsage) {
 			fs.Usage()
@@ -286,7 +334,7 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 		errOut.fail(err)
 		return ExitErr
 	}
-	p, ev, err := saveProposal(ctx, env, cfg, op)
+	p, ev, err := saveProposal(ctx, env, cfg, ops...)
 	if err != nil {
 		errOut.fail(err)
 		return ExitErr
