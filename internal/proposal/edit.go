@@ -48,14 +48,11 @@ type editor struct {
 // Apply runs the operations against the config repo's files in memory. The
 // edited zakwas.yaml must still validate; an edit that doesn't is rejected.
 func Apply(ops []Op, cfg *config.Config, home string) (*Result, error) {
-	if len(ops) == 0 {
-		return nil, errors.New("no operations")
+	if err := ValidateOps(ops); err != nil {
+		return nil, err
 	}
 	e := &editor{cfg: cfg, home: home, files: map[string]*Edit{}, markets: map[string]bool{}}
 	for i, op := range ops {
-		if err := op.Validate(); err != nil {
-			return nil, fmt.Errorf("%s: %w", op.Summary(), err)
-		}
 		if err := e.apply(op); err != nil {
 			return nil, fmt.Errorf("operation %d (%s): %w", i+1, op.Summary(), err)
 		}

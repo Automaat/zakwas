@@ -170,6 +170,18 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 
 `--providers`, `--arg` and `--env-var` take a comma list or repeat. Also `-c PATH` and `-json`, which prints the proposal as JSON. Flags go before `--`; any command word that starts with a dash goes after it: `zakwas propose -json add-permission allow -- ls -la`.
 
+For several changes, use `zakwas propose batch operations.json` (or `zakwas propose batch -` to read stdin). The input is a non-empty JSON array of the same operation fields used by MCP:
+
+```json
+[
+  {"kind": "add-brew", "name": "iterm2", "cask": true},
+  {"kind": "add-brew", "name": "jq"},
+  {"kind": "add-brew", "name": "ripgrep"}
+]
+```
+
+A batch returns one proposal ID with a combined diff, plan and risk tier. One `zakwas approve ID` reviews, applies and commits the entire batch. Operations run in order in memory, so a marketplace can precede its plugins. Empty, invalid or conflicting batches save nothing; each target can be edited only once (including a mise tool or the same permission list and command). A cask or any other high-risk operation makes the whole proposal high risk. Configuration changes after creation still make the proposal stale. Only `-c` and `-json` apply to the batch command; set each operation's fields in the JSON.
+
 Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared (one declared by an earlier operation of the same proposal counts), a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
 
 **Risk tier.** `low` or `high`, from the operations and the plan of the modules they affect (a permission or MCP edit also plans `templates`, a mise pin `files`):
@@ -265,7 +277,7 @@ Pass `-c` (or set `ZAKWAS_CONFIG` in the agent's environment): an agent starts t
 | `zakwas_plan` | the plan as JSON, like `zakwas plan --json`; arguments `only` (modules) and `diff` |
 | `zakwas_check` | the same, with `drift: true` when anything would change |
 | `zakwas_capture` | what the agents have that `zakwas.yaml` doesn't declare, like [`capture`](#capture): `findings`, `skipped` with the reason, and in `ops` the operations that declare the rest, each valid for `zakwas_propose`. Changes nothing |
-| `zakwas_propose` | saves a proposal like [`propose`](#propose); arguments are the operation's fields (`kind`, `name`, `decision`, `command`, `version`, `cask`, `providers`, `justification`, `server`). Returns the proposal and what to do next |
+| `zakwas_propose` | saves a proposal like [`propose`](#propose); arguments are either `{"ops": [operation, ...]}` for one combined proposal or the single operation's fields (`kind`, `name`, `decision`, `command`, `version`, `cask`, `providers`, `justification`, `server`). Returns the proposal and what to do next |
 | `zakwas_proposals` | pending proposals of this config |
 | `zakwas_discard` | deletes a pending proposal of this config |
 | `zakwas_apply` | only with `--enable-apply`: applies a low-risk proposal after you confirm it in the agent |
