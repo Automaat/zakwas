@@ -23,9 +23,19 @@ zakwas check --only agents
 stdout 'up to date: agents'
 
 zakwas upgrade -y --only agents
+stderr 'Refresh codex: codex plugin marketplace upgrade sai --json: started'
+stderr 'Plan codex: codex plugin list --available --json: done'
+stderr 'Upgrade refresh and planning timings \(slowest first\):'
+! stderr '\x1b'
 grep '^codex plugin marketplace upgrade codexonly --json$' calls
 grep '^codex plugin marketplace upgrade sai --json$' calls
 grep '^claude plugin marketplace update codexless --json$' calls
+rm calls
+
+zakwas upgrade -y --only agents --json
+stdout '"type":"plan"'
+! stdout 'Refresh codex'
+! stderr 'Upgrade refresh and planning timings'
 rm calls
 
 cp zakwas-prune.yaml zakwas.yaml

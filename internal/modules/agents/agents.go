@@ -220,7 +220,7 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		if d.skip(p) {
 			continue
 		}
-		c, err := b.plan(ctx, d)
+		c, err := b.plan(runner.WithOperation(ctx, p), d)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -262,9 +262,9 @@ func (m *Module) Refresh(ctx context.Context) error {
 		if len(d.sources) == 0 || d.skip(p) {
 			continue
 		}
-		errs = append(errs, b.refresh(ctx, d))
+		errs = append(errs, b.refresh(runner.WithOperation(ctx, p), d))
 	}
-	errs = append(errs, m.refreshSkills(ctx))
+	errs = append(errs, m.refreshSkills(runner.WithOperation(ctx, "skills")))
 	return errors.Join(errs...)
 }
 

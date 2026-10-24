@@ -70,6 +70,8 @@ With an `agents` section, `apply` and `upgrade` refuse to run from a coding-agen
 
 ### upgrade
 
+Before each external refresh or planning command, upgrade prints its phase, provider and operation to stderr. Long operations report elapsed time every five seconds; completion, failure and cancellation include the duration. A timing summary lists completed operations from slowest to fastest before the plan is shown. Redirected progress uses plain lines without animation. `--json` keeps the existing machine output and omits these human progress lines. Approval and apply work as before.
+
 Refreshes package and plugin sources, then runs `apply`, so new versions get picked up: `brew update` when the `brew` module runs, and, when the `agents` module runs, `claude plugin marketplace update` for every declared Claude marketplace and `codex plugin marketplace upgrade` for every declared Git marketplace in Codex that is already configured, `copilot plugin marketplace update` for every declared marketplace already added to Copilot CLI (and, with `agents.upgrade`, `copilot plugin update` for its declared plugins, since Copilot lists no versions), and `git fetch` for every opencode Git marketplace and every [skill](config.md#skills) Git source zakwas already fetched. Codex moves installed plugins to the upgraded marketplace's versions itself. Needs a `brew` or `agents` section. Every other command runs brew with `HOMEBREW_NO_AUTO_UPDATE=1` and never refreshes marketplaces; `apply` only clones an opencode Git marketplace or a skill Git source that isn't fetched yet.
 
 ### check

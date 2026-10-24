@@ -47,6 +47,7 @@ func gitClone(ctx context.Context, r runner.Runner, cacheDir, name, src string) 
 // git is pinned to the clone's own .git, so it can never walk up into an
 // enclosing repo such as a dotfiles $HOME.
 func gitPull(ctx context.Context, r runner.Runner, dir, src string) error {
+	ctx = runner.WithOperation(ctx, "source "+filepath.Base(dir))
 	_, ref := gitSource(src)
 	if ref == "" {
 		ref = "HEAD"

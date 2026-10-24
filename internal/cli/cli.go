@@ -220,6 +220,11 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		saved = &doc
 		o.only = strings.Join(doc.Only, ",")
 	}
+	var operations *operationProgress
+	if cmd == "upgrade" && !o.asJSON {
+		operations = &operationProgress{out: errOut, interval: 5 * time.Second}
+		env.Runner = &operationRunner{Runner: env.Runner, progress: operations}
+	}
 	mods, err := selectModules(Modules(cfg, env), o.only, env.goos())
 	if err == nil && o.offline {
 		mods, err = offlineModules(mods, o.only != "")
@@ -242,13 +247,15 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 
 	if cmd == "upgrade" {
-		if code, ok := refresh(ctx, env, cfg, mods, errOut); !ok {
+		if code, ok := refresh(withOperationPhase(ctx, "Refresh"), env, cfg, mods, errOut); !ok {
+			operations.summary()
 			return code
 		}
 	}
 
 	style := engine.Style{Color: env.Color && !o.noColor && !o.asJSON, ShowDiffs: o.diff}
-	plan := engine.Build(ctx, mods)
+	plan := engine.Build(withOperationPhase(ctx, "Plan"), mods)
+	operations.summary()
 	planErr := plan.Err()
 	var onlyList []string
 	if o.only != "" {
