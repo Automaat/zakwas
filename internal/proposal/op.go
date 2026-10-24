@@ -68,6 +68,32 @@ type Op struct {
 	Server        *Server  `json:"server,omitempty"`
 }
 
+// ValidateOps rejects empty batches, invalid operations and repeated targets.
+// A target may be edited only once so order cannot hide an earlier decision.
+func ValidateOps(ops []Op) error {
+	if len(ops) == 0 {
+		return errors.New("no operations")
+	}
+	seen := map[string]int{}
+	for i, op := range ops {
+		if err := op.Validate(); err != nil {
+			return fmt.Errorf("operation %d: %w", i+1, err)
+		}
+		key := op.Kind + ":" + op.Name
+		switch op.Kind {
+		case AddBrew:
+			key = fmt.Sprintf("%s:%t", key, op.Cask)
+		case AddPermission, RemovePermission:
+			key = "permission:" + op.Decision + ":" + normalize(op.Command)
+		}
+		if previous, ok := seen[key]; ok {
+			return fmt.Errorf("operation %d (%s) conflicts with operation %d: target is edited more than once", i+1, op.Summary(), previous)
+		}
+		seen[key] = i + 1
+	}
+	return nil
+}
+
 // Server is the MCP server an add-mcp operation declares.
 type Server struct {
 	Command        string   `json:"command,omitempty"`
