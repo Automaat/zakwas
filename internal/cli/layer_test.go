@@ -474,9 +474,18 @@ func TestRunningFromALayerCheckoutIsRefused(t *testing.T) {
 	if !exists(filepath.Join(home, ".zshrc")) || !exists(filepath.Join(home, ".work")) {
 		t.Error("a refused run removed files")
 	}
-	list := invoke(Env{Home: home, Cwd: work, Runner: env.Runner, GOOS: env.GOOS}, "", "layer", "list")
-	if list.code != ExitOK {
-		t.Errorf("layer list from a layer checkout: exit %d\n%s", list.code, list.stderr)
+	nested := layerRepo(t, "~/.nested", "nested\n")
+	inLayer := env
+	inLayer.Cwd = work
+	before, _ := os.ReadFile(layers.Path(home))
+	for _, args := range [][]string{{"layer", "add", "nested", nested}, {"layer", "remove", "work"}, {"layer", "list"}} {
+		r := invoke(inLayer, "", args...)
+		if r.code != ExitErr || !strings.Contains(r.stderr, `is layer "work" of `) {
+			t.Errorf("%v from a layer checkout: exit %d\nstdout: %s\nstderr: %s", args, r.code, r.stdout, r.stderr)
+		}
+	}
+	if after, _ := os.ReadFile(layers.Path(home)); string(after) != string(before) {
+		t.Errorf("a refused layer command changed the registry:\n%s", after)
 	}
 }
 

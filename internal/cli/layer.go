@@ -65,6 +65,10 @@ func runLayer(ctx context.Context, env Env, args []string, out, errOut *console)
 		errOut.fail(err)
 		return ExitErr
 	}
+	if _, err := registeredLayers(cfg.Path, env.Home); err != nil {
+		errOut.fail(err)
+		return ExitErr
+	}
 	if sub == "list" {
 		return listLayers(env, cfg, out, errOut)
 	}
