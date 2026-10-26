@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/platform"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 func writeLayer(t *testing.T, name, body string) Layer {
@@ -37,8 +38,9 @@ commands: [{name: root-cmd, check: "true", run: "true"}]
 launchd:
   - {label: com.example.root, program: [/bin/true], schedule: {every: 1h}}
 `)
+	absSrc := testutil.Abs("/abs/src")
 	first := writeLayer(t, "first", `
-files: [{src: f, dst: ~/.first}, {src: /abs/src, dst: ~/.abs}]
+files: [{src: f, dst: ~/.first}, {src: '`+absSrc+`', dst: ~/.abs}]
 links: [{src: fl, dst: ~/.firstl}]
 templates:
   vars: {editor: vim}
@@ -75,7 +77,7 @@ commands: [{name: second-cmd, check: "true", run: "true"}]
 	if got := c.Files[1].Src; got != filepath.Join(filepath.Dir(first.Path), "f") {
 		t.Errorf("a layer's relative src = %q, want it under the layer's directory", got)
 	}
-	if got := c.Files[2].Src; got != "/abs/src" {
+	if got := c.Files[2].Src; got != absSrc {
 		t.Errorf("an absolute src = %q, want it untouched", got)
 	}
 	if got := c.Files[0].Src; got != "a" {
