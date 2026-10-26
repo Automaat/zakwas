@@ -185,7 +185,9 @@ func layerFile(env Env, path string) (string, error) {
 }
 
 // registeredLayers lists the layers registered for the root of the config at
-// path, none for a root that has none.
+// path, none for a root that has none. A file that is itself registered as a
+// layer of another root is refused: loaded alone it would plan the removal of
+// everything the main config installed.
 func registeredLayers(path, home string) ([]config.Layer, error) {
 	root, err := config.RootOf(path)
 	if err != nil {
@@ -195,5 +197,14 @@ func registeredLayers(path, home string) ([]config.Layer, error) {
 	if err != nil {
 		return nil, err
 	}
+	if main, layer, ok := reg.LayerOf(path); ok && !samePath(main, root) {
+		return nil, fmt.Errorf("%s is layer %q of %s: run zakwas there, or pass -c %s", path, layer.Name, filepath.Join(main, config.FileName), filepath.Join(main, config.FileName))
+	}
 	return reg.For(root), nil
+}
+
+func samePath(a, b string) bool {
+	x, errA := os.Stat(a)
+	y, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(x, y)
 }

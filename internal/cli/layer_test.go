@@ -456,3 +456,54 @@ func TestProposalWithAMissingLayerFails(t *testing.T) {
 		t.Errorf("exit %d\nstderr: %s", r.code, r.stderr)
 	}
 }
+
+func TestRunningFromALayerCheckoutIsRefused(t *testing.T) {
+	env, home := setup(t, filesOnly)
+	work := layerRepo(t, "~/.work", "work\n")
+	mustOK(t, env, "layer", "add", "work", work)
+	mustOK(t, env, "apply", "-y")
+
+	for _, args := range [][]string{{"plan"}, {"check"}, {"apply", "-y"}, {"propose", "add-permission", "deny", "rm"}} {
+		inLayer := env
+		inLayer.Cwd = work
+		r := invoke(inLayer, "", args...)
+		if r.code != ExitErr || !strings.Contains(r.stderr, `is layer "work" of `) || !strings.Contains(r.stderr, filepath.Join(env.Cwd, "zakwas.yaml")) {
+			t.Errorf("%v: exit %d\nstdout: %s\nstderr: %s", args, r.code, r.stdout, r.stderr)
+		}
+	}
+	if !exists(filepath.Join(home, ".zshrc")) || !exists(filepath.Join(home, ".work")) {
+		t.Error("a refused run removed files")
+	}
+	list := invoke(Env{Home: home, Cwd: work, Runner: env.Runner, GOOS: env.GOOS}, "", "layer", "list")
+	if list.code != ExitOK {
+		t.Errorf("layer list from a layer checkout: exit %d\n%s", list.code, list.stderr)
+	}
+}
+
+func TestApplyRefusesLayersChangedWhileWaitingForTheLock(t *testing.T) {
+	env, home := setup(t, filesOnly)
+	cfg, err := loadConfig("", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layersUnchanged(cfg, env); err != nil {
+		t.Fatal(err)
+	}
+	mustOK(t, env, "layer", "add", "work", layerRepo(t, "~/.work", "work\n"))
+
+	err = layersUnchanged(cfg, env)
+
+	if err == nil || !strings.Contains(err.Error(), "registered layers changed") {
+		t.Errorf("err = %v", err)
+	}
+	reloaded, err := loadConfig("", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layersUnchanged(reloaded, env); err != nil {
+		t.Errorf("after a reload: %v", err)
+	}
+	if exists(filepath.Join(home, ".work")) {
+		t.Error("the check applied something")
+	}
+}

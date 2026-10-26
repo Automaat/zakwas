@@ -91,3 +91,37 @@ func TestLoadRejects(t *testing.T) {
 		})
 	}
 }
+
+func TestForFindsTheRootUnderAnotherSpelling(t *testing.T) {
+	dir := t.TempDir()
+	alias := filepath.Join(filepath.Dir(dir), strings.ToUpper(filepath.Base(dir)))
+	if _, err := os.Stat(alias); err != nil || alias == dir {
+		t.Skip("the file system is case sensitive")
+	}
+	r := &Registry{Roots: map[string][]config.Layer{dir: {{Name: "a", Path: "/a"}}}}
+
+	if got := r.For(alias); len(got) != 1 {
+		t.Errorf("layers under the other spelling = %v, want the registered one", got)
+	}
+	r.Set(alias, []config.Layer{{Name: "b", Path: "/b"}})
+	if len(r.Roots) != 1 || r.Roots[dir][0].Name != "b" {
+		t.Errorf("Set under the other spelling made a second key: %v", r.Roots)
+	}
+}
+
+func TestLayerOfFindsTheMainRoot(t *testing.T) {
+	main, dir := t.TempDir(), t.TempDir()
+	file := filepath.Join(dir, "zakwas.yaml")
+	if err := os.WriteFile(file, []byte("files: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &Registry{Roots: map[string][]config.Layer{main: {{Name: "work", Path: file}}}}
+
+	root, layer, ok := r.LayerOf(file)
+	if !ok || root != main || layer.Name != "work" {
+		t.Errorf("LayerOf = %q, %v, %v", root, layer, ok)
+	}
+	if _, _, ok := r.LayerOf(filepath.Join(main, "zakwas.yaml")); ok {
+		t.Error("a file that is no layer was reported as one")
+	}
+}

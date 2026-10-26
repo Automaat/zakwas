@@ -918,9 +918,9 @@ zakwas layer add work ~/work/dotfiles/zakwas.yaml
 zakwas plan
 ```
 
-The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
+The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. Running `plan`, `check` or `apply` from a layer's own checkout (or with `-c` on its file) is refused with a line naming the main config, since loaded alone it would plan the removal of everything the main config installed. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
 
-A layer is an ordinary `zakwas.yaml`. Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
+A layer is an ordinary `zakwas.yaml`; `protect`, `brew`, `mise` and `agents` are refused when the key is present, even empty. Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
 
 ```yaml
 files:

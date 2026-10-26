@@ -136,6 +136,9 @@ func TestParseLayeredRejects(t *testing.T) {
 		want   []string
 	}{
 		{"protect is root-only", []string{"protect: {immutable: true}\n"}, []string{`layer "l0" is invalid`, "zakwas layer remove l0", "protect is set in a layer"}},
+		{"an empty protect is still set", []string{"protect: {immutable: false}\n"}, []string{"protect is set in a layer"}},
+		{"a bare agents key is still set", []string{"agents:\nfiles: [{src: x, dst: ~/.x}]\n"}, []string{"agents is set in a layer"}},
+		{"an empty brew is still set", []string{"brew:\n"}, []string{"brew is set in a layer"}},
 		{"brew is root-only", []string{"brew: {file: Brewfile}\n"}, []string{"brew is set in a layer"}},
 		{"mise is root-only", []string{"mise: {config: m.toml}\n"}, []string{"mise is set in a layer"}},
 		{"agents is root-only", []string{"agents: {}\n"}, []string{"agents is set in a layer"}},

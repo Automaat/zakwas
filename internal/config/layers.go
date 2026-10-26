@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // Layer is a local layer registered on this machine: an extra zakwas.yaml
@@ -237,7 +239,7 @@ func loadLayer(l Layer, home, goos string) (*Config, error) {
 	if err != nil {
 		return nil, &LayerError{Layer: l, Err: err}
 	}
-	if errs := lc.rootOnly(); len(errs) > 0 {
+	if errs := rootOnly(data); len(errs) > 0 {
 		return nil, &LayerError{Layer: l, Err: fmt.Errorf("%s: %w", l.Path, errors.Join(errs...))}
 	}
 	if err := lc.Validate(home); err != nil {
@@ -246,20 +248,17 @@ func loadLayer(l Layer, home, goos string) (*Config, error) {
 	return lc, nil
 }
 
-// rootOnly names every section a layer sets that only the main config may.
-func (c *Config) rootOnly() []error {
+// rootOnly names every section a layer sets that only the main config may,
+// by the keys present in its YAML: an empty value still counts as set.
+func rootOnly(data []byte) []error {
+	var top map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &top); err != nil {
+		return nil
+	}
 	var errs []error
-	for _, s := range []struct {
-		name string
-		set  bool
-	}{
-		{"protect", c.Protect != Protect{}},
-		{"brew", c.Brew != nil},
-		{"mise", c.Mise != nil},
-		{"agents", c.Agents != nil},
-	} {
-		if s.set {
-			errs = append(errs, fmt.Errorf("%s is set in a layer; only the main zakwas.yaml may set it", s.name))
+	for _, name := range []string{"protect", "brew", "mise", "agents"} {
+		if _, set := top[name]; set {
+			errs = append(errs, fmt.Errorf("%s is set in a layer; only the main zakwas.yaml may set it", name))
 		}
 	}
 	return errs

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -53,14 +54,50 @@ func Load(home string) (*Registry, error) {
 	return r, nil
 }
 
+// key is the registry key that names the same directory as root: an existing
+// key wins over the spelling of root, since a case-insensitive file system
+// reaches one directory through several.
+func (r *Registry) key(root string) string {
+	if _, ok := r.Roots[root]; ok {
+		return root
+	}
+	want, err := os.Stat(root)
+	if err != nil {
+		return root
+	}
+	for _, k := range slices.Sorted(maps.Keys(r.Roots)) {
+		if have, err := os.Stat(k); err == nil && os.SameFile(want, have) {
+			return k
+		}
+	}
+	return root
+}
+
 // For lists the layers registered for the config root.
 func (r *Registry) For(root string) []config.Layer {
-	return slices.Clone(r.Roots[root])
+	return slices.Clone(r.Roots[r.key(root)])
+}
+
+// LayerOf reports a root the file at path is registered as a layer of.
+func (r *Registry) LayerOf(path string) (root string, layer config.Layer, ok bool) {
+	want, err := os.Stat(path)
+	if err != nil {
+		return "", config.Layer{}, false
+	}
+	for _, k := range slices.Sorted(maps.Keys(r.Roots)) {
+		for _, l := range r.Roots[k] {
+			if have, err := os.Stat(l.Path); err == nil && os.SameFile(want, have) {
+				return k, l, true
+			}
+		}
+	}
+	return "", config.Layer{}, false
 }
 
 // Set replaces the layers registered for the config root; none removes its
 // entry.
 func (r *Registry) Set(root string, layers []config.Layer) {
+	root = r.key(root)
 	if len(layers) == 0 {
 		delete(r.Roots, root)
 		return

@@ -247,6 +247,10 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		}
 		defer func() { _ = held.Release() }()
 		cleanSelfUpdateLeftovers(env, env.goos(), errOut)
+		if err := layersUnchanged(cfg, env); err != nil {
+			errOut.fail(err)
+			return ExitErr
+		}
 	}
 
 	if cmd == "upgrade" {
@@ -604,6 +608,20 @@ func loadConfig(flagPath string, env Env) (*config.Config, error) {
 		return nil, err
 	}
 	return config.ParseLayered(data, path, env.Home, env.GOOS, layers)
+}
+
+// layersUnchanged fails when the layers registered for the config changed
+// while the run waited for the lock: it planned without a layer added in the
+// meantime, and applying that plan would remove the layer's files.
+func layersUnchanged(cfg *config.Config, env Env) error {
+	now, err := registeredLayers(cfg.Path, env.Home)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(now, cfg.LayerRefs()) {
+		return errors.New("the registered layers changed while waiting for the lock; run it again")
+	}
+	return nil
 }
 
 // configPath finds zakwas.yaml: -c, else upward from the working directory,
