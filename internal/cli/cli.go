@@ -663,7 +663,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 		mods = append(mods, &brew.Module{Brew: *cfg.Brew, Paths: paths, Runner: env.Runner})
 	}
 	if cfg.Mise != nil && here("mise") {
-		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Paths: paths, Runner: env.Runner})
+		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Layers: cfg.LayerMise(), Paths: paths, Runner: env.Runner})
 	}
 	agentsCfg := cfg.Agents
 	for _, state := range []string{agents.InstructionsStatePath(env.Home), agents.InstructionFilesStatePath(env.Home)} {

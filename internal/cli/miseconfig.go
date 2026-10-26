@@ -76,7 +76,8 @@ func globalConfigPath(tools map[string][]miseTool, home string) string {
 // throwaway state and cache dir, so no config or state outside the repo
 // changes; mise may add version alias symlinks to its shared installs dir.
 func writeMiseConfig(ctx context.Context, r runner.Runner, tools map[string][]miseTool, home, dst string) ([]string, error) {
-	data, err := os.ReadFile(globalConfigPath(tools, home))
+	global := globalConfigPath(tools, home)
+	data, err := os.ReadFile(global)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
@@ -103,6 +104,9 @@ func writeMiseConfig(ctx context.Context, r runner.Runner, tools map[string][]mi
 	}
 	var unpinned []string
 	for _, name := range slices.Sorted(maps.Keys(tools)) {
+		if fromOtherConfig(tools[name], global) {
+			continue
+		}
 		args, why := pinArgs(name, tools[name], parsed.Tools[name])
 		switch {
 		case args == nil && why == "":
@@ -125,6 +129,15 @@ func writeMiseConfig(ctx context.Context, r runner.Runner, tools map[string][]mi
 		return nil, fmt.Errorf("pinned mise config %s is not valid TOML: %w", dst, err)
 	}
 	return unpinned, nil
+}
+
+// fromOtherConfig reports whether a tool comes from another global config,
+// such as one in ~/.config/mise/conf.d: it isn't in the copy, so pinning it
+// would add it there.
+func fromOtherConfig(versions []miseTool, global string) bool {
+	return slices.ContainsFunc(versions, func(t miseTool) bool {
+		return strings.HasSuffix(t.Source.Path, ".toml") && t.Source.Path != global
+	})
 }
 
 // pinArgs returns the `mise use` arguments pinning name, nil when every

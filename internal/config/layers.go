@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 
+	"github.com/pelletier/go-toml/v2"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -27,6 +28,15 @@ type Layer struct {
 type LoadedLayer struct {
 	Layer
 	Root string
+}
+
+// MiseConfig is a mise config a layer brought: Path is absolute. Installed
+// lists the destinations of the layer's files entries that copy it, which
+// mise reads as global config once there.
+type MiseConfig struct {
+	Layer     string
+	Path      string
+	Installed []string
 }
 
 var layerName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -80,6 +90,9 @@ func (c *Config) LayerRoots() []string {
 	return out
 }
 
+// LayerMise lists the mise configs the layers brought, in registration order.
+func (c *Config) LayerMise() []MiseConfig { return slices.Clone(c.layerMise) }
+
 // Paths resolves paths for the config: its root and its layers' roots.
 func (c *Config) Paths(home string) Paths {
 	return Paths{Home: home, Root: c.Root, Layers: c.LayerRoots()}
@@ -103,7 +116,9 @@ func LoadLayered(path, home, goos string, layers []Layer) (*Config, error) {
 // templates, commands, launchd jobs, defaults and system directories follow
 // the main config's; templates.vars merge, with a repeated name an error;
 // system.sshKey may be set once; sudoTouchID is on when any file sets it.
-// protect, brew, mise and agents belong to the main config only. The merged
+// A layer may set mise.config when the main config has a mise section; a
+// tool pinned in two mise configs is an error naming both files. protect,
+// brew, agents and mise.prune belong to the main config only. The merged
 // config is validated as a whole, so a destination two files both claim is
 // an error naming both. A layer that is missing or invalid fails the load.
 func ParseLayered(data []byte, path, home, goos string, layers []Layer) (*Config, error) {
@@ -123,6 +138,7 @@ func ParseLayered(data []byte, path, home, goos string, layers []Layer) (*Config
 	if err := m.cfg.Validate(home); err != nil {
 		errs = append(errs, err)
 	}
+	errs = append(errs, m.cfg.miseConflicts(home)...)
 	if err := errors.Join(errs...); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -149,6 +165,7 @@ func newMerge(c *Config) *merge {
 	m.Launchd = slices.Clone(c.Launchd)
 	m.System.Dirs = slices.Clone(c.System.Dirs)
 	m.Layers = nil
+	m.layerMise = nil
 	m.origins = map[string][]string{}
 	mg := &merge{cfg: &m, seen: map[string]bool{c.Path: true}, varFile: map[string]string{}}
 	mg.label("files", len(c.Files), c.Path)
@@ -202,12 +219,25 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	c.Commands = append(c.Commands, lc.Commands...)
 	c.System.Dirs = append(c.System.Dirs, lc.System.Dirs...)
 	c.System.SudoTouchID = c.System.SudoTouchID || lc.System.SudoTouchID
+	var errs []error
+	if lc.Mise != nil {
+		if c.Mise == nil {
+			errs = append(errs, fmt.Errorf("layer %q: mise.config in %s needs a mise section in %s", l.Name, lc.Path, c.Path))
+		} else {
+			mc := MiseConfig{Layer: l.Name, Path: abs(lc.Mise.Config)}
+			for _, f := range lc.Files {
+				if filepath.Clean(abs(f.Src)) == filepath.Clean(mc.Path) {
+					mc.Installed = append(mc.Installed, f.Dst)
+				}
+			}
+			c.layerMise = append(c.layerMise, mc)
+		}
+	}
 	m.label("files", len(lc.Files), lc.Path)
 	m.label("links", len(lc.Links), lc.Path)
 	m.label("templates.files", len(lc.Templates.Files), lc.Path)
 	m.label("defaults", len(lc.Defaults), lc.Path)
 	m.label("launchd", len(lc.Launchd), lc.Path)
-	var errs []error
 	for _, k := range slices.Sorted(maps.Keys(lc.Templates.Vars)) {
 		if first, dup := m.varFile[k]; dup {
 			errs = append(errs, fmt.Errorf("templates.vars.%s is set in both %s and %s", k, first, lc.Path))
@@ -256,9 +286,63 @@ func rootOnly(data []byte) []error {
 		return nil
 	}
 	var errs []error
-	for _, name := range []string{"protect", "brew", "mise", "agents"} {
+	for _, name := range []string{"protect", "brew", "agents"} {
 		if _, set := top[name]; set {
 			errs = append(errs, fmt.Errorf("%s is set in a layer; only the main zakwas.yaml may set it", name))
+		}
+	}
+	if node, set := top["mise"]; set {
+		errs = append(errs, miseRootOnly(node)...)
+	}
+	return errs
+}
+
+// miseRootOnly allows only mise.config in a layer: prune is machine-wide.
+func miseRootOnly(node yaml.Node) []error {
+	if node.Kind != yaml.MappingNode {
+		return []error{errors.New("mise is set in a layer without mise.config; a layer may set only mise.config")}
+	}
+	var errs []error
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if key := node.Content[i].Value; key != "config" {
+			errs = append(errs, fmt.Errorf("mise.%s is set in a layer; only the main zakwas.yaml may set it", key))
+		}
+	}
+	return errs
+}
+
+// miseConflicts reads the mise configs of a merged config and names every
+// tool pinned in more than one: mise would pick one silently.
+func (c *Config) miseConflicts(home string) []error {
+	if c.Mise == nil || len(c.layerMise) == 0 {
+		return nil
+	}
+	paths := Paths{Home: home, Root: c.Root}
+	files := []string{paths.Src(c.Mise.Config)}
+	for _, mc := range c.layerMise {
+		files = append(files, mc.Path)
+	}
+	var errs []error
+	pinned := map[string]string{}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("mise config: %w", err))
+			continue
+		}
+		var parsed struct {
+			Tools map[string]any `toml:"tools"`
+		}
+		if err := toml.Unmarshal(data, &parsed); err != nil {
+			errs = append(errs, fmt.Errorf("mise config %s is not valid TOML: %w", file, err))
+			continue
+		}
+		for _, tool := range slices.Sorted(maps.Keys(parsed.Tools)) {
+			if first, dup := pinned[tool]; dup {
+				errs = append(errs, fmt.Errorf("mise tool %s is pinned in both %s and %s; mise would pick one", tool, first, file))
+				continue
+			}
+			pinned[tool] = file
 		}
 	}
 	return errs

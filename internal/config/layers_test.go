@@ -142,9 +142,12 @@ func TestParseLayeredRejects(t *testing.T) {
 		{"a bare agents key is still set", []string{"agents:\nfiles: [{src: x, dst: ~/.x}]\n"}, []string{"agents is set in a layer"}},
 		{"an empty brew is still set", []string{"brew:\n"}, []string{"brew is set in a layer"}},
 		{"brew is root-only", []string{"brew: {file: Brewfile}\n"}, []string{"brew is set in a layer"}},
-		{"mise is root-only", []string{"mise: {config: m.toml}\n"}, []string{"mise is set in a layer"}},
+		{"mise.prune is root-only", []string{"mise: {config: m.toml, prune: true}\n"}, []string{"mise.prune is set in a layer"}},
+		{"an empty mise.prune is still set", []string{"mise: {config: m.toml, prune: false}\n"}, []string{"mise.prune is set in a layer"}},
+		{"a bare mise key sets no config", []string{"mise:\n"}, []string{"mise is set in a layer without mise.config"}},
+		{"mise without config", []string{"mise: {}\n"}, []string{"mise.config is required"}},
 		{"agents is root-only", []string{"agents: {}\n"}, []string{"agents is set in a layer"}},
-		{"every root-only section is named", []string{"brew: {file: B}\nmise: {config: m}\n"}, []string{"brew is set in a layer", "mise is set in a layer"}},
+		{"every root-only section is named", []string{"brew: {file: B}\nmise: {config: m, prune: true}\n"}, []string{"brew is set in a layer"}},
 		{"a layer that does not validate", []string{"files: [{src: a}]\n"}, []string{`layer "l0" is invalid`, "src and dst are required"}},
 		{"unknown fields", []string{"nope: 1\n"}, []string{`layer "l0" is invalid`, "unknown field"}},
 		{"a destination in two layers", []string{"files: [{src: x, dst: ~/.same}]\n", "links: [{src: y, dst: ~/.same}]\n"}, []string{"destination", "~/.same", "overlaps", "links[0] of", "files[0] of"}},
@@ -173,6 +176,118 @@ func TestParseLayeredRejects(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func writeMise(t *testing.T, dir, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, "mise.toml")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestParseLayeredMiseConfigs(t *testing.T) {
+	rootDir := t.TempDir()
+	writeMise(t, rootDir, "[tools]\njq = \"1.8.2\"\n")
+	root := filepath.Join(rootDir, FileName)
+	rootBody := "mise: {config: mise.toml, prune: true}\n"
+	if err := os.WriteFile(root, []byte(rootBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	work := writeLayer(t, "work", "mise: {config: mise/work.toml}\nfiles:\n  - {src: mise/work.toml, dst: ~/.config/mise/conf.d/work.toml}\n")
+	workDir := filepath.Dir(work.Path)
+	if err := os.MkdirAll(filepath.Join(workDir, "mise"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "mise/work.toml"), []byte("[tools]\nkubectl = \"1.34.1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lab := writeLayer(t, "lab", "mise: {config: mise.toml}\n")
+	writeMise(t, filepath.Dir(lab.Path), "[tools]\n\"aqua:cli/cli\" = \"2\"\n")
+
+	c, err := ParseLayered(mustReadBytes(t, root), root, t.TempDir(), platform.Darwin, []Layer{work, lab})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.LayerMise()
+	if len(got) != 2 || got[0].Layer != "work" || got[1].Layer != "lab" {
+		t.Fatalf("LayerMise = %+v", got)
+	}
+	if want := filepath.Join(workDir, "mise/work.toml"); got[0].Path != want {
+		t.Errorf("path = %q, want it under the layer's directory: %q", got[0].Path, want)
+	}
+	if len(got[0].Installed) != 1 || got[0].Installed[0] != "~/.config/mise/conf.d/work.toml" || len(got[1].Installed) != 0 {
+		t.Errorf("installed = %v, %v", got[0].Installed, got[1].Installed)
+	}
+	if !c.Mise.Prune || c.Mise.Config != "mise.toml" {
+		t.Errorf("the main mise section changed: %+v", c.Mise)
+	}
+}
+
+func TestParseLayeredMiseRejects(t *testing.T) {
+	tests := []struct {
+		name     string
+		rootMise string
+		rootBody string
+		layers   []string
+		want     []string
+	}{
+		{"a tool in the main config and a layer", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{"[tools]\njq = \"2\"\nkind = \"0.30\"\n"}, []string{"mise tool jq is pinned in both", "mise.toml and", "mise.toml"}},
+		{"a tool in two layers", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{"[tools]\nkind = \"1\"\n", "[tools]\nkind = \"2\"\n"}, []string{"mise tool kind is pinned in both"}},
+		{"a layer config without a main mise section", "", "files: [{src: a, dst: ~/.a}]\n", []string{"[tools]\nkind = \"1\"\n"}, []string{`layer "l0": mise.config in`, "needs a mise section in"}},
+		{"a layer config that is not TOML", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{"[tools\n"}, []string{"is not valid TOML"}},
+		{"a layer config that is missing", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{""}, []string{"mise config:", "no such file"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rootDir := t.TempDir()
+			if tt.rootMise != "" {
+				writeMise(t, rootDir, tt.rootMise)
+			}
+			root := filepath.Join(rootDir, FileName)
+			if err := os.WriteFile(root, []byte(tt.rootBody), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var layers []Layer
+			for i, toml := range tt.layers {
+				l := writeLayer(t, "l"+string(rune('0'+i)), "mise: {config: mise.toml}\n")
+				if toml != "" {
+					writeMise(t, filepath.Dir(l.Path), toml)
+				}
+				layers = append(layers, l)
+			}
+			_, err := ParseLayered(mustReadBytes(t, root), root, t.TempDir(), platform.Darwin, layers)
+			if err == nil {
+				t.Fatal("merged")
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error lacks %q:\n%v", want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestParseLayeredMiseConflictNamesBothFiles(t *testing.T) {
+	rootDir := t.TempDir()
+	rootToml := writeMise(t, rootDir, "[tools]\njq = \"1\"\n")
+	root := filepath.Join(rootDir, FileName)
+	if err := os.WriteFile(root, []byte("mise: {config: mise.toml}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l := writeLayer(t, "work", "mise: {config: mise.toml}\n")
+	layerToml := writeMise(t, filepath.Dir(l.Path), "[tools]\njq = \"2\"\n")
+	_, err := ParseLayered(mustReadBytes(t, root), root, t.TempDir(), platform.Darwin, []Layer{l})
+	if err == nil {
+		t.Fatal("merged")
+	}
+	for _, f := range []string{rootToml, layerToml} {
+		if !strings.Contains(err.Error(), f) {
+			t.Errorf("error does not name %s:\n%v", f, err)
+		}
 	}
 }
 
