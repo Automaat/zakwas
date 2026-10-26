@@ -270,10 +270,12 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 	machine := o.asJSON || o.outFile != "" || saved != nil
 	var commit string
+	var layers []layerCommit
 	if machine && !o.offline {
 		commit, _ = git(ctx, env.Runner, cfg.Root, "rev-parse", "HEAD")
+		layers = layerCommitsOf(ctx, env.Runner, cfg.Layers, false)
 	}
-	full := newPlanDoc(env, cfg.Path, commit, onlyList, plan, true)
+	full := newPlanDoc(env, cfg.Path, commit, layers, onlyList, plan, true)
 	if saved != nil {
 		if err := checkSaved(*saved, full); err != nil {
 			errOut.fail(err)
@@ -286,7 +288,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return ExitErr
 		}
 	}
-	doc := newPlanDoc(env, cfg.Path, commit, onlyList, plan, o.diff)
+	doc := newPlanDoc(env, cfg.Path, commit, layers, onlyList, plan, o.diff)
 	if o.offline {
 		doc.Offline, doc.Skipped = true, offlineNotChecked(mods, env.goos())
 	}
@@ -330,7 +332,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 		}
 		return ExitOK
 	}
-	for _, w := range repoWarnings(ctx, env.Runner, cfg.Root) {
+	for _, w := range repoWarnings(ctx, env.Runner, cfg.Root, cfg.Layers) {
 		errOut.print("zakwas: warning: " + w + "\n")
 	}
 	if !o.yes && saved == nil {
@@ -351,7 +353,7 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 	}
 	result, applyErr := engine.Apply(ctx, obs, plan)
 	finalErr := errors.Join(planErr, applyErr)
-	if err := recordHistory(ctx, env, cfg.Root, plan, result, finalErr); err != nil {
+	if err := recordHistory(ctx, env, cfg.Root, cfg.Layers, plan, result, finalErr); err != nil {
 		errOut.print("zakwas: warning: history not recorded: " + err.Error() + "\n")
 	}
 	if o.asJSON {
