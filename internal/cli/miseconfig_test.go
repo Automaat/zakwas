@@ -144,3 +144,43 @@ func TestGlobalConfigPath(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestWriteMiseConfigLeavesToolsOfOtherConfigs(t *testing.T) {
+	home := t.TempDir()
+	global := filepath.Join(home, ".config/mise/config.toml")
+	if err := writeFile(global, []byte("[tools]\nnode = \"22\"\njq = \"1.7.1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	node, jq, kubectl := tool("22", "22.21.1", true), tool("1.7.1", "1.7.1", true), tool("1", "1.34.1", true)
+	node.Source.Path, jq.Source.Path = global, global
+	kubectl.Source.Path = filepath.Join(home, ".config/mise/conf.d/work.toml")
+	tools := map[string][]miseTool{"node": {node}, "jq": {jq}, "kubectl": {kubectl}}
+	fake := runnertest.New().OnOK("mise use --global --pin --quiet node@22.21.1", "")
+	dst := filepath.Join(t.TempDir(), "config.toml")
+
+	unpinned, err := writeMiseConfig(context.Background(), fake, tools, home, dst)
+	if err != nil || len(unpinned) != 0 {
+		t.Fatalf("unpinned %v, err %v", unpinned, err)
+	}
+	if got := fake.Lines(); len(got) != 1 {
+		t.Errorf("ran %v; a tool from another config must not be pinned into the copy", got)
+	}
+}
+
+func TestOtherConfigTools(t *testing.T) {
+	t.Setenv("MISE_GLOBAL_CONFIG_FILE", "")
+	a := testutil.Abs
+	from := func(path string) []miseTool {
+		var m miseTool
+		m.Source.Path = path
+		return []miseTool{m}
+	}
+	work, main := a("/h/.config/mise/conf.d/work.toml"), a("/h/.config/mise/config.toml")
+	tools := map[string][]miseTool{
+		"kubectl": from(work), "yq": from(work), "jq": from(main), "legacy": from(a("/h/.tool-versions")),
+	}
+	got := otherConfigTools(tools, a("/h"))
+	if want := []string{"jq (" + main + ")"}; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q (the copy is of %s)", got, want, work)
+	}
+}

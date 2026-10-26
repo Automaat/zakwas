@@ -94,6 +94,9 @@ type initPlan struct {
 	orphans  int
 	trusted  []string
 	unpinned []string
+	// others are active tools from a global mise config other than the one
+	// copied; the generated config lacks them.
+	others []string
 }
 
 func runInit(ctx context.Context, env Env, args []string, out, errOut *console) int {
@@ -348,6 +351,7 @@ func (p *initPlan) write(ctx context.Context, r runner.Runner, tools map[string]
 			return created, err
 		}
 		p.unpinned = unpinned
+		p.others = otherConfigTools(tools, p.home)
 	}
 	if p.brew {
 		dump := runner.Cmd{
@@ -460,6 +464,9 @@ func (p *initPlan) summary() string {
 		fmt.Fprintf(&b, "  %-29s global mise config, active tools pinned to exact versions\n", miseSrc)
 		if len(p.unpinned) > 0 {
 			fmt.Fprintf(&b, "  %-29s left as written: %s\n", "", strings.Join(p.unpinned, ", "))
+		}
+		if len(p.others) > 0 {
+			fmt.Fprintf(&b, "  %-29s not in it, from other mise configs: %s\n", "", strings.Join(p.others, ", "))
 		}
 	case !platform.Supported("mise", p.goos):
 		fmt.Fprintf(&b, "  no mise section: the mise module is not supported on %s\n", platform.Name(p.goos))

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Automaat/zakwas/internal/config"
@@ -250,5 +251,142 @@ func TestMergeBumps(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// withLayer adds a layer config next to the main one, installed to conf.d as
+// a converged apply leaves it.
+func withLayer(t *testing.T, m *Module) config.MiseConfig {
+	t.Helper()
+	const body = "[tools]\nkubectl = \"1.34.1\"\n"
+	dir := t.TempDir()
+	l := config.MiseConfig{Layer: "work", Path: filepath.Join(dir, "mise.toml"), Installed: []string{"~/.config/mise/conf.d/work.toml"}}
+	writeFile(t, l.Path, body)
+	writeFile(t, m.Paths.Dst(l.Installed[0]), body)
+	m.Layers = []config.MiseConfig{l}
+	return l
+}
+
+func TestLayerToolsAreInstalledFromTheirOwnConfig(t *testing.T) {
+	m, fake := newModule(t)
+	l := withLayer(t, m)
+	rootEnv := "MISE_GLOBAL_CONFIG_FILE=" + m.Paths.Src(m.Mise.Config)
+	layerEnv := "MISE_GLOBAL_CONFIG_FILE=" + l.Path
+	// Same command line, answered in the order the configs are queried.
+	fake.OnOK("mise ls --global --missing --json", `{"jq":[{"version":"1.8.2","installed":false}]}`)
+	fake.OnOK("mise ls --global --missing --json", `{"kubectl":[{"version":"1.34.1","installed":false}]}`)
+	fake.OnOK("mise install --yes", "")
+
+	changes, err := m.Plan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"+ jq@1.8.2", "+ kubectl@1.34.1", "! mise install", "! mise install"}
+	if got := targets(changes); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if changes[2].Detail != "" || changes[3].Detail != "layer work" {
+		t.Errorf("details %q, %q", changes[2].Detail, changes[3].Detail)
+	}
+	if err := enginetest.Apply(context.Background(), engine.Plan{{Changes: changes}}); err != nil {
+		t.Fatal(err)
+	}
+	var ran []string
+	for _, c := range fake.Calls {
+		if c.Dir != "/" {
+			t.Errorf("%s ran in %q, want /", c, c.Dir)
+		}
+		ran = append(ran, c.Args[0]+" "+c.Env[0])
+	}
+	want = []string{"ls " + rootEnv, "ls " + layerEnv, "install " + rootEnv, "install " + layerEnv}
+	if !reflect.DeepEqual(ran, want) {
+		t.Errorf("ran %v, want each config queried and installed on its own: %v", ran, want)
+	}
+}
+
+func TestLayerWithNothingMissingAddsNothing(t *testing.T) {
+	m, fake := newModule(t)
+	withLayer(t, m)
+	fake.OnOK("mise ls --global --missing --json", "{}")
+	changes, err := m.Plan(context.Background())
+	if err != nil || len(changes) != 0 {
+		t.Errorf("changes = %v, err = %v", changes, err)
+	}
+	if got := len(fake.Calls); got != 2 {
+		t.Errorf("%d mise calls, want one query per config", got)
+	}
+}
+
+func TestOnlyLayerMissingInstallsOnlyLayer(t *testing.T) {
+	m, fake := newModule(t)
+	withLayer(t, m)
+	fake.OnOK("mise ls --global --missing --json", "{}")
+	fake.OnOK("mise ls --global --missing --json", `{"kubectl":[{"version":"1.34.1","installed":false}]}`)
+	changes, err := m.Plan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := targets(changes), []string{"+ kubectl@1.34.1", "! mise install"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if changes[1].Detail != "layer work" {
+		t.Errorf("detail = %q", changes[1].Detail)
+	}
+}
+
+func TestPruneScheduledWhenLayerConfigStale(t *testing.T) {
+	tests := map[string]func(t *testing.T, m *Module, l config.MiseConfig){
+		"installed copy differs": func(t *testing.T, m *Module, l config.MiseConfig) {
+			writeFile(t, m.Paths.Dst(l.Installed[0]), "[tools]\nkubectl = \"1.33.0\"\n")
+		},
+		"installed copy missing": func(t *testing.T, m *Module, l config.MiseConfig) {
+			if err := os.Remove(m.Paths.Dst(l.Installed[0])); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, setup := range tests {
+		t.Run(name, func(t *testing.T) {
+			m, fake := newModule(t)
+			m.Mise.Prune = true
+			setup(t, m, withLayer(t, m))
+			fake.OnOK("mise ls --global --missing --json", "{}")
+			fake.OnOK("mise ls --prunable --json", "{}")
+			changes, err := m.Plan(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := targets(changes); !reflect.DeepEqual(got, []string{"! mise prune"}) {
+				t.Fatalf("got %v", got)
+			}
+		})
+	}
+}
+
+func TestPruneQuietWhenLayerConfigInstalled(t *testing.T) {
+	m, fake := newModule(t)
+	m.Mise.Prune = true
+	withLayer(t, m)
+	fake.OnOK("mise ls --global --missing --json", "{}")
+	fake.OnOK("mise ls --prunable --json", "{}")
+	changes, err := m.Plan(context.Background())
+	if err != nil || len(changes) != 0 {
+		t.Errorf("changes = %v, err = %v", changes, err)
+	}
+}
+
+func TestBootstrapInstallsEveryConfig(t *testing.T) {
+	m, fake := newModule(t)
+	l := withLayer(t, m)
+	fake.Missing("mise")
+	changes, err := m.Plan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := targets(changes), []string{"+ mise@" + Version, "! mise install", "! mise install"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got := changes[2].Detail; !strings.Contains(got, "layer work") || !strings.Contains(got, l.Path) {
+		t.Errorf("detail = %q", got)
 	}
 }
