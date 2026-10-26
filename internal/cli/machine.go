@@ -19,6 +19,7 @@ type planDoc struct {
 	Host          string              `json:"host"`
 	Config        string              `json:"config"`
 	Commit        string              `json:"commit,omitempty"`
+	Layers        []layerCommit       `json:"layers,omitempty"`
 	Only          []string            `json:"only,omitempty"`
 	Offline       bool                `json:"offline,omitempty"`
 	Skipped       []string            `json:"skipped,omitempty"`
@@ -26,13 +27,14 @@ type planDoc struct {
 	Summary       engine.JSONSummary  `json:"summary"`
 }
 
-func newPlanDoc(env Env, config, commit string, only []string, p engine.Plan, withDiff bool) planDoc {
+func newPlanDoc(env Env, config, commit string, layers []layerCommit, only []string, p engine.Plan, withDiff bool) planDoc {
 	return planDoc{
 		FormatVersion: engine.FormatVersion,
 		ZakwasVersion: env.Version,
 		Host:          env.Host,
 		Config:        config,
 		Commit:        commit,
+		Layers:        layers,
 		Only:          only,
 		Modules:       p.JSONModules(withDiff),
 		Summary:       p.JSONSummary(),

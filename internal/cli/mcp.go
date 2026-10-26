@@ -251,7 +251,14 @@ func jsonResult(v any) (mcp.Result, error) {
 	return mcp.Result{Text: string(data)}, nil
 }
 
-func (t *mcpTools) config(context.Context, *mcp.Call) (mcp.Result, error) {
+// layerInfo is a registered layer as zakwas_config shows it: where it is
+// and which commit its checkout is on.
+type layerInfo struct {
+	config.Layer
+	Commit string `json:"commit,omitempty"`
+}
+
+func (t *mcpTools) config(ctx context.Context, _ *mcp.Call) (mcp.Result, error) {
 	cfg, err := t.load()
 	if err != nil {
 		return mcp.Result{}, err
@@ -261,16 +268,21 @@ func (t *mcpTools) config(context.Context, *mcp.Call) (mcp.Result, error) {
 		names = append(names, m.Name())
 	}
 	out := struct {
-		Config    string         `json:"config"`
-		Root      string         `json:"root"`
-		Modules   []string       `json:"modules"`
-		Providers []string       `json:"agent_providers,omitempty"`
-		MCP       []string       `json:"agent_mcp_servers,omitempty"`
-		Layers    []config.Layer `json:"layers,omitempty"`
-		Guard     bool           `json:"guard"`
-		Apply     bool           `json:"apply_enabled"`
-		YAML      string         `json:"yaml"`
-	}{Config: cfg.Path, Root: cfg.Root, Modules: names, Guard: cfg.Agents.GuardEnabled(), Apply: t.enableApply, Layers: cfg.LayerRefs()}
+		Config    string      `json:"config"`
+		Root      string      `json:"root"`
+		Modules   []string    `json:"modules"`
+		Providers []string    `json:"agent_providers,omitempty"`
+		MCP       []string    `json:"agent_mcp_servers,omitempty"`
+		Commit    string      `json:"commit,omitempty"`
+		Layers    []layerInfo `json:"layers,omitempty"`
+		Guard     bool        `json:"guard"`
+		Apply     bool        `json:"apply_enabled"`
+		YAML      string      `json:"yaml"`
+	}{Config: cfg.Path, Root: cfg.Root, Modules: names, Guard: cfg.Agents.GuardEnabled(), Apply: t.enableApply}
+	out.Commit, _ = git(ctx, t.env.Runner, cfg.Root, "rev-parse", "HEAD")
+	for i, lc := range layerCommitsOf(ctx, t.env.Runner, cfg.Layers, false) {
+		out.Layers = append(out.Layers, layerInfo{Layer: cfg.Layers[i].Layer, Commit: lc.Commit})
+	}
 	if cfg.Agents != nil {
 		out.Providers = cfg.Agents.DefaultProviders()
 		out.MCP = slices.Sorted(maps.Keys(cfg.Agents.MCP))
@@ -306,7 +318,7 @@ func (t *mcpTools) plan(ctx context.Context, c *mcp.Call, check bool) (mcp.Resul
 	}
 	plan := engine.Build(ctx, mods)
 	commit, _ := git(ctx, t.env.Runner, cfg.Root, "rev-parse", "HEAD")
-	doc := newPlanDoc(t.env, cfg.Path, commit, args.Only, plan, args.Diff)
+	doc := newPlanDoc(t.env, cfg.Path, commit, layerCommitsOf(ctx, t.env.Runner, cfg.Layers, false), args.Only, plan, args.Diff)
 	var res mcp.Result
 	if check {
 		res, err = jsonResult(struct {

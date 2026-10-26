@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/layers"
+	"github.com/Automaat/zakwas/internal/runner/runnertest"
 )
 
 const filesOnly = "files: [{src: dotfiles/zshrc, dst: ~/.zshrc}]\n"
@@ -515,5 +519,136 @@ func TestApplyRefusesLayersChangedWhileWaitingForTheLock(t *testing.T) {
 	}
 	if exists(filepath.Join(home, ".work")) {
 		t.Error("the check applied something")
+	}
+}
+
+func gitFake(root, status, branch, head string) *runnertest.Fake {
+	return runnertest.New().
+		OnOK("git -C "+root+" status --porcelain", status).
+		OnOK("git -C "+root+" rev-parse --abbrev-ref HEAD", branch+"\n").
+		OnOK("git -C "+root+" rev-list --count HEAD..@{upstream}", "0\n").
+		OnOK("git -C "+root+" rev-parse HEAD", head+"\n")
+}
+
+func TestRepoWarningsNameTheLayer(t *testing.T) {
+	fake := gitFake("/main", "", "main", "m1")
+	for _, c := range []string{
+		"git -C /work status --porcelain",
+		"git -C /work rev-parse --abbrev-ref HEAD",
+		"git -C /work rev-list --count HEAD..@{upstream}",
+	} {
+		switch {
+		case strings.HasSuffix(c, "--porcelain"):
+			fake.OnOK(c, " M zakwas.yaml\n")
+		case strings.HasSuffix(c, "HEAD"):
+			fake.OnOK(c, "wip\n")
+		default:
+			fake.OnOK(c, "2\n")
+		}
+	}
+	layers := []config.LoadedLayer{
+		{Layer: config.Layer{Name: "work"}, Root: "/work"},
+		{Layer: config.Layer{Name: "lab"}, Root: "/lab"},
+	}
+	got := repoWarnings(t.Context(), fake, "/main", layers)
+	want := []string{
+		"layer work: applying uncommitted changes from /work",
+		"layer work: applying from branch wip, not main",
+		"layer work: 2 commit(s) behind upstream; git pull first?",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("warnings = %q, want %q (a clean main and a layer outside git stay silent)", got, want)
+	}
+}
+
+func layerGitEnv(t *testing.T) (Env, string, string, string) {
+	t.Helper()
+	env, home := setup(t, filesOnly)
+	work := layerRepo(t, "~/.work", "work\n")
+	mustOK(t, env, "layer", "add", "work", work)
+	root, _ := filepath.EvalSymlinks(env.Cwd)
+	fake := gitFake(root, "", "main", "main111")
+	for k, v := range map[string]string{
+		"git -C " + work + " status --porcelain":                 " M payload\n",
+		"git -C " + work + " rev-parse --abbrev-ref HEAD":        "main\n",
+		"git -C " + work + " rev-list --count HEAD..@{upstream}": "0\n",
+		"git -C " + work + " rev-parse HEAD":                     "work222\n",
+	} {
+		fake.OnOK(k, v)
+	}
+	env.Runner = fake
+	return env, home, root, work
+}
+
+func TestApplyWarnsAboutADirtyLayerAndRecordsItsCommit(t *testing.T) {
+	env, home, _, work := layerGitEnv(t)
+	r := invoke(env, "", "apply", "-y")
+	if r.code != ExitOK {
+		t.Fatalf("%+v", r)
+	}
+	if !strings.Contains(r.stderr, "warning: layer work: applying uncommitted changes from "+work) {
+		t.Errorf("stderr lacks the layer warning:\n%s", r.stderr)
+	}
+	if strings.Contains(r.stderr, "applying uncommitted changes from "+env.Cwd) {
+		t.Errorf("the clean main repo warned:\n%s", r.stderr)
+	}
+	data, err := os.ReadFile(HistoryPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry historyEntry
+	if err := json.Unmarshal(bytes.TrimSpace(data), &entry); err != nil {
+		t.Fatal(err)
+	}
+	want := []layerCommit{{Name: "work", Root: work, Commit: "work222", Dirty: true}}
+	if entry.Commit != "main111" || entry.Dirty || !slices.Equal(entry.Layers, want) {
+		t.Errorf("entry = %+v, want commit main111 and layers %+v", entry, want)
+	}
+}
+
+func TestHistoryWithoutLayersKeepsItsShape(t *testing.T) {
+	env, home := setup(t, linksOnly)
+	mustOK(t, env, "apply", "-y")
+	data, err := os.ReadFile(HistoryPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "layers") {
+		t.Errorf("an apply without layers must not add a layers field: %s", data)
+	}
+	var old historyEntry
+	line := `{"format_version":"1","time":"2026-09-28T12:00:00Z","commit":"abc","changes":[],"result":null}`
+	if err := json.Unmarshal([]byte(line), &old); err != nil || old.Commit != "abc" || old.Layers != nil {
+		t.Errorf("an entry from before layers = %+v, %v", old, err)
+	}
+}
+
+func TestPlanJSONAndMCPConfigCarryLayerCommits(t *testing.T) {
+	env, _, root, work := layerGitEnv(t)
+	r := mustOK(t, env, "plan", "--json")
+	var doc planDoc
+	if err := json.Unmarshal([]byte(r.stdout), &doc); err != nil {
+		t.Fatal(err)
+	}
+	want := []layerCommit{{Name: "work", Root: work, Commit: "work222"}}
+	if doc.Commit != "main111" || !slices.Equal(doc.Layers, want) {
+		t.Errorf("plan commit %q layers %+v, want main111 and %+v", doc.Commit, doc.Layers, want)
+	}
+
+	res, err := (&mcpTools{env: env}).config(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Commit string
+		Root   string
+		Layers []struct{ Name, Path, Commit string }
+	}
+	if err := json.Unmarshal([]byte(res.Text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Commit != "main111" || out.Root != root || len(out.Layers) != 1 ||
+		out.Layers[0].Name != "work" || out.Layers[0].Commit != "work222" || out.Layers[0].Path != filepath.Join(work, "zakwas.yaml") {
+		t.Errorf("zakwas_config = %+v", out)
 	}
 }

@@ -1,0 +1,76 @@
+[windows] skip 'the fake mise is an sh script'
+env ZAKWAS_TEST_GOOS=darwin
+chmod 755 bin/mise
+mkdir state
+
+zakwas layer add work work
+stdout 'Added layer work'
+
+zakwas plan
+stdout '\+ jq@1.8.2'
+stdout '\+ kubectl@1.34.1'
+stdout 'layer work'
+stdout '\+ ~/.config/mise/conf.d/work.toml'
+
+zakwas apply -y
+stdout 'Applied \d+ of \d+ steps'
+cmp home/.config/mise/conf.d/work.toml work/mise.toml
+grep 'mise install --yes' calls
+
+zakwas plan
+stdout 'No changes'
+zakwas check
+
+cp work/mise-bumped.toml work/mise.toml
+zakwas plan
+stdout '\+ kubectl@1.35.0'
+zakwas apply -y
+zakwas check
+
+cp work/mise-dup.toml work/mise.toml
+! zakwas plan
+stderr 'mise tool jq is pinned in both'
+stderr 'dotfiles[/]mise.toml'
+stderr 'work[/]mise.toml'
+! zakwas check
+
+cp work/mise-bumped.toml work/mise.toml
+! zakwas layer add pruner pruner
+stderr 'mise.prune is set in a layer'
+
+-- zakwas.yaml --
+files:
+  - {src: dotfiles/mise.toml, dst: ~/.config/mise/config.toml}
+mise: {config: dotfiles/mise.toml}
+-- dotfiles/mise.toml --
+[tools]
+jq = "1.8.2"
+-- work/zakwas.yaml --
+mise: {config: mise.toml}
+files:
+  - {src: mise.toml, dst: ~/.config/mise/conf.d/work.toml}
+-- work/mise.toml --
+[tools]
+kubectl = "1.34.1"
+-- work/mise-bumped.toml --
+[tools]
+kubectl = "1.35.0"
+-- work/mise-dup.toml --
+[tools]
+jq = "1.7.1"
+-- pruner/zakwas.yaml --
+mise: {config: mise.toml, prune: true}
+-- bin/mise --
+#!/bin/sh
+echo "mise $*" >> "$WORK/calls"
+case "$MISE_GLOBAL_CONFIG_FILE" in
+  "$WORK/dotfiles/mise.toml") tool=jq; ver=1.8.2 ;;
+  "$WORK/work/mise.toml") tool=kubectl; ver=$(sed -n 's/^kubectl = "\(.*\)"/\1/p' "$MISE_GLOBAL_CONFIG_FILE") ;;
+  *) echo "wrong config $MISE_GLOBAL_CONFIG_FILE" >&2; exit 98 ;;
+esac
+case "$1" in
+  ls)
+    if [ -f "$WORK/state/$tool-$ver" ]; then echo '{}'; else echo "{\"$tool\":[{\"version\":\"$ver\",\"installed\":false}]}"; fi ;;
+  install) touch "$WORK/state/$tool-$ver" ;;
+  *) exit 99 ;;
+esac

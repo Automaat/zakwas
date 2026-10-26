@@ -45,6 +45,9 @@ type Config struct {
 	// order; see ParseLayered.
 	Layers []LoadedLayer `yaml:"-"`
 
+	// layerMise are the mise configs the layers brought.
+	layerMise []MiseConfig
+
 	// origins labels the entries of a merged config by the file they came
 	// from, per section, so errors can name it.
 	origins map[string][]string
