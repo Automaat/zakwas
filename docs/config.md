@@ -946,6 +946,10 @@ How each section merges (the main config first, then the layers in the order the
 | `brew` | the main config's `brew` section stays in charge; a layer adds its own Brewfile with `brew.file` (see below) |
 | `protect`, `mise`, `agents` | main config only; a layer that sets one fails with a line naming the layer file and the section |
 
+The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.
+
+A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).
+
 ### Brewfiles in layers
 
 A layer may set `brew.file` and nothing else, for taps and tools that belong to it. `brew.cleanup` and `brew.upgrade` stay with the main config, and a layer that sets either fails with a line naming the layer file and the key. The main `zakwas.yaml` must have a `brew` section for a layer's Brewfile to apply; without one, the layer is refused and the line names it.
@@ -964,9 +968,11 @@ zakwas reads every Brewfile, the main one first and then each layer's in the ord
 - The same package in two Brewfiles is fine: `brew bundle` accepts the duplicate, and the plan lists it once.
 - A layer's Brewfile that is missing fails the plan, like a missing layer.
 
-The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.
+Because brew reads the files as one Brewfile, a few things reach across them:
 
-A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).
+- `cask_args` in one file applies to the casks of every file after it, not to the ones before it.
+- A top-level `__END__` or `return` would make brew stop reading there and ignore the later files, so a plan with layers fails naming the file that has one. A lone Brewfile, without layers, is passed to brew as is.
+- The commands that install and clean up get the Brewfile on stdin, so their child processes read an empty stdin instead of the terminal: `HOMEBREW_ASK` prompts are skipped. Installer password prompts use the terminal and still work.
 
 ## Full example
 

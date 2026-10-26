@@ -125,7 +125,26 @@ func (m *Module) read() (bundleFiles, error) {
 			return nil, err
 		}
 	}
-	return fs, nil
+	return fs, fs.requireWholeFiles()
+}
+
+var endsEarly = regexp.MustCompile(`(?m)^\s*(__END__|return)\b`)
+
+// requireWholeFiles rejects a Brewfile that stops brew reading early. With
+// layers the files are one Ruby program, so a top-level `__END__` or `return`
+// would hide every later Brewfile from brew while zakwas still counts its
+// entries, and cleanup would remove what the layer lists.
+func (fs bundleFiles) requireWholeFiles() error {
+	if len(fs) < 2 {
+		return nil
+	}
+	var errs []error
+	for _, f := range fs {
+		if g := endsEarly.FindSubmatch(f.data); g != nil {
+			errs = append(errs, fmt.Errorf("%s has a top-level `%s`; with layers brew would stop reading there and ignore the Brewfiles after it", f.label(), g[1]))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // entries lists the tap/brew/cask entries of every Brewfile, in order.

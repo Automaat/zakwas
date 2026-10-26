@@ -213,3 +213,41 @@ func TestWithoutLayersBrewReadsTheFile(t *testing.T) {
 		}
 	}
 }
+
+func TestLayeredBrewfileThatEndsEarlyIsRejected(t *testing.T) {
+	tests := []struct {
+		name, root, work, want string
+	}{
+		{"__END__ in the main Brewfile", rootBrewfile + "__END__\nnotes\n", workBrewfile, "the Brewfile has a top-level `__END__`"},
+		{"return in the main Brewfile", "brew \"jq\"\n  return\n", workBrewfile, "the Brewfile has a top-level `return`"},
+		{"__END__ in a layer Brewfile", rootBrewfile, workBrewfile + "\n__END__\n", `the Brewfile of layer "work"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, fake, _ := layered(t, config.Brew{Cleanup: config.CleanupZap}, tt.root, tt.work)
+			_, err := m.Plan(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+			if len(fake.Calls) != 0 {
+				t.Errorf("ran %v", fake.Lines())
+			}
+		})
+	}
+}
+
+func TestEarlyEndIsFineWithoutLayersAndInComments(t *testing.T) {
+	m, fake, file := newModuleWith(t, config.Brew{}, "brew \"jq\"\n__END__\nnotes\n")
+	fake.OnOK("brew trust --json=v1", `{"taps":[]}`)
+	fake.OnOK("brew bundle check --file "+file+" --verbose --no-upgrade", "")
+	if _, err := m.Plan(context.Background()); err != nil {
+		t.Fatalf("a lone Brewfile is passed to brew as is: %v", err)
+	}
+
+	m, fake, _ = layered(t, config.Brew{}, "# return early\n"+rootBrewfile, workBrewfile)
+	fake.OnOK("brew trust --json=v1", `{"taps":["automaat/tap","acme/work"]}`)
+	fake.OnOK("brew bundle check --file=- --verbose --no-upgrade", "")
+	if _, err := m.Plan(context.Background()); err != nil {
+		t.Fatalf("a comment is not a directive: %v", err)
+	}
+}
