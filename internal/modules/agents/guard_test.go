@@ -69,7 +69,7 @@ func TestGuardDeniesApplyAndEditsInClaude(t *testing.T) {
 
 	m.Guard = false
 	changes := plan(t, m)
-	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-42 deny") {
+	if len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-50 deny") {
 		t.Fatalf("plan = %q", targets(changes))
 	}
 	apply(t, changes)
@@ -113,6 +113,48 @@ func TestGuardDeniesTheMainCheckoutOfAWorktree(t *testing.T) {
 		}
 	}
 	assertConverged(t, m)
+}
+
+func TestGuardDeniesEditsToEveryLayerCheckout(t *testing.T) {
+	m := guardedModule(t, config.ProviderClaude)
+	layerMain := filepath.Join(m.Paths.Home, "work")
+	layerTree := filepath.Join(m.Paths.Home, "wt", "work")
+	plain := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(layerMain, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitdir := filepath.Join(layerMain, ".git", "worktrees", "wt")
+	writeFile(t, filepath.Join(gitdir, "commondir"), "../..\n")
+	writeFile(t, filepath.Join(layerTree, ".git"), "gitdir: "+gitdir+"\n")
+	m.Paths.Layers = []string{layerTree, plain, m.Paths.Root}
+
+	apply(t, plan(t, m))
+
+	deny := settingsDeny(t, filepath.Join(m.Paths.Home, ".claude", "settings.json"))
+	for _, want := range []string{
+		"Edit(~/dotfiles/**)", "Edit(~/work/**)", "Edit(~/wt/work/**)",
+		"Edit(" + claudeAbsPath(filepath.ToSlash(realPath(plain))) + "/**)",
+	} {
+		if n := countOf(deny, want); n != 1 {
+			t.Errorf("deny holds %q %d times, want once: %q", want, n, deny)
+		}
+	}
+	assertConverged(t, m)
+
+	m.Paths.Layers = nil
+	if changes := plan(t, m); len(changes) != 1 || !strings.Contains(changes[0].Summary(), "-") {
+		t.Errorf("dropping the layers should drop their rules: %q", targets(changes))
+	}
+}
+
+func countOf(list []string, want string) int {
+	n := 0
+	for _, s := range list {
+		if s == want {
+			n++
+		}
+	}
+	return n
 }
 
 func TestGuardOutsideGitDeniesTheConfigDir(t *testing.T) {
@@ -368,8 +410,8 @@ func TestGuardRulesAreTheSameOffWindows(t *testing.T) {
 		m := guardedModule(t, config.ProviderClaude)
 		m.GOOS = goos
 		rules := m.claudeGuardRules()
-		if len(rules) != 42 {
-			t.Errorf("%s: %d rules, want 42", goos, len(rules))
+		if len(rules) != 50 {
+			t.Errorf("%s: %d rules, want 50", goos, len(rules))
 		}
 		for _, r := range rules {
 			if strings.HasPrefix(r, "PowerShell(") || strings.Contains(r, ".exe") {

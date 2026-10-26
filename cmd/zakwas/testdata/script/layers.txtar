@@ -1,0 +1,113 @@
+[windows] skip 'the layer commands use sh checks and shell paths'
+env ZAKWAS_TEST_GOOS=linux
+
+zakwas layer list
+stdout 'No layers registered'
+
+zakwas layer add work work
+stdout 'Added layer work'
+zakwas layer add lab lab/zakwas.yaml
+zakwas layer list
+stdout 'work\t.*[/]work[/]zakwas.yaml'
+stdout 'lab\t.*[/]lab[/]zakwas.yaml'
+
+zakwas plan
+stdout '\+ ~/.zshrc'
+stdout '\+ ~/.config/work/settings'
+stdout '\+ ~/.config/lab/settings'
+stdout 'work: marker'
+stdout 'lab: marker'
+
+zakwas apply -y
+stdout 'Applied \d+ of \d+ steps'
+cmp home/.config/work/settings work/settings
+cmp home/.config/lab/settings lab/settings
+exists home/.work-marker
+exists home/.lab-marker
+
+zakwas plan
+stdout 'No changes'
+zakwas check
+zakwas apply -y
+zakwas check
+exists home/.config/work/settings
+exists home/.config/lab/settings
+
+zakwas -c other/zakwas.yaml plan
+stdout '\+ ~/.other'
+! stdout 'marker'
+
+zakwas layer remove work
+stdout 'Removed layer work'
+zakwas plan
+stdout '- ~/.config/work/settings'
+! stdout 'lab/settings'
+zakwas apply -y
+! exists home/.config/work/settings
+exists home/.config/lab/settings
+zakwas check
+
+rm home/.zshrc
+mv lab lab-gone
+! zakwas plan
+stderr -count=1 'layer "lab"'
+stderr 'zakwas layer remove lab'
+! stdout .
+! zakwas check
+stderr 'zakwas layer remove lab'
+! zakwas apply -y
+stderr 'zakwas layer remove lab'
+! exists home/.zshrc
+exists home/.config/lab/settings
+mv lab-gone lab
+zakwas plan
+stdout '\+ ~/.zshrc'
+
+! zakwas layer add bad bad
+stderr 'brew is set in a layer'
+! zakwas layer add clash clash
+stderr 'overlaps'
+stderr 'clash[/]zakwas.yaml'
+! zakwas layer add lab lab
+stderr 'already registered'
+! zakwas layer remove nope
+stderr 'no layer "nope"'
+zakwas layer remove lab
+zakwas layer list
+stdout 'No layers registered'
+
+-- zakwas.yaml --
+files:
+  - {src: dotfiles/zshrc, dst: ~/.zshrc}
+-- dotfiles/zshrc --
+export EDITOR=vim
+-- work/zakwas.yaml --
+files:
+  - {src: settings, dst: ~/.config/work/settings}
+commands:
+  - name: "work: marker"
+    check: test -e ~/.work-marker
+    run: touch ~/.work-marker
+-- work/settings --
+work=1
+-- lab/zakwas.yaml --
+files:
+  - {src: settings, dst: ~/.config/lab/settings}
+commands:
+  - name: "lab: marker"
+    check: test -e ~/.lab-marker
+    run: touch ~/.lab-marker
+-- lab/settings --
+lab=1
+-- other/zakwas.yaml --
+files:
+  - {src: o, dst: ~/.other}
+-- other/o --
+other
+-- bad/zakwas.yaml --
+brew: {file: Brewfile}
+-- clash/zakwas.yaml --
+files:
+  - {src: c, dst: ~/.zshrc}
+-- clash/c --
+clash

@@ -119,9 +119,9 @@ func TestGuardPlanNamesZakwasExeOnlyOnWindows(t *testing.T) {
 		wantRules string
 		exe       bool
 	}{
-		{platform.Darwin, "permissions +42 deny", false},
-		{platform.Linux, "permissions +42 deny", false},
-		{platform.Windows, "permissions +222 deny", true},
+		{platform.Darwin, "permissions +50 deny", false},
+		{platform.Linux, "permissions +50 deny", false},
+		{platform.Windows, "permissions +266 deny", true},
 	} {
 		t.Run(tt.goos, func(t *testing.T) {
 			env, home := setup(t, guardedFiles)

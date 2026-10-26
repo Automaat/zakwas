@@ -118,6 +118,10 @@ Windows PowerShell 5.1 blocks scripts by default (`Restricted`), so the command 
 
 `files` and `templates` write copies with write bits stripped; `protect.immutable` adds the macOS `uchg` flag (on Linux files stay read-only copies). To change one, edit it in the repo and `zakwas apply`. A file zakwas did not write, or that was edited in place, is backed up to `<file>.zakwas-bak` before it is replaced. See [docs/config.md](docs/config.md#files) and [troubleshooting](docs/troubleshooting.md#the-plan-shows-edited-in-place-or-not-managed-yet-and-a-zakwas-bak-file).
 
+## Layers
+
+A machine can add a second config repo (say a work one next to your private one) without the main repo referencing it: `zakwas layer add work ~/work/dotfiles/zakwas.yaml`. The layers merge into one config, one plan and one state, so neither repo's `apply` prunes the other's files. A layer's `brew`, `mise` and `agents` sections are not merged yet, and `protect` stays with the main config. See [Layers](docs/config.md#layers).
+
 ## Security model
 
 zakwas runs as your user, and your config repo is code that runs as you: apply only a config you trust. `plan` and `check` never change the system. `sudo` is used only during `apply`, for Touch ID and the Homebrew installer. Downloads are checksum-verified, and the Homebrew installer and mise are pinned. Details and limits, including what the agent guard does not stop, are in [docs/security.md](docs/security.md). Report a vulnerability through [SECURITY.md](SECURITY.md), not a public issue.
@@ -132,7 +136,7 @@ zakwas runs as your user, and your config repo is code that runs as you: apply o
 
 - [docs/getting-started.md](docs/getting-started.md): the normal loop, from `init` to a second Mac
 - [docs/commands.md](docs/commands.md): commands, flags, output, JSON, exit codes, environment
-- [docs/config.md](docs/config.md): every key in `zakwas.yaml`, editor setup
+- [docs/config.md](docs/config.md): every key in `zakwas.yaml`, editor setup, [local layers](docs/config.md#layers) for a second config repo (work next to private)
 - [docs/recipes.md](docs/recipes.md): snippets for common setups
 - [examples/](examples): a complete sample config repo ([examples/zakwas.yaml](examples/zakwas.yaml))
 - [docs/agents.md](docs/agents.md): coding agents: what each supports and the capture, propose, approve flow

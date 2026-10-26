@@ -16,6 +16,7 @@ Declarative macOS setup: a Go CLI that converges a Mac to `zakwas.yaml` (files, 
 | `internal/modules/<name>/` | one package per module |
 | `internal/proposal/` | typed config edits (byte-splicing), proposal store, risk tiers |
 | `.claude-plugin/`, `plugins/zakwas/` | the repo's agent marketplace and its `zakwas` plugin (skill teaching agents the proposal flow); `plugin.json` holds the plugin version |
+| `internal/layers/` | registry of local config layers (`~/.local/state/zakwas/layers.json`, keyed by the real path of the main config root) |
 | `internal/install/` | protected-copy writer + hash state (`~/.local/state/zakwas/files.json`) |
 | `internal/lock/` | flock that serializes `apply`/`upgrade` (`~/.local/state/zakwas/lock`) |
 | `internal/runner/` | exec abstraction; `runnertest.Fake` for tests |
@@ -63,6 +64,7 @@ system → files → links → templates → brew → mise → agents → comman
 - `files`/`links`/`templates` destinations must be absolute or `~/…` (no `$VAR`) and must not overlap (case-insensitive). Modes are octal: `0644`, not `644`.
 - zakwas refuses to write through a symlinked parent dir under `$HOME` or one resolving into the config repo.
 - The mise module runs mise from `/`: from `$HOME`, mise treats `~/.config/mise/config.toml` as a project config that outranks the repo file, hiding bumped pins until after `apply`.
+- Local layers: `config.ParseLayered` (`internal/config/layers.go`) is the one place a merged config is built; `cli.loadConfig` feeds it the registry's layers for the root, and `approve` (`config.LoadLayered`) and `proposal.Apply` pass `cfg.LayerRefs()`, so nothing plans or validates the root alone. A layer is validated alone first, then the merged config runs the existing cross-entry checks; entries carry their file through `Config.where` labels. Layer relative `src` paths are made absolute at merge. A missing or invalid layer is a `config.LayerError` that fails the load, never a skip (a skip would prune the layer's files). `protect`, `brew`, `mise` and `agents` are root-only (`rootOnly`). Every check that compares against `Paths.Root` iterates `Paths.Roots()` (guard `Edit` rules, `install.CheckParents`). `layer` is in `config.GuardedCommands`; `layer add`/`remove` refuse an agent session and take the run lock, `remove` and `list` load the root alone so they work when a layer is broken.
 - `commands` stops at the first failing entry.
 - launchd: `plan` only runs `launchctl print`; apply writes `~/Library/LaunchAgents/<label>.plist`, then `bootstrap`s it (`bootout` first on a change). Only labels in `~/.local/state/zakwas/launchd.json` are ever unloaded or deleted; a configured label loaded from a plist zakwas did not write is a plan error.
 - zakwas bootstraps its own prerequisites: brew/mise modules plan an install of Homebrew / mise (pinned `mise.Version`, SHA256 from the release's `SHASUMS256.txt`) when `Runner.Installed` says the binary is missing. `main` appends `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` to `PATH` so later modules find what earlier ones installed.

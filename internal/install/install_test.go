@@ -414,6 +414,39 @@ func TestSymlinkedParentRefused(t *testing.T) {
 	}
 }
 
+func TestSymlinkedParentResolvingIntoALayerRepoRefused(t *testing.T) {
+	testutil.RequireSymlinks(t)
+	in, _ := newInstaller(t, false)
+	main, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	layer, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Paths.Root, in.Paths.Layers = main, []string{layer}
+	mustWrite(t, filepath.Join(layer, "d/f"), "v1")
+	link := filepath.Join(t.TempDir(), "d")
+	if err := os.Symlink(filepath.Join(layer, "d"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = in.Plan(filepath.Join(link, "f"), []byte("v2"), 0o644)
+
+	if err == nil || !strings.Contains(err.Error(), "is a symlink; remove it") {
+		t.Fatalf("err = %v, want the symlinked-parent refusal", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(layer, "d/f")); string(got) != "v1" {
+		t.Errorf("the layer's source changed to %q", got)
+	}
+
+	in.Paths.Layers = nil
+	if _, err := in.Plan(filepath.Join(link, "f"), []byte("v2"), 0o644); err != nil {
+		t.Errorf("without the layer's root the link is outside every repo: %v", err)
+	}
+}
+
 func TestSymlinkOutsideHomeAllowed(t *testing.T) {
 	in, _ := newInstaller(t, false)
 	target := t.TempDir()

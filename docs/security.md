@@ -50,9 +50,9 @@ An agent that can run `zakwas apply` can write the agent config files it may not
 
 ### What the guard does
 
-- **Denies commands.** Every managed agent is denied `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`. Claude Code, Gemini CLI and opencode also match a flag before the command (`zakwas -c zakwas.yaml apply`) and a path (`~/.local/bin/zakwas apply`); Codex matches the command as written.
-- **Denies edits.** Claude Code is denied edits to the config repo's main checkout (and the linked worktree zakwas runs from) and to `~/.local/state/zakwas`. Worktrees an agent creates elsewhere stay editable, so an agent can still propose a change as a branch.
-- **Refuses sessions.** `zakwas apply`, `upgrade` and `approve` exit 1 before changing anything when they start inside an agent session.
+- **Denies commands.** Every managed agent is denied `zakwas apply`, `upgrade`, `self-update`, `approve`, `mcp` and `layer`. Claude Code, Gemini CLI and opencode also match a flag before the command (`zakwas -c zakwas.yaml apply`) and a path (`~/.local/bin/zakwas apply`); Codex matches the command as written.
+- **Denies edits.** Claude Code is denied edits to the config repo's main checkout (and the linked worktree zakwas runs from), to the checkouts of the repos of any [registered layer](#layers) and to `~/.local/state/zakwas`. Worktrees an agent creates elsewhere stay editable, so an agent can still propose a change as a branch.
+- **Refuses sessions.** `zakwas apply`, `upgrade`, `approve` and `layer add` / `remove` exit 1 before changing anything when they start inside an agent session.
 - **Leaves reading and proposing open.** `plan`, `check`, `capture` and `propose` change nothing outside a saved proposal, so agents keep them.
 
 ### Why deny rules are the boundary
@@ -121,6 +121,14 @@ What stops an agent from answering its own form is that it does not start the se
 - No environment check stands in the way. The server has to run inside agent sessions, so unlike `apply` it has no session refusal.
 
 What remains bounded is the damage: the wrapped server applies only a low-risk proposal, checks it again before writing, commits to the current branch without pushing, and records the apply in the history. High-risk changes still need `zakwas approve` in a terminal. To close the gap, don't let the agent run shell wrappers unreviewed: keep its own approval prompts on for commands the deny rules don't recognize. A person who starts the server in a shell outside the agent is out of scope.
+
+## Layers
+
+A [layer](config.md#layers) is another `zakwas.yaml` that a machine merges into its config, and it has the full power of the main one: shell `commands`, files and links written anywhere under your home, `launchd` jobs and `defaults`. Registering a layer is therefore the same decision as applying that repo's config. Register only repos you control, and review `zakwas plan` after `zakwas layer add`.
+
+- **A layer cannot widen the machine-wide settings.** `protect`, `brew`, `mise` and `agents` (so the guard, the agent providers and the permission rules) are read from the main config only; a layer that sets one fails validation.
+- **Agents can't register one.** `layer` is a guarded command: the deny rules cover it and `layer add` / `remove` refuse an agent session. A layer path that an agent can write to is a way to run commands at the next `apply`, which is why the guard's edit rules cover every layer repo's checkout, not just the main one.
+- **A broken layer stops everything.** A missing or invalid layer fails the plan instead of being skipped, so a moved checkout can never turn into a prune of what it installed.
 
 ## sudo
 

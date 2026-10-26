@@ -275,7 +275,7 @@ func (a *approval) checkGit(ctx context.Context, rels []string) (string, error) 
 // are already on disk, so the plan is made again and must match the one that
 // was reviewed.
 func (a *approval) apply(ctx context.Context, ev *evaluation, style engine.Style) int {
-	cfg, err := config.LoadFor(a.cfg.Path, a.env.Home, a.env.GOOS)
+	cfg, err := config.LoadLayered(a.cfg.Path, a.env.Home, a.env.GOOS, a.cfg.LayerRefs())
 	if err != nil {
 		a.errOut.fail(err)
 		return ExitErr

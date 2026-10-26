@@ -527,3 +527,39 @@ func TestValidateRefusesTextThatCannotBeWrittenBack(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyKeepsTheLayersOfTheConfig(t *testing.T) {
+	cfg, home := newRepo(t, baseConfig)
+	layerDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	layer := config.Layer{Name: "work", Path: filepath.Join(layerDir, "zakwas.yaml")}
+	if err := os.WriteFile(layer.Path, []byte("files: [{src: f, dst: ~/.work}]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	layered, err := config.LoadLayered(cfg.Path, home, platform.Darwin, []config.Layer{layer})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Apply([]Op{{Kind: RemovePermission, Decision: "allow", Command: "ls"}}, layered, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := res.Config.LayerRefs(); len(got) != 1 || got[0] != layer {
+		t.Errorf("layers of the edited config = %v, want %v", got, layer)
+	}
+	if len(res.Config.Files) != 1 || res.Config.Files[0].Dst != "~/.work" {
+		t.Errorf("files = %+v, want the layer's entry in the edited config", res.Config.Files)
+	}
+
+	if err := os.Remove(layer.Path); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Apply([]Op{{Kind: RemovePermission, Decision: "allow", Command: "ls"}}, layered, home)
+	if err == nil || !strings.Contains(err.Error(), "zakwas layer remove work") {
+		t.Errorf("err = %v, want one pointing at `zakwas layer remove work`", err)
+	}
+}

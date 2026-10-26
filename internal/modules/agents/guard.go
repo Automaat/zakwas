@@ -74,25 +74,28 @@ func claudeAbsPath(slashed string) string {
 
 // guardedDirs are the directories Claude is denied edits to: the config
 // repo's checkout, and its main checkout when that is another one, a
-// worktree of it. Agents work in worktrees, so those stay editable. A repo
+// worktree of it, for the main config and for each local layer. Agents work
+// in worktrees, so those stay editable. A repo
 // that holds the home directory can't be denied; the warning says so.
 func (m *Module) guardedDirs() (dirs []string, warning string) {
-	root := realPath(m.Paths.Root)
-	top, main := repoCheckouts(root)
-	candidates := []string{top, main}
-	if top == "" {
-		candidates = []string{root}
-	}
-	for _, d := range candidates {
-		if contains(d, m.Paths.Home) {
-			warning = "the config repo holds your home directory, so Claude's edits to it can't be denied"
-			d = root
+	for _, r := range m.Paths.Roots() {
+		root := realPath(r)
+		top, main := repoCheckouts(root)
+		candidates := []string{top, main}
+		if top == "" {
+			candidates = []string{root}
 		}
-		if contains(d, m.Paths.Home) {
-			continue
-		}
-		if !hasDir(dirs, d) {
-			dirs = append(dirs, d)
+		for _, d := range candidates {
+			if contains(d, m.Paths.Home) {
+				warning = "the config repo holds your home directory, so Claude's edits to it can't be denied"
+				d = root
+			}
+			if contains(d, m.Paths.Home) {
+				continue
+			}
+			if !hasDir(dirs, d) {
+				dirs = append(dirs, d)
+			}
 		}
 	}
 	return dirs, warning

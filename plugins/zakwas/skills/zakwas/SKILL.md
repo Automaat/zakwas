@@ -11,7 +11,7 @@ zakwas converges this machine (macOS or Linux) to a `zakwas.yaml` in a config re
 
 - Edit agent config: `~/.claude/settings.json`, `~/.claude.json`, `~/.codex/config.toml`, `~/.codex/rules/`, `~/.config/opencode/opencode.json`, `~/.agents/`, `~/.gemini/`, `~/.copilot/`.
 - Edit `zakwas.yaml`, the Brewfile or the mise config in the config repo.
-- Run `zakwas apply`, `upgrade`, `approve`, `self-update` or `mcp`. The guard denies them, and a workaround (`sh -c`, a script, another tool) defeats the point of the approval.
+- Run `zakwas apply`, `upgrade`, `approve`, `self-update`, `mcp` or `layer`. The guard denies them, and a workaround (`sh -c`, a script, another tool) defeats the point of the approval.
 - Run `claude plugin install`, `codex plugin add`, `brew install`, `mise use` or similar to get the same result outside zakwas.
 
 ## Propose a change

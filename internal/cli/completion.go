@@ -17,6 +17,8 @@ func completionModules() []string { return platform.SupportedModules(platform.Cu
 
 var shells = []string{"zsh", "bash", "fish"}
 
+var layerCommands = []string{"add", "remove", "list"}
+
 // planCommands share the flags defined by newFlags.
 var planCommands = []string{"plan", "apply", "upgrade", "check"}
 
@@ -76,7 +78,7 @@ func isBoolFlag(f *flag.Flag) bool {
 }
 
 type completionModel struct {
-	global, init, selfUpdate, capture, propose, proposals, approve, mcp []complFlag
+	global, init, selfUpdate, capture, propose, proposals, approve, mcp, layer []complFlag
 }
 
 func newCompletionModel() completionModel {
@@ -89,9 +91,10 @@ func newCompletionModel() completionModel {
 	proposalsFS, _ := newConfigFlags("proposals", "", true, discard)
 	approveFS, _ := newConfigFlags("approve", "", false, discard)
 	mcpFS, _ := newMCPFlags(discard)
+	layerFS, _ := newConfigFlags("layer", "", false, discard)
 	return completionModel{
 		global: flagsOf(global), init: flagsOf(initFS), selfUpdate: flagsOf(selfUpdateFS),
-		capture: flagsOf(captureFS), propose: flagsOf(proposeFS), proposals: flagsOf(proposalsFS), approve: flagsOf(approveFS), mcp: flagsOf(mcpFS),
+		capture: flagsOf(captureFS), propose: flagsOf(proposeFS), proposals: flagsOf(proposalsFS), approve: flagsOf(approveFS), mcp: flagsOf(mcpFS), layer: flagsOf(layerFS),
 	}
 }
 
@@ -130,7 +133,7 @@ func commandNames() []string {
 }
 
 func (m completionModel) all() []complFlag {
-	return slices.Concat(m.global, m.init, m.selfUpdate, m.capture, m.propose, m.proposals, m.approve, m.mcp)
+	return slices.Concat(m.global, m.init, m.selfUpdate, m.capture, m.propose, m.proposals, m.approve, m.mcp, m.layer)
 }
 
 func (m completionModel) bash() string {
@@ -167,6 +170,7 @@ func (m completionModel) bash() string {
 	fmt.Fprintf(&b, "        proposals) words='%s' ;;\n", spellingsOf(m.proposals))
 	fmt.Fprintf(&b, "        approve) words='%s' ;;\n", spellingsOf(m.approve))
 	fmt.Fprintf(&b, "        mcp) words='%s' ;;\n", spellingsOf(m.mcp))
+	fmt.Fprintf(&b, "        layer) words='%s %s' ;;\n", strings.Join(layerCommands, " "), spellingsOf(m.layer))
 	fmt.Fprintf(&b, "        completion) words='%s' ;;\n", strings.Join(shells, " "))
 	b.WriteString("        *) return ;;\n    esac\n")
 	b.WriteString("    COMPREPLY=($(compgen -W \"$words\" -- \"$cur\"))\n}\n")
@@ -218,6 +222,11 @@ func (m completionModel) zsh() string {
 		}
 		b.WriteString(" ;;\n")
 	}
+	b.WriteString("        layer) _arguments")
+	for _, f := range m.layer {
+		b.WriteString(" " + zshSpec(f, ""))
+	}
+	fmt.Fprintf(&b, " '1:command:(%s)' ;;\n", strings.Join(layerCommands, " "))
 	fmt.Fprintf(&b, "        completion) _arguments '1:shell:(%s)' ;;\n", strings.Join(shells, " "))
 	b.WriteString("      esac ;;\n  esac\n}\n\n")
 	b.WriteString("if [[ $funcstack[1] == _zakwas ]]; then\n  _zakwas \"$@\"\nelse\n  compdef _zakwas zakwas\nfi\n")
@@ -269,6 +278,10 @@ func (m completionModel) fish() string {
 			b.WriteString(fishFlag(fishQuote("__fish_seen_subcommand_from "+sub.name), f))
 		}
 	}
+	for _, f := range m.layer {
+		b.WriteString(fishFlag(fishQuote("__fish_seen_subcommand_from layer"), f))
+	}
+	fmt.Fprintf(&b, "complete -c zakwas -n '__fish_seen_subcommand_from layer' -a %s\n", fishQuote(strings.Join(layerCommands, " ")))
 	fmt.Fprintf(&b, "complete -c zakwas -n '__fish_seen_subcommand_from completion' -a %s\n", fishQuote(strings.Join(shells, " ")))
 	return b.String()
 }

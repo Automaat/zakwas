@@ -47,6 +47,7 @@ var commandList = []struct{ name, args, help string }{
 	{"proposals", "", "list pending proposals"},
 	{"approve", "ID", "show a proposal's diff and plan, confirm, apply it and commit it"},
 	{"mcp", "[--enable-apply]", "serve config reads and proposals to coding agents over MCP"},
+	{"layer", "add|remove|list", "register another zakwas.yaml on this machine, merged into this config"},
 	{"init", "DIR [--add PATH]...", "create a starter config repo in DIR from this Mac"},
 	{"self-update", "[--version X.Y.Z]", "replace this zakwas binary with a release"},
 	{"completion", "zsh|bash|fish", "print a shell completion script"},
@@ -173,6 +174,8 @@ func run(ctx context.Context, env Env, out, errOut *console) int {
 			return runApprove(ctx, env, env.Args[1:], out, errOut)
 		case "mcp":
 			return runMCP(ctx, env, env.Args[1:], out, errOut)
+		case "layer":
+			return runLayer(ctx, env, env.Args[1:], out, errOut)
 		}
 	}
 	fs, o := newFlags(errOut)
@@ -583,20 +586,40 @@ func parseCommand(fs *flag.FlagSet, out *console, parse func() error) (int, bool
 	return ExitUsage, false
 }
 
+// loadConfig is how every command that plans, applies or checks a proposal
+// loads the config: the main zakwas.yaml with the local layers registered for
+// its root merged in, so no path sees the root alone and plans removals of
+// what a layer installed.
 func loadConfig(flagPath string, env Env) (*config.Config, error) {
-	path := flagPath
-	if path == "" {
-		found, err := config.Find(env.Cwd)
-		switch {
-		case err == nil:
-			path = found
-		case os.Getenv("ZAKWAS_CONFIG") != "":
-			path = os.Getenv("ZAKWAS_CONFIG")
-		default:
-			return nil, err
-		}
+	path, err := configPath(flagPath, env)
+	if err != nil {
+		return nil, err
 	}
-	return config.LoadFor(path, env.Home, env.GOOS)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	layers, err := registeredLayers(path, env.Home)
+	if err != nil {
+		return nil, err
+	}
+	return config.ParseLayered(data, path, env.Home, env.GOOS, layers)
+}
+
+// configPath finds zakwas.yaml: -c, else upward from the working directory,
+// else $ZAKWAS_CONFIG.
+func configPath(flagPath string, env Env) (string, error) {
+	if flagPath != "" {
+		return flagPath, nil
+	}
+	found, err := config.Find(env.Cwd)
+	switch {
+	case err == nil:
+		return found, nil
+	case os.Getenv("ZAKWAS_CONFIG") != "":
+		return os.Getenv("ZAKWAS_CONFIG"), nil
+	}
+	return "", err
 }
 
 // Modules returns every configured module in apply order. Order matters:
@@ -606,7 +629,7 @@ func loadConfig(flagPath string, env Env) (*config.Config, error) {
 func Modules(cfg *config.Config, env Env) []engine.Module {
 	goos := env.goos()
 	here := func(module string) bool { return platform.Supported(module, goos) }
-	paths := config.Paths{Home: env.Home, Root: cfg.Root}
+	paths := cfg.Paths(env.Home)
 	immutable := cfg.Protect.Immutable && platform.FeatureSupported("protect.immutable", goos)
 	installer := &install.Installer{Paths: paths, StatePath: install.StatePath(env.Home), Immutable: immutable}
 	var mods []engine.Module

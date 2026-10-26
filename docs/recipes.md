@@ -186,7 +186,7 @@ Start them with `claude --agent review`, `codex --profile review`, `opencode --a
 
 ## Guard: keep agents from applying the config
 
-With an `agents` section the guard is on, with nothing to configure. zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`, denies Claude Code edits to the config repo and zakwas state, and refuses `apply` started from an agent session. Run `apply` in a terminal outside the agent. Agents keep `plan`, `check`, `capture` and `propose`.
+With an `agents` section the guard is on, with nothing to configure. zakwas denies the managed agents `zakwas apply`, `upgrade`, `self-update`, `approve`, `mcp` and `layer`, denies Claude Code edits to the config repo and zakwas state, and refuses `apply` started from an agent session. Run `apply` in a terminal outside the agent. Agents keep `plan`, `check`, `capture` and `propose`.
 
 To turn it off:
 

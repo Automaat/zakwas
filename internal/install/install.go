@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -306,7 +307,7 @@ func CheckParents(paths config.Paths, dst string) error {
 	for dir := filepath.Dir(filepath.Clean(dst)); ; dir = filepath.Dir(dir) {
 		info, err := os.Lstat(dir)
 		if err == nil && isLink(dir, info) &&
-			(within(dir, home) || resolvesInto(dir, paths.Root)) {
+			(within(dir, home) || slices.ContainsFunc(paths.Roots(), func(root string) bool { return resolvesInto(dir, root) })) {
 			return fmt.Errorf("parent %s of %s is a symlink; remove it", paths.Pretty(dir), paths.Pretty(dst))
 		}
 		if filepath.Dir(dir) == dir {
