@@ -274,3 +274,82 @@ func TestDefaultLayer(t *testing.T) {
 		t.Error("an empty layer must change nothing")
 	}
 }
+
+func TestApplyRemovesTheRuleOfTheLayerNamedWhenTwoFilesDeclareTheCommand(t *testing.T) {
+	mainYAML := strings.Replace(baseConfig, "providers: [claude]", "providers: [claude, opencode]", 1)
+	mainYAML = strings.Replace(mainYAML, "    deny:\n      - rm\n", "    deny:\n      - command: rm\n        providers: [claude]\n", 1)
+	base, home := newRepo(t, mainYAML)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	layer := config.Layer{Name: "work", Path: filepath.Join(dir, "zakwas.yaml")}
+	if err := os.WriteFile(layer.Path, []byte("agents:\n  permissions:\n    deny:\n      - command: rm\n        providers: [opencode]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadLayered(base.Path, home, platform.Darwin, []config.Layer{layer})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Apply([]Op{{Kind: RemovePermission, Decision: "deny", Command: "rm", Layer: "work"}}, cfg, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Layer != "work" || len(res.Edits) != 1 || res.Edits[0].Path != layer.Path {
+		t.Errorf("layer = %q, edits = %+v, want the layer's rule removed", res.Layer, res.Edits)
+	}
+	_, err = Apply([]Op{{Kind: RemovePermission, Decision: "deny", Command: "rm"}}, cfg, home)
+	if err == nil || !strings.Contains(err.Error(), "name a layer") {
+		t.Errorf("without a layer: err = %v, want the ambiguity reported", err)
+	}
+}
+
+func TestApplyRefusesALayerPluginFromAnotherLayersMarketplace(t *testing.T) {
+	cfg, home, _ := layeredRepo(t, layerYAML)
+	other, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherFile := filepath.Join(other, "zakwas.yaml")
+	if err := os.WriteFile(otherFile, []byte("agents:\n  marketplaces:\n    ok: owner/ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = config.LoadLayered(cfg.Path, home, platform.Darwin, append(cfg.LayerRefs(), config.Layer{Name: "other", Path: otherFile}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Apply([]Op{{Kind: AddPlugin, Name: "w2@ok", Layer: "work"}}, cfg, home)
+	if err == nil || !strings.Contains(err.Error(), `layer "work" can't depend on another layer`) {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := Apply([]Op{{Kind: AddPlugin, Name: "w2@ok", Layer: "other"}}, cfg, home); err != nil {
+		t.Errorf("a plugin in the layer that declares the marketplace: %v", err)
+	}
+}
+
+func TestApplyLeavesTheMainFileAloneForALayerOnlyProposal(t *testing.T) {
+	cfg, home, _ := layeredRepo(t, layerYAML)
+	real := filepath.Join(t.TempDir(), "real.yaml")
+	data, err := os.ReadFile(cfg.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(cfg.Path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, cfg.Path); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+
+	if _, err := Apply([]Op{{Kind: AddPermission, Decision: "deny", Command: "dd", Layer: "work"}}, cfg, home); err != nil {
+		t.Errorf("a layer edit with a symlinked main file: %v", err)
+	}
+	if _, err := Apply([]Op{{Kind: AddPermission, Decision: "deny", Command: "dd"}}, cfg, home); err == nil || !strings.Contains(err.Error(), "is a symlink") {
+		t.Errorf("a main edit with a symlinked main file: err = %v", err)
+	}
+}

@@ -94,13 +94,27 @@ func Apply(ops []Op, cfg *config.Config, home string) (*Result, error) {
 			sources[l.Path] = f.New
 		}
 	}
-	newCfg, err := config.ParseLayeredWith(e.files[cfg.Path].New, cfg.Path, home, cfg.GOOS, cfg.LayerRefs(), sources)
+	mainYAML, err := e.mainYAML()
+	if err != nil {
+		return nil, err
+	}
+	newCfg, err := config.ParseLayeredWith(mainYAML, cfg.Path, home, cfg.GOOS, cfg.LayerRefs(), sources)
 	if err != nil {
 		return nil, fmt.Errorf("the edited config is invalid: %w", err)
 	}
 	res.Config = newCfg
 	res.Layer, res.Root = e.repo.layer, e.repo.root
 	return res, nil
+}
+
+// mainYAML is the main zakwas.yaml as the operations left it. A file they
+// don't edit is only read, so a layer-only proposal doesn't need it to be a
+// regular file inside the repo.
+func (e *editor) mainYAML() ([]byte, error) {
+	if f, ok := e.files[e.cfg.Path]; ok {
+		return f.New, nil
+	}
+	return os.ReadFile(e.cfg.Path)
 }
 
 // main is the target of the main config's repo.
@@ -179,10 +193,6 @@ func (e *editor) file(path, root string) (*Edit, error) {
 }
 
 func (e *editor) apply(op Op) error {
-	// The main zakwas.yaml is always read: the edited config is parsed from it.
-	if _, err := e.file(e.cfg.Path, e.cfg.Root); err != nil {
-		return err
-	}
 	paths := config.Paths{Home: e.home, Root: e.cfg.Root}
 	switch op.Kind {
 	case AddBrew:
@@ -238,12 +248,16 @@ func (e *editor) yamlTarget(op Op) (target, error) {
 	}
 	switch len(files) {
 	case 0:
-		// Not declared anywhere: editing reports it.
 		return e.addTarget(op)
 	case 1:
 		return e.holderTarget(op, files[0])
 	}
-	return target{}, fmt.Errorf("%s has a rule for %q in %s; remove it with the layer that holds it named", op.Decision, want, strings.Join(files, " and "))
+	if op.Layer != "" {
+		if t, err := e.layerNamed(op.Layer); err == nil && slices.Contains(files, t.yaml) {
+			return t, nil
+		}
+	}
+	return target{}, fmt.Errorf("%s has a rule for %q in %s; name a layer to remove its rule, and remove the main config's by hand", op.Decision, want, strings.Join(files, " and "))
 }
 
 // rules are the merged permission rules of one decision.
@@ -464,8 +478,8 @@ func (e *editor) editYAML(y *yamlFile, op Op, t target) error {
 }
 
 // marketplaceFor checks a plugin's marketplace is declared where the plugin
-// can use it. The main config can't lean on a marketplace only a layer
-// declares: the repo would stop validating on a machine without the layer.
+// can use it. A repo can't lean on a marketplace only another layer declares:
+// it would stop validating on a machine without that layer.
 func (e *editor) marketplaceFor(mkt string, t target) error {
 	var declaredIn string
 	switch {
@@ -484,10 +498,13 @@ func (e *editor) marketplaceFor(mkt string, t target) error {
 		}
 		declaredIn = layer
 	}
-	if t.layer == "" && declaredIn != "" {
+	switch {
+	case declaredIn == "" || declaredIn == t.layer:
+		return nil
+	case t.layer == "":
 		return fmt.Errorf("marketplace %q is declared only by layer %q, and the main config can't depend on a layer; add the plugin to that layer", mkt, declaredIn)
 	}
-	return nil
+	return fmt.Errorf("marketplace %q is declared only by layer %q, and layer %q can't depend on another layer; add the plugin to layer %q or declare the marketplace in layer %q", mkt, declaredIn, t.layer, declaredIn, t.layer)
 }
 
 func mcpEntry(indent string, op Op) []string {
