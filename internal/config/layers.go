@@ -119,8 +119,9 @@ func LoadLayered(path, home, goos string, layers []Layer) (*Config, error) {
 // A layer may set mise.config when the main config has a mise section; a
 // tool pinned in two mise configs is an error naming both files. A layer may
 // set brew.file, an extra Brewfile the main config's brew section converges
-// with its own, when the main config has one. protect, agents, mise.prune
-// and brew's cleanup and upgrade belong to the main config only. The merged
+// with its own, when the main config has one. protect, mise.prune and brew's
+// cleanup and upgrade belong to the main config only. Agents sections merge
+// into the main config's, which must have one; see agentsMerge. The merged
 // config is validated as a whole, so a destination two files both claim is
 // an error naming both. A layer that is missing or invalid fails the load.
 func ParseLayered(data []byte, path, home, goos string, layers []Layer) (*Config, error) {
@@ -154,6 +155,7 @@ type merge struct {
 	seen    map[string]bool
 	varFile map[string]string
 	sshFile string
+	agents  *agentsMerge
 }
 
 func newMerge(c *Config) *merge {
@@ -175,6 +177,7 @@ func newMerge(c *Config) *merge {
 	}
 	m.origins = map[string][]string{}
 	mg := &merge{cfg: &m, seen: map[string]bool{c.Path: true}, varFile: map[string]string{}}
+	mg.agents = newAgentsMerge(&m, c)
 	mg.label("files", len(c.Files), c.Path)
 	mg.label("links", len(c.Links), c.Path)
 	mg.label("templates.files", len(c.Templates.Files), c.Path)
@@ -252,6 +255,7 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	m.label("templates.files", len(lc.Templates.Files), lc.Path)
 	m.label("defaults", len(lc.Defaults), lc.Path)
 	m.label("launchd", len(lc.Launchd), lc.Path)
+	errs = append(errs, m.agents.add(lc)...)
 	for _, k := range slices.Sorted(maps.Keys(lc.Templates.Vars)) {
 		if first, dup := m.varFile[k]; dup {
 			errs = append(errs, fmt.Errorf("templates.vars.%s is set in both %s and %s", k, first, lc.Path))
@@ -286,7 +290,13 @@ func loadLayer(l Layer, home, goos string) (*Config, error) {
 	if errs := rootOnly(data); len(errs) > 0 {
 		return nil, &LayerError{Layer: l, Err: fmt.Errorf("%s: %w", l.Path, errors.Join(errs...))}
 	}
-	if err := lc.Validate(home); err != nil {
+	// The agents section may refer to entries of another file, so it is
+	// validated once merged.
+	agents := lc.Agents
+	lc.Agents = nil
+	err = lc.Validate(home)
+	lc.Agents = agents
+	if err != nil {
 		return nil, &LayerError{Layer: l, Err: fmt.Errorf("%s: %w", l.Path, err)}
 	}
 	return lc, nil
@@ -300,7 +310,7 @@ func rootOnly(data []byte) []error {
 		return nil
 	}
 	var errs []error
-	for _, name := range []string{"protect", "agents"} {
+	for _, name := range []string{"protect"} {
 		if _, set := top[name]; set {
 			errs = append(errs, fmt.Errorf("%s is set in a layer; only the main zakwas.yaml may set it", name))
 		}
@@ -311,7 +321,7 @@ func rootOnly(data []byte) []error {
 	if node, set := top["brew"]; set {
 		errs = append(errs, brewRootOnly(node)...)
 	}
-	return errs
+	return append(errs, rootOnlyAgents(top)...)
 }
 
 // brewRootOnly allows only brew.file in a layer: cleanup and upgrade are

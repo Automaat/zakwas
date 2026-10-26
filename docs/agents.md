@@ -80,6 +80,23 @@ agents:
 
 `zakwas plan` lists what each agent gets. `zakwas apply` writes it and records what it wrote, so later removing an entry removes only what zakwas added, never what you set yourself. An MCP server that already exists and differs from the declaration fails the plan instead of being replaced, and a file zakwas did not write is backed up to `<file>.zakwas-bak` first. [recipes.md](recipes.md) has a tested recipe for each key.
 
+## A work setup on top
+
+A machine that also runs a work config repo can keep the work-only marketplaces, plugins, MCP servers, permissions, skills, profiles and instructions in that repo, registered as a [local layer](config.md#layers). The main repo only needs an `agents` section; the layer adds to it, and `prune` sees both, so neither repo removes what the other installed:
+
+```yaml
+agents:
+  marketplaces:
+    work: example/work-plugins
+  plugins:
+    - work-tools@work
+  instructions: dotfiles/work/AGENTS.md
+  mcp:
+    tickets: {url: "https://tickets.example.com/mcp", bearerTokenEnv: TICKETS_TOKEN}
+```
+
+Which keys merge and which stay with the main config is in [config.md](config.md#layer-agents).
+
 ## Day to day
 
 Agents change their own setup all the time: you approve a command, install a plugin, add an MCP server. With `prune` the next `apply` removes an undeclared plugin, and without it the next Mac still never gets it. The loop that keeps the config repo the source of truth:

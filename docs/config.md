@@ -920,7 +920,7 @@ zakwas plan
 
 The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. Running `plan`, `check` or `apply` from a layer's own checkout (or with `-c` on its file) is refused with a line naming the main config, since loaded alone it would plan the removal of everything the main config installed. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
 
-A layer is an ordinary `zakwas.yaml`; `protect` and `agents` are refused when the key is present, even empty, and so is `mise.prune`; a layer may set only `mise.config` (see [mise configs](#mise-configs-in-layers)) and only `brew.file` (see [Brewfiles in layers](#brewfiles-in-layers)). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
+A layer is an ordinary `zakwas.yaml`; `protect` is refused when the key is present, even empty, and so is `mise.prune`; a layer may set only `mise.config` (see [mise configs](#mise-configs-in-layers)) and only `brew.file` (see [Brewfiles in layers](#brewfiles-in-layers)). `agents` is refused for the keys listed [below](#layer-agents). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
 
 ```yaml
 files:
@@ -944,10 +944,23 @@ How each section merges (the main config first, then the layers in the order the
 | `system.sshKey` | at most one file may set it |
 | `system.sudoTouchID` | on when any file sets it |
 | `mise.config` | each layer's config is installed too; the main config needs a `mise` section; a tool pinned in two mise configs is an error naming both files |
-| `brew.file` | each layer's Brewfile is converged too; the main config needs a `brew` section (see below) |
-| `protect`, `agents`, `mise.prune`, `brew.cleanup`, `brew.upgrade` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+| `brew.file` | each layer's Brewfile is converged too; the main config needs a `brew` section (see [Brewfiles in layers](#brewfiles-in-layers)) |
+| `protect`, `mise.prune`, `brew.cleanup`, `brew.upgrade` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+| `agents` | see [agents in layers](#layer-agents); the main config must have an `agents` section |
 
 The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.
+
+<a id="layer-agents"></a>
+**Agents in layers.** A layer may add marketplaces, plugins, instructions, hooks, permissions, MCP servers, profiles and skills to the agents the main config manages, for example a work marketplace and its MCP servers. The main config must declare an `agents` section (`agents: {}` is enough); a layer that sets `agents` without one fails, since its agents would otherwise never be converged. The sections merge like this:
+
+- `providers`, `prune`, `guard`, `upgrade`, `sharedInstructions`, `codex` and `opencode` are main config only; a layer that sets one fails. A layer's entries can only target providers the main config manages. As in a single file, an entry that names `codex`, `gemini` or `copilot` opts that provider in for the whole merged section; set `agents.providers` in the main config to pin the set. `prune` sees the union, so the main config never prunes what a layer installed.
+- `marketplaces`, `mcp` and `profiles` are merged by name; a name set in two files is an error naming both.
+- `plugins`, `permissions`, `skills` and `hooks.commands` are joined, the main config first. The duplicate checks run across files: a plugin, a permission, a hook or a skill name declared twice is an error naming both files. A layer's plugin may come from a marketplace of the main config, and a layer's profile may name an MCP server of the main config.
+- `instructions` are appended after the main config's, in the order the layers were added, so each provider's rendered copy holds the main config's text first. `hooks.klaudiush` is on when any file sets it.
+- Relative paths in a layer (`instructions`, a profile's `prompt`, a local `skills` path, a local marketplace source) resolve against the layer's own directory.
+- The state files stay single, and the templates functions `agentPermissions` and `agentMCP` render the merged sets.
+
+A layer's agents section is validated together with the main config's, after the merge, so a layer entry that is wrong is reported with the layer's file and its key, without the `zakwas layer remove` hint a layer's other sections get.
 
 ### mise configs in layers
 

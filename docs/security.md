@@ -126,7 +126,7 @@ What remains bounded is the damage: the wrapped server applies only a low-risk p
 
 A [layer](config.md#layers) is another `zakwas.yaml` that a machine merges into its config, and it has the full power of the main one: shell `commands`, files and links written anywhere under your home, `launchd` jobs and `defaults`. Registering a layer is therefore the same decision as applying that repo's config. Register only repos you control, and review `zakwas plan` after `zakwas layer add`.
 
-- **A layer cannot widen the machine-wide settings.** `protect`, `mise.prune` and `agents` (so the guard, the agent providers and the permission rules) are read from the main config only, and so are `brew.cleanup` and `brew.upgrade`; a layer that sets one fails validation. A layer's `brew.file` adds a Brewfile whose taps need `trusted: true` like the main one's.
+- **A layer cannot widen the machine-wide settings.** `protect`, `mise.prune`, `brew.cleanup`, `brew.upgrade` and the machine-wide `agents` settings (so the guard, the agent providers and the permission rules) are read from the main config only; a layer that sets one fails validation. A layer's `brew.file` adds a Brewfile whose taps need `trusted: true` like the main one's.
 - **Agents can't register one.** `layer` is a guarded command: the deny rules cover it and `layer add` / `remove` refuse an agent session. A layer path that an agent can write to is a way to run commands at the next `apply`, which is why the guard's edit rules cover every layer repo's checkout, not just the main one.
 - **A broken layer stops everything.** A missing or invalid layer fails the plan instead of being skipped, so a moved checkout can never turn into a prune of what it installed.
 

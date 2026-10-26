@@ -139,7 +139,6 @@ func TestParseLayeredRejects(t *testing.T) {
 	}{
 		{"protect is root-only", []string{"protect: {immutable: true}\n"}, []string{`layer "l0" is invalid`, "zakwas layer remove l0", "protect is set in a layer"}},
 		{"an empty protect is still set", []string{"protect: {immutable: false}\n"}, []string{"protect is set in a layer"}},
-		{"a bare agents key is still set", []string{"agents:\nfiles: [{src: x, dst: ~/.x}]\n"}, []string{"agents is set in a layer"}},
 		{"a bare brew key has no file", []string{"brew:\n"}, []string{"brew.file is required"}},
 		{"an empty brew has no file", []string{"brew: {}\n"}, []string{"brew.file is required"}},
 		{"a layer Brewfile needs a brew section in the main config", []string{"brew: {file: Brewfile}\n"}, []string{`layer "l0"`, "brew.file is set in", "the main zakwas.yaml has no brew section"}},
@@ -150,8 +149,8 @@ func TestParseLayeredRejects(t *testing.T) {
 		{"an empty mise.prune is still set", []string{"mise: {config: m.toml, prune: false}\n"}, []string{"mise.prune is set in a layer"}},
 		{"a bare mise key sets no config", []string{"mise:\n"}, []string{"mise is set in a layer without mise.config"}},
 		{"mise without config", []string{"mise: {}\n"}, []string{"mise.config is required"}},
-		{"agents is root-only", []string{"agents: {}\n"}, []string{"agents is set in a layer"}},
-		{"every root-only section is named", []string{"protect: {}\nbrew: {file: B, cleanup: zap}\nmise: {config: m, prune: true}\nagents: {}\n"}, []string{"protect is set in a layer", "brew.cleanup is set in a layer", "mise.prune is set in a layer", "agents is set in a layer"}},
+		{"agents need the main config's agents", []string{"agents: {}\n"}, []string{"sets agents, but the main zakwas.yaml has no agents section"}},
+		{"every root-only section is named", []string{"protect: {}\nbrew: {file: B, cleanup: zap}\nmise: {config: m, prune: true}\n"}, []string{"protect is set in a layer", "brew.cleanup is set in a layer", "mise.prune is set in a layer"}},
 		{"a layer that does not validate", []string{"files: [{src: a}]\n"}, []string{`layer "l0" is invalid`, "src and dst are required"}},
 		{"unknown fields", []string{"nope: 1\n"}, []string{`layer "l0" is invalid`, "unknown field"}},
 		{"a destination in two layers", []string{"files: [{src: x, dst: ~/.same}]\n", "links: [{src: y, dst: ~/.same}]\n"}, []string{"destination", "~/.same", "overlaps", "links[0] of", "files[0] of"}},

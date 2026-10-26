@@ -53,6 +53,10 @@ type Agents struct {
 	Skills             []Skill                `yaml:"skills" jsonschema_description:"Standalone skills, which don't come from a plugin marketplace, linked into every managed agent's skills directory: Claude Code's ${CLAUDE_CONFIG_DIR:-~/.claude}/skills, and ~/.agents/skills for Codex, opencode and Gemini CLI (${GEMINI_CLI_HOME:-~}/.agents/skills when GEMINI_CLI_HOME is set), and for Copilot CLI too unless COPILOT_HOME is set, which then reads ${COPILOT_HOME}/skills only. Each entry is a skill directory (holding SKILL.md) in the config repo or elsewhere on disk, or an object with 'git', 'path' and optional 'ref' for a skill inside a git repository. The directory name must equal the name in SKILL.md, and names are unique. zakwas replaces nothing it did not link; a skill directory or link already there fails the plan. 'plan' never fetches, 'apply' clones missing git sources and 'zakwas upgrade' pulls them."`
 	Opencode           *Opencode              `yaml:"opencode" jsonschema_description:"Settings of the opencode provider."`
 	Guard              *bool                  `yaml:"guard" jsonschema:"default=true" jsonschema_description:"Stop the managed agents from applying this config themselves. An agent that can run 'zakwas apply' can widen its own permissions, add hooks or install marketplaces, because apply writes agent config files the agent may not edit. While on, every managed agent is denied 'zakwas apply', 'upgrade', 'self-update', 'approve' and 'mcp' (Claude Code in settings.json, Codex in its rules file, Gemini CLI in its user policy file, opencode through the agentPermissions template function), Claude Code is denied edits to the config repo's main checkout and to zakwas state, and 'zakwas apply' and 'upgrade' started from an agent session refuse. 'plan' and 'check' stay allowed. The plan names a managed provider that cannot be protected, such as Copilot CLI, which has no user-level deny rules and is covered only by the refusal. Default true; false removes the rules zakwas added."`
+
+	// origins names the file each entry of a list came from, per section,
+	// when layers are merged, so errors can name it.
+	origins map[string][]string
 }
 
 // InstructionFiles is agents.instructions. In YAML it is either one file or
@@ -683,7 +687,7 @@ func (a *Agents) validate() []error {
 	folded := map[string]string{}
 	for _, name := range a.MarketplaceNames() {
 		m := a.Marketplaces[name]
-		what := "agents.marketplaces." + name
+		what := a.keyed("agents.marketplaces", name)
 		if other, dup := folded[strings.ToLower(name)]; dup {
 			errs = append(errs, fmt.Errorf("%s: differs from %s only in case; macOS file names ignore case, so use distinct names", what, other))
 		}
@@ -702,11 +706,15 @@ func (a *Agents) validate() []error {
 	for i, f := range a.Instructions {
 		switch {
 		case strings.TrimSpace(f) == "":
-			errs = append(errs, fmt.Errorf("agents.instructions[%d]: file is required", i))
+			errs = append(errs, fmt.Errorf("%s: file is required", a.at("agents.instructions", i)))
 		case IsHomePath(f):
-			errs = append(errs, fmt.Errorf("agents.instructions: %q must be relative to the directory holding zakwas.yaml, or absolute", f))
+			what := "agents.instructions"
+			if a.origins[what] != nil {
+				what = a.at(what, i)
+			}
+			errs = append(errs, fmt.Errorf("%s: %q must be relative to the directory holding zakwas.yaml, or absolute", what, f))
 		case slices.Contains(a.Instructions[:i], f):
-			errs = append(errs, fmt.Errorf("agents.instructions[%d]: %q is already listed", i, f))
+			errs = append(errs, fmt.Errorf("%s: %q is already listed", a.at("agents.instructions", i), f))
 		}
 	}
 	if a.SharedInstructions && len(a.Instructions) == 0 {
@@ -721,7 +729,7 @@ func (a *Agents) validate() []error {
 	if a.Hooks != nil {
 		seenHooks := map[string]int{}
 		for i, h := range a.Hooks.Commands {
-			what := fmt.Sprintf("agents.hooks.commands[%d]", i)
+			what := a.at("agents.hooks.commands", i)
 			if !slices.Contains([]string{"beforeTool", "afterTool", "sessionStart", "stop"}, h.Event) {
 				errs = append(errs, fmt.Errorf("%s.event: unknown event %q", what, h.Event))
 			}
@@ -736,7 +744,7 @@ func (a *Agents) validate() []error {
 			for _, provider := range providers {
 				key := provider + "\x00" + h.Event + "\x00" + h.Command
 				if first, dup := seenHooks[key]; dup {
-					errs = append(errs, fmt.Errorf("%s: duplicates agents.hooks.commands[%d] for %s", what, first, provider))
+					errs = append(errs, fmt.Errorf("%s: duplicates %s for %s", what, a.at("agents.hooks.commands", first), provider))
 				}
 				seenHooks[key] = i
 			}
@@ -749,14 +757,14 @@ func (a *Agents) validate() []error {
 	errs = append(errs, a.validateSkills(checkProviders)...)
 	seen := map[string]int{}
 	for i, p := range a.Plugins {
-		what := fmt.Sprintf("agents.plugins[%d]", i)
+		what := a.at("agents.plugins", i)
 		_, mk, ok := SplitPluginID(p.ID)
 		if !ok {
 			errs = append(errs, fmt.Errorf("%s: id %q must be name@marketplace", what, p.ID))
 			continue
 		}
 		if first, dup := seen[p.ID]; dup {
-			errs = append(errs, fmt.Errorf("%s: %s is already declared by agents.plugins[%d]", what, p.ID, first))
+			errs = append(errs, fmt.Errorf("%s: %s is already declared by %s", what, p.ID, a.at("agents.plugins", first)))
 		} else {
 			seen[p.ID] = i
 		}
@@ -783,7 +791,7 @@ func (a *Agents) validatePermissions(checkProviders func(what string, list, allo
 	seen := map[string]entry{}
 	for _, list := range a.Permissions.lists() {
 		for i, p := range list.entries {
-			what := fmt.Sprintf("agents.permissions.%s[%d]", list.decision, i)
+			what := a.at("agents.permissions."+list.decision, i)
 			words := strings.Fields(p.Command)
 			if len(words) == 0 {
 				errs = append(errs, fmt.Errorf("%s: command is required", what))
@@ -832,8 +840,10 @@ func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []st
 	folded := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(a.MCP)) {
 		s := a.MCP[name]
-		what := "agents.mcp." + name
-		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		what := a.keyed("agents.mcp", name)
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("%s: %s", what, fmt.Sprintf(format, args...)))
+		}
 		if !mcpName.MatchString(name) {
 			fail("name may only contain letters, digits, '_' and '-', and must start with a letter or digit")
 		}
@@ -1045,8 +1055,10 @@ func (a *Agents) validateProfiles(checkProviders func(what string, list, allowed
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(a.Profiles)) {
 		p := a.Profiles[name]
-		what := "agents.profiles." + name
-		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		what := a.keyed("agents.profiles", name)
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("%s: %s", what, fmt.Sprintf(format, args...)))
+		}
 		if !profileName.MatchString(name) {
 			fail("name may only contain lowercase letters, digits and '-', and must start with a letter")
 		}
@@ -1138,8 +1150,10 @@ func (a *Agents) validateSkills(checkProviders func(what string, list, allowed [
 	var errs []error
 	folded := map[string]int{}
 	for i, s := range a.Skills {
-		what := fmt.Sprintf("agents.skills[%d]", i)
-		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		what := a.at("agents.skills", i)
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("%s: %s", what, fmt.Sprintf(format, args...)))
+		}
 		word := func(field, v string) bool {
 			if strings.ContainsFunc(v, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
 				fail("%s %q must not contain spaces or control characters", field, v)
@@ -1184,7 +1198,7 @@ func (a *Agents) validateSkills(checkProviders func(what string, list, allowed [
 			fail("name %q (the last element of path) may only contain letters, digits, '.', '_' and '-', and must start with a letter or digit", name)
 		}
 		if first, dup := folded[strings.ToLower(name)]; dup {
-			fail("skill %q is already declared by agents.skills[%d]; skill names are compared without case, since macOS file names are", name, first)
+			fail("skill %q is already declared by %s; skill names are compared without case, since macOS file names are", name, a.at("agents.skills", first))
 		}
 		folded[strings.ToLower(name)] = i
 		checkProviders(what+".providers", s.Providers, a.DefaultProviders(), "agents.providers")
