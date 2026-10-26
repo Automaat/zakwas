@@ -1,0 +1,177 @@
+[windows] skip 'the fake claude is an sh script'
+env ZAKWAS_TEST_GOOS=linux
+chmod 755 bin/claude
+mkdir state
+env CLAUDE_CONFIG_DIR=$WORK/claude
+
+zakwas layer add work work
+
+zakwas plan --only agents
+stdout '\+ claude marketplace sai '
+stdout '\+ claude marketplace work '
+stdout '\+ claude plugin humanize@sai'
+stdout '\+ claude plugin tool@work'
+stdout 'mcp.*root-srv'
+stdout 'mcp.*work-srv'
+stdout 'settings.json  permissions \+2 allow'
+
+zakwas apply -y --only agents
+grep '^claude plugin marketplace add Owner/sai --scope user --json$' calls
+grep '^claude plugin marketplace add Owner/work --scope user --json$' calls
+grep '^claude plugin install humanize@sai --scope user --json$' calls
+grep '^claude plugin install tool@work --scope user --json$' calls
+
+exec cat claude/CLAUDE.md
+cmp stdout want-CLAUDE.md
+cmp home/.config/opencode/AGENTS.md claude/CLAUDE.md
+
+grep 'Bash\(git status' claude/settings.json
+grep 'Bash\(make test' claude/settings.json
+grep '"root-srv"' claude/.claude.json
+grep '"work-srv"' claude/.claude.json
+
+rm calls
+zakwas plan --only agents
+stdout 'No changes'
+zakwas check --only agents
+stdout 'up to date: agents'
+zakwas apply -y --only agents
+! grep '^claude plugin (marketplace add|install|uninstall)' calls
+
+cp want-CLAUDE.md state/stale
+zakwas plan --only agents
+stdout '- claude plugin stale@sai'
+! stdout 'tool@work'
+! stdout 'humanize@sai'
+zakwas apply -y --only agents
+grep '^claude plugin uninstall stale@sai --scope user --json$' calls
+! grep 'uninstall tool@work' calls
+zakwas plan --only agents
+stdout 'No changes'
+
+zakwas layer remove work
+zakwas plan --only agents
+stdout '- claude plugin tool@work'
+stdout '- claude mcp work-srv'
+stdout 'permissions -1 allow'
+! stdout 'humanize@sai'
+zakwas apply -y --only agents
+grep '^claude plugin uninstall tool@work --scope user --json$' calls
+! grep 'work-srv' claude/.claude.json
+! grep 'make test' claude/settings.json
+grep 'root-srv' claude/.claude.json
+grep 'Bash\(git status' claude/settings.json
+zakwas check --only agents
+
+zakwas layer add work work
+cp zakwas-noagents.yaml zakwas.yaml
+! zakwas plan --only agents
+stderr 'work[/]zakwas.yaml sets agents, but the main zakwas.yaml has no agents section'
+
+-- zakwas.yaml --
+agents:
+  guard: false
+  providers: [claude, opencode]
+  prune: true
+  marketplaces:
+    sai: {source: Owner/sai, providers: [claude]}
+  plugins:
+    - {id: humanize@sai, providers: [claude]}
+  instructions: root.md
+  permissions:
+    allow:
+      - command: git status
+  mcp:
+    root-srv: {command: /bin/echo, args: [root]}
+-- zakwas-noagents.yaml --
+files: []
+-- root.md --
+root rule
+-- want-CLAUDE.md --
+root rule
+
+work rule
+-- work/zakwas.yaml --
+agents:
+  marketplaces:
+    work: {source: Owner/work, providers: [claude]}
+  plugins:
+    - {id: tool@work, providers: [claude]}
+  instructions: instructions.md
+  permissions:
+    allow:
+      - command: make test
+  mcp:
+    work-srv: {url: "https://mcp.example.com/mcp"}
+-- work/instructions.md --
+work rule
+-- bin/claude --
+#!/bin/sh
+echo "claude $*" >> "$WORK/calls"
+[ "$(pwd)" = / ] || { echo "claude must run from /, not $(pwd)" >&2; exit 97; }
+known="$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json"
+write_known() {
+  mkdir -p "$(dirname "$known")"
+  sep=''
+  printf '{' > "$known"
+  if [ -f "$WORK/state/sai" ]; then
+    printf '%s"sai":{"source":{"source":"github","repo":"Owner/sai"},"installLocation":"/nowhere","autoUpdate":true}' "$sep" >> "$known"; sep=','
+  fi
+  if [ -f "$WORK/state/work" ]; then
+    printf '%s"work":{"source":{"source":"github","repo":"Owner/work"},"installLocation":"/nowhere","autoUpdate":true}' "$sep" >> "$known"
+  fi
+  printf '}\n' >> "$known"
+}
+case "$*" in
+  "plugin marketplace list --json")
+    out=''
+    sep=''
+    if [ -f "$WORK/state/sai" ]; then
+      out="$out$sep"'{"name":"sai","source":"github","repo":"Owner/sai","installLocation":"/nowhere"}'; sep=','
+    fi
+    if [ -f "$WORK/state/work" ]; then
+      out="$out$sep"'{"name":"work","source":"github","repo":"Owner/work","installLocation":"/nowhere"}'
+    fi
+    echo "[$out]" ;;
+  "plugin list --json --available")
+    installed=''
+    available=''
+    sep=''
+    asep=''
+    if [ -f "$WORK/state/stale" ]; then
+      installed='{"id":"stale@sai","version":"1.0.0","scope":"user","enabled":true}'; sep=','
+    fi
+    if [ -f "$WORK/state/humanize" ]; then
+      installed="$installed$sep"'{"id":"humanize@sai","version":"2.5.0","scope":"user","enabled":true}'; sep=','
+    else
+      available="$available$asep"'{"pluginId":"humanize@sai","version":"2.5.0"}'; asep=','
+    fi
+    if [ -f "$WORK/state/tool" ]; then
+      installed="$installed$sep"'{"id":"tool@work","version":"1.0.0","scope":"user","enabled":true}'
+    else
+      available="$available$asep"'{"pluginId":"tool@work","version":"1.0.0"}'
+    fi
+    echo "{\"installed\":[$installed],\"available\":[$available]}" ;;
+  "plugin marketplace add Owner/sai --scope user --json")
+    touch "$WORK/state/sai"; write_known
+    echo '{"command":"marketplace-add","outcome":"ok","marketplace":"sai"}' ;;
+  "plugin marketplace add Owner/work --scope user --json")
+    touch "$WORK/state/work"; write_known
+    echo '{"command":"marketplace-add","outcome":"ok","marketplace":"work"}' ;;
+  "plugin install humanize@sai --scope user --json")
+    touch "$WORK/state/humanize"
+    echo '{"command":"install","outcome":"ok"}' ;;
+  "plugin install tool@work --scope user --json")
+    touch "$WORK/state/tool"
+    echo '{"command":"install","outcome":"ok"}' ;;
+  "plugin uninstall stale@sai --scope user --json")
+    rm -f "$WORK/state/stale"
+    echo '{"command":"uninstall","outcome":"ok"}' ;;
+  "plugin uninstall tool@work --scope user --json")
+    rm -f "$WORK/state/tool"
+    echo '{"command":"uninstall","outcome":"ok"}' ;;
+  "plugin marketplace remove work --json"|"plugin marketplace remove work")
+    rm -f "$WORK/state/work"; write_known
+    echo '{"command":"marketplace-remove","outcome":"ok"}' ;;
+  *) echo "unexpected claude $*" >&2; exit 99 ;;
+esac

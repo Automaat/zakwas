@@ -139,11 +139,10 @@ func TestParseLayeredRejects(t *testing.T) {
 	}{
 		{"protect is root-only", []string{"protect: {immutable: true}\n"}, []string{`layer "l0" is invalid`, "zakwas layer remove l0", "protect is set in a layer"}},
 		{"an empty protect is still set", []string{"protect: {immutable: false}\n"}, []string{"protect is set in a layer"}},
-		{"a bare agents key is still set", []string{"agents:\nfiles: [{src: x, dst: ~/.x}]\n"}, []string{"agents is set in a layer"}},
 		{"an empty brew is still set", []string{"brew:\n"}, []string{"brew is set in a layer"}},
 		{"brew is root-only", []string{"brew: {file: Brewfile}\n"}, []string{"brew is set in a layer"}},
 		{"mise is root-only", []string{"mise: {config: m.toml}\n"}, []string{"mise is set in a layer"}},
-		{"agents is root-only", []string{"agents: {}\n"}, []string{"agents is set in a layer"}},
+		{"agents need the main config's agents", []string{"agents: {}\n"}, []string{"sets agents, but the main zakwas.yaml has no agents section"}},
 		{"every root-only section is named", []string{"brew: {file: B}\nmise: {config: m}\n"}, []string{"brew is set in a layer", "mise is set in a layer"}},
 		{"a layer that does not validate", []string{"files: [{src: a}]\n"}, []string{`layer "l0" is invalid`, "src and dst are required"}},
 		{"unknown fields", []string{"nope: 1\n"}, []string{`layer "l0" is invalid`, "unknown field"}},

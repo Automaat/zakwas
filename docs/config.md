@@ -920,7 +920,7 @@ zakwas plan
 
 The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. Running `plan`, `check` or `apply` from a layer's own checkout (or with `-c` on its file) is refused with a line naming the main config, since loaded alone it would plan the removal of everything the main config installed. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
 
-A layer is an ordinary `zakwas.yaml`; `protect`, `brew`, `mise` and `agents` are refused when the key is present, even empty. Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
+A layer is an ordinary `zakwas.yaml`; `protect`, `brew` and `mise` are refused when the key is present, even empty, and `agents` is refused for the keys listed [below](#layer-agents). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
 
 ```yaml
 files:
@@ -943,9 +943,22 @@ How each section merges (the main config first, then the layers in the order the
 | `templates.vars` | maps are merged; a name set in two files is an error naming both |
 | `system.sshKey` | at most one file may set it |
 | `system.sudoTouchID` | on when any file sets it |
-| `protect`, `brew`, `mise`, `agents` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+| `protect`, `brew`, `mise` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+| `agents` | see [agents in layers](#layer-agents); the main config must have an `agents` section |
 
 The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.
+
+<a id="layer-agents"></a>
+**Agents in layers.** A layer may add marketplaces, plugins, instructions, hooks, permissions, MCP servers, profiles and skills to the agents the main config manages, for example a work marketplace and its MCP servers. The main config must declare an `agents` section (`agents: {}` is enough); a layer that sets `agents` without one fails, since its agents would otherwise never be converged. The sections merge like this:
+
+- `providers`, `prune`, `guard`, `upgrade`, `sharedInstructions`, `codex` and `opencode` are main config only; a layer that sets one fails. The layer's entries target the main config's providers, and `prune` sees the union, so the main config never prunes what a layer installed.
+- `marketplaces`, `mcp` and `profiles` are merged by name; a name set in two files is an error naming both.
+- `plugins`, `permissions`, `skills` and `hooks.commands` are joined, the main config first. The duplicate checks run across files: a plugin, a permission, a hook or a skill name declared twice is an error naming both files. A layer's plugin may come from a marketplace of the main config, and a layer's profile may name an MCP server of the main config.
+- `instructions` are appended after the main config's, in the order the layers were added, so each provider's rendered copy holds the main config's text first. `hooks.klaudiush` is on when any file sets it.
+- Relative paths in a layer (`instructions`, a profile's `prompt`, a local `skills` path, a local marketplace source) resolve against the layer's own directory.
+- The state files stay single, and the templates functions `agentPermissions` and `agentMCP` render the merged sets.
+
+A layer's agents section is validated together with the main config's, so an error in a layer entry names the layer's file when it can, and its key otherwise.
 
 A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).
 
