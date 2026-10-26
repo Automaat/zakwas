@@ -66,7 +66,7 @@ func Apply(ops []Op, cfg *config.Config, home string) (*Result, error) {
 	if len(res.Edits) == 0 {
 		return nil, errors.New("the operations change nothing")
 	}
-	newCfg, err := config.ParseFor(e.files[cfg.Path].New, cfg.Path, home, cfg.GOOS)
+	newCfg, err := config.ParseLayered(e.files[cfg.Path].New, cfg.Path, home, cfg.GOOS, cfg.LayerRefs())
 	if err != nil {
 		return nil, fmt.Errorf("the edited config is invalid: %w", err)
 	}

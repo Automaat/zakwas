@@ -454,8 +454,9 @@ func (a *Agents) Wants(provider string) bool {
 // GuardedCommands are the zakwas commands that change the system or zakwas
 // itself, which the guard keeps agents from running. mcp is among them
 // because with --enable-apply an agent that starts it in a shell is the
-// client that answers its confirmation.
-var GuardedCommands = []string{"apply", "upgrade", "self-update", "approve", "mcp"}
+// client that answers its confirmation; layer because a registered layer
+// runs commands and writes files like the main config.
+var GuardedCommands = []string{"apply", "upgrade", "self-update", "approve", "mcp", "layer"}
 
 // GuardBinaries are the spellings of the zakwas binary the guard denies on
 // goos. Windows resolves a command typed without its extension, so both

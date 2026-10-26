@@ -40,6 +40,14 @@ type Config struct {
 	// GOOS is the operating system the config is validated for; empty
 	// means the one zakwas runs on.
 	GOOS string `yaml:"-"`
+
+	// Layers are the local layers merged into this config, in registration
+	// order; see ParseLayered.
+	Layers []LoadedLayer `yaml:"-"`
+
+	// origins labels the entries of a merged config by the file they came
+	// from, per section, so errors can name it.
+	origins map[string][]string
 }
 
 // OS is the operating system the config is validated for.
@@ -167,6 +175,18 @@ func Parse(data []byte, path, home string) (*Config, error) {
 
 // ParseFor is Parse for the operating system goos; empty means this one.
 func ParseFor(data []byte, path, home, goos string) (*Config, error) {
+	c, err := decode(data, path, goos)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Validate(home); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return c, nil
+}
+
+// decode reads config bytes without validating them.
+func decode(data []byte, path, goos string) (*Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var c Config
@@ -183,11 +203,12 @@ func ParseFor(data []byte, path, home, goos string) (*Config, error) {
 	c.Root = root
 	c.Path = filepath.Join(root, filepath.Base(path))
 	c.GOOS = goos
-	if err := c.Validate(home); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
 	return &c, nil
 }
+
+// RootOf is the directory a config file at path counts as the root of: its
+// own directory with symlinks followed, the key the layer registry uses.
+func RootOf(path string) (string, error) { return resolveRoot(path) }
 
 // resolveRoot follows symlinks so link targets are identical no matter which
 // path (e.g. a ~/.config symlink to the repo) zakwas was started from.
@@ -243,18 +264,18 @@ func (c *Config) Validate(home string) error {
 	}{{"files", c.Files}, {"links", c.Links}} {
 		for i, l := range section.entries {
 			if l.Src == "" || l.Dst == "" {
-				errs = append(errs, fmt.Errorf("%s[%d]: src and dst are required", section.name, i))
+				errs = append(errs, fmt.Errorf("%s: src and dst are required", c.where(section.name, i)))
 			}
-			claimDst(l.Dst, fmt.Sprintf("%s[%d]", section.name, i))
+			claimDst(l.Dst, c.where(section.name, i))
 		}
 	}
 	for i, t := range c.Templates.Files {
 		if t.Src == "" || t.Dst == "" {
-			errs = append(errs, fmt.Errorf("templates.files[%d]: src and dst are required", i))
+			errs = append(errs, fmt.Errorf("%s: src and dst are required", c.where("templates.files", i)))
 		}
-		claimDst(t.Dst, fmt.Sprintf("templates.files[%d]", i))
+		claimDst(t.Dst, c.where("templates.files", i))
 		if t.Mode != 0 && (t.Mode&^0o777 != 0 || t.Mode&0o400 == 0) {
-			errs = append(errs, fmt.Errorf("templates.files[%d]: mode %s must be octal permissions readable by the owner, e.g. 0o644", i, octal(t.Mode)))
+			errs = append(errs, fmt.Errorf("%s: mode %s must be octal permissions readable by the owner, e.g. 0o644", c.where("templates.files", i), octal(t.Mode)))
 		}
 	}
 	if c.Brew != nil && here("brew") {
@@ -280,20 +301,20 @@ func (c *Config) Validate(home string) error {
 			break
 		}
 		if d.Domain == "" || d.Key == "" {
-			errs = append(errs, fmt.Errorf("defaults[%d]: domain and key are required", i))
+			errs = append(errs, fmt.Errorf("%s: domain and key are required", c.where("defaults", i)))
 		}
 		key := defaultKey{d.Domain, d.Key, d.CurrentHost}
 		if first, dup := defaultsSeen[key]; dup {
-			errs = append(errs, fmt.Errorf("defaults[%d]: %s %s is already set by defaults[%d]", i, d.Domain, d.Key, first))
+			errs = append(errs, fmt.Errorf("%s: %s %s is already set by %s", c.where("defaults", i), d.Domain, d.Key, c.where("defaults", first)))
 		} else {
 			defaultsSeen[key] = i
 		}
 		switch v := d.Value.(type) {
 		case bool, int, float64, string:
 		case time.Time:
-			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: YAML reads %s as a date; quote it to write a string", i, d.Domain, d.Key, yamlDate(v)))
+			errs = append(errs, fmt.Errorf("%s %s %s: YAML reads %s as a date; quote it to write a string", c.where("defaults", i), d.Domain, d.Key, yamlDate(v)))
 		default:
-			errs = append(errs, fmt.Errorf("defaults[%d] %s %s: unsupported value of type %T", i, d.Domain, d.Key, d.Value))
+			errs = append(errs, fmt.Errorf("%s %s %s: unsupported value of type %T", c.where("defaults", i), d.Domain, d.Key, d.Value))
 		}
 	}
 	for i, d := range c.System.Dirs {
@@ -391,13 +412,13 @@ func (c *Config) Destinations(paths Paths) []Destination {
 		}
 	}
 	for i, f := range c.Files {
-		add(fmt.Sprintf("files[%d]", i), f.Dst)
+		add(c.where("files", i), f.Dst)
 	}
 	for i, l := range c.Links {
-		add(fmt.Sprintf("links[%d]", i), l.Dst)
+		add(c.where("links", i), l.Dst)
 	}
 	for i, t := range c.Templates.Files {
-		add(fmt.Sprintf("templates.files[%d]", i), t.Dst)
+		add(c.where("templates.files", i), t.Dst)
 	}
 	return out
 }
@@ -481,6 +502,15 @@ func octal(m fs.FileMode) string {
 type Paths struct {
 	Home string
 	Root string
+	// Layers are the roots of the local layers merged into the config. Their
+	// relative sources are already absolute; they are listed so every check
+	// that guards the config repo guards theirs too.
+	Layers []string
+}
+
+// Roots lists every config repo root: the main one, then the layers'.
+func (p Paths) Roots() []string {
+	return append([]string{p.Root}, p.Layers...)
 }
 
 // CutHome splits "~/rest" into rest. Where backslash separates paths, "~\rest"

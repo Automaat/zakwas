@@ -17,6 +17,7 @@ Flags go before or after the command: `zakwas -y apply` and `zakwas apply -y` ar
 | [`proposals`](#proposals) | list pending proposals |
 | [`approve`](#approve) | show a proposal's diff and plan, confirm, apply it and commit it |
 | [`mcp`](#mcp) | serve config reads and proposals to coding agents over MCP |
+| [`layer`](#layer) | register another `zakwas.yaml` on this machine, merged into this config |
 | [`init`](#init) | create a starter config repo from this machine |
 | [`self-update`](#self-update) | replace the zakwas binary with a release |
 | [`completion`](#completion) | print a shell completion script |
@@ -275,7 +276,7 @@ Pass `-c` (or set `ZAKWAS_CONFIG` in the agent's environment): an agent starts t
 
 | Tool | What it does |
 |---|---|
-| `zakwas_config` | the config path, repo root, modules, agent providers, MCP servers, whether the [guard](config.md#guard) is on, and the text of `zakwas.yaml` |
+| `zakwas_config` | the config path, repo root, modules, agent providers, MCP servers, the registered [layers](config.md#layers), whether the [guard](config.md#guard) is on, and the text of `zakwas.yaml` |
 | `zakwas_plan` | the plan as JSON, like `zakwas plan --json`; arguments `only` (modules) and `diff` |
 | `zakwas_check` | the same, with `drift: true` when anything would change |
 | `zakwas_capture` | what the agents have that `zakwas.yaml` doesn't declare, like [`capture`](#capture): `findings`, `skipped` with the reason, and in `ops` the operations that declare the rest, each valid for `zakwas_propose`. Changes nothing |
@@ -312,6 +313,22 @@ agents:
 ```
 
 Claude Code and Codex install the plugin; opencode gets the skill linked. The plugin version is the zakwas release it was published with: the release workflow stops when `plugins/zakwas/.claude-plugin/plugin.json` differs from the tag. Pin the marketplace with `Automaat/zakwas#vX.Y.Z` to follow one release; the default branch can be ahead of the binary you run.
+
+## layer
+
+```
+zakwas layer add NAME PATH [-c PATH]
+zakwas layer remove NAME [-c PATH]
+zakwas layer list [-c PATH]
+```
+
+Manages the [local layers](config.md#layers) of this machine: extra `zakwas.yaml` files merged into the config found by `-c` or the working directory. The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of that config's directory, so a layer applies only to the config it was added for.
+
+- `add` takes a name (lowercase letters, digits and `-`, unique for the config) and the layer's `zakwas.yaml`, or a directory holding one. The layer must load, pass validation and merge cleanly with the main config and the layers already added; otherwise nothing is saved. The path is stored absolute, with symlinks resolved. Review the effect with `zakwas plan`.
+- `remove` unregisters a layer. The next `plan` lists the destinations only that layer installed as removals (destructive), so review it before `apply`. `remove` works while the layer's file is missing or broken, which is how you get past the error such a layer causes.
+- `list` prints each layer's name and file, with `(missing)` for a file that is gone.
+
+`add` and `remove` take the [run lock](#apply) and exit 1 inside an agent session like `apply` does, unless `agents.guard: false`; the [guard](config.md#guard) also denies agents the whole `layer` command. An agent can read the registered layers from the `zakwas_config` tool of [`zakwas mcp`](#mcp).
 
 ## init
 

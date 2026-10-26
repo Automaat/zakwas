@@ -3,8 +3,8 @@ env CLAUDE_CONFIG_DIR=$WORK/claude
 env CODEX_HOME=$WORK/codex
 
 zakwas plan --only agents
-stdout 'permissions \+221 deny'
-stdout 'permissions \+10 forbidden'
+stdout 'permissions \+265 deny'
+stdout 'permissions \+12 forbidden'
 ! stdout 'not enforced'
 ! stderr 'not enforced'
 

@@ -121,7 +121,7 @@ agents:
 
 Pass `-c` with an absolute path (zakwas does not expand `~` there, and the agent starts the server in whatever directory it is in). With the `zakwas` plugin installed (`agents.marketplaces: {zakwas: Automaat/zakwas}`, `agents.plugins: [zakwas@zakwas]`), the agent also knows to propose changes instead of editing agent config or `zakwas.yaml`. See [mcp](commands.md#mcp) and [teach agents the flow](commands.md#teach-agents-the-flow).
 
-The agent cannot apply anything through this. The [guard](config.md#guard) denies it `zakwas apply`, `upgrade`, `self-update`, `approve` and `mcp`.
+The agent cannot apply anything through this. The [guard](config.md#guard) denies it `zakwas apply`, `upgrade`, `self-update`, `approve`, `mcp` and `layer`.
 
 ### Approve in a terminal
 

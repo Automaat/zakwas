@@ -86,7 +86,7 @@ func (c *Config) validateLaunchd(paths Paths, claimDst func(dst, what string)) [
 	var errs []error
 	seen := map[string]int{}
 	for i, j := range c.Launchd {
-		what := fmt.Sprintf("launchd[%d]", i)
+		what := c.where("launchd", i)
 		switch {
 		case j.Label == "":
 			errs = append(errs, fmt.Errorf("%s: label is required", what))
@@ -94,7 +94,7 @@ func (c *Config) validateLaunchd(paths Paths, claimDst func(dst, what string)) [
 			errs = append(errs, fmt.Errorf("%s: label %q may only hold letters, digits, '.', '_' and '-', and must start with a letter or digit", what, j.Label))
 		default:
 			if first, dup := seen[strings.ToLower(j.Label)]; dup {
-				errs = append(errs, fmt.Errorf("%s: label %q is already used by launchd[%d]", what, j.Label, first))
+				errs = append(errs, fmt.Errorf("%s: label %q is already used by %s", what, j.Label, c.where("launchd", first)))
 			} else {
 				seen[strings.ToLower(j.Label)] = i
 				claimDst(j.PlistDst(), what)

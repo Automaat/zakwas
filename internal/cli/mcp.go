@@ -261,15 +261,16 @@ func (t *mcpTools) config(context.Context, *mcp.Call) (mcp.Result, error) {
 		names = append(names, m.Name())
 	}
 	out := struct {
-		Config    string   `json:"config"`
-		Root      string   `json:"root"`
-		Modules   []string `json:"modules"`
-		Providers []string `json:"agent_providers,omitempty"`
-		MCP       []string `json:"agent_mcp_servers,omitempty"`
-		Guard     bool     `json:"guard"`
-		Apply     bool     `json:"apply_enabled"`
-		YAML      string   `json:"yaml"`
-	}{Config: cfg.Path, Root: cfg.Root, Modules: names, Guard: cfg.Agents.GuardEnabled(), Apply: t.enableApply}
+		Config    string         `json:"config"`
+		Root      string         `json:"root"`
+		Modules   []string       `json:"modules"`
+		Providers []string       `json:"agent_providers,omitempty"`
+		MCP       []string       `json:"agent_mcp_servers,omitempty"`
+		Layers    []config.Layer `json:"layers,omitempty"`
+		Guard     bool           `json:"guard"`
+		Apply     bool           `json:"apply_enabled"`
+		YAML      string         `json:"yaml"`
+	}{Config: cfg.Path, Root: cfg.Root, Modules: names, Guard: cfg.Agents.GuardEnabled(), Apply: t.enableApply, Layers: cfg.LayerRefs()}
 	if cfg.Agents != nil {
 		out.Providers = cfg.Agents.DefaultProviders()
 		out.MCP = slices.Sorted(maps.Keys(cfg.Agents.MCP))

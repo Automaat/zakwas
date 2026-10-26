@@ -722,10 +722,10 @@ A skill written as a plain string is its `path`.
 
 An agent that can run `zakwas apply`, or edit the config repo or zakwas state, can widen its own permissions, add hooks or install marketplaces, because `apply` writes agent config files the agent may not edit itself. One prompt injection in a README is enough. So with an `agents` section, zakwas keeps the managed agents from applying the config unless you set `guard: false`:
 
-- **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade`, `zakwas self-update`, `zakwas approve` and `zakwas mcp`, also with a flag before the command (`zakwas -c zakwas.yaml apply`) and, for Claude Code, Gemini CLI and opencode, when run by path (`~/.local/bin/zakwas apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). Gemini CLI gets `deny` rules in `zakwas.toml`, at a priority above `permissions`, that also match flags before the command, the binary by path or quoted, in any case, and the command word quoted; what they miss is exact in [Gemini CLI](#gemini-cli). opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
+- **Deny rules.** Every managed agent is denied `zakwas apply`, `zakwas upgrade`, `zakwas self-update`, `zakwas approve`, `zakwas mcp` and `zakwas layer`, also with a flag before the command (`zakwas -c zakwas.yaml apply`) and, for Claude Code, Gemini CLI and opencode, when run by path (`~/.local/bin/zakwas apply`). Claude Code gets `Bash(zakwas …)` rules in `permissions.deny`, which hold in every permission mode, `bypassPermissions` included. Codex gets `forbidden` rules in `zakwas.rules`, for the commands as written (`zakwas apply`, not `zakwas -c … apply`). Gemini CLI gets `deny` rules in `zakwas.toml`, at a priority above `permissions`, that also match flags before the command, the binary by path or quoted, in any case, and the command word quoted; what they miss is exact in [Gemini CLI](#gemini-cli). opencode gets `deny` patterns through the [`agentPermissions`](#permissions) template function. They sit with the rules from `permissions`, so removing them follows the same rules: zakwas removes only what it added.
 - **Windows.** On a Windows host the rules also name `zakwas.exe`, bare, by a path or quoted. Claude Code gets the `Bash(…)` rules plus the same ones as `PowerShell(…)` rules (and `PowerShell(& zakwas apply)` for the call operator); the PowerShell rules also keep Claude's PowerShell tool on, which Claude switches off on its own when only `Bash` has deny rules and Git Bash is installed. Codex gets a `forbidden` rule for `zakwas.exe` next to the one for `zakwas`, opencode the matching `deny` patterns, and Gemini CLI a regex that also reads `zakwas.exe`, backslash paths and a leading `&`. The patterns hold no backslash, since a rule's reading of one is not documented: `*zakwas.exe apply` stands for `C:\bin\zakwas.exe apply`. A command that starts with a backslash path and leaves the extension off (`C:\bin\zakwas apply`) is matched by Gemini CLI only. None of this has been run against Claude Code, Codex or opencode on Windows; [security.md](security.md#windows) lists what is and isn't confirmed.
-- **Edits.** Claude Code is also denied edits (`Edit(…)` rules, which cover its file tools) to the config repo's main checkout, and to the checkout zakwas runs from when that is a linked worktree of it, and to `~/.local/state/zakwas`. Worktrees agents create outside that checkout stay editable, so an agent can still propose a change as a branch; one created inside it is covered by the rule. On Windows a repo outside your home is written the way Claude Code normalizes paths, `//d/repo/**` for `D:\repo`. A repo that holds your home directory can't be denied, and the plan says so. These rules don't stop a shell command that writes a file; the command rules above are what stop `apply`. They match the command as the agent writes it, so a wrapper (`sh -c`, a script, a PTY) is outside what they stop.
-- **Refusal.** `zakwas apply`, `zakwas upgrade` and `zakwas approve` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, `COPILOT_AGENT_SESSION_ID`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and, with `zakwas propose`, save a change for you to [approve](commands.md#approve) in a terminal.
+- **Edits.** Claude Code is also denied edits (`Edit(…)` rules, which cover its file tools) to the config repo's main checkout, and to the checkout zakwas runs from when that is a linked worktree of it, and to `~/.local/state/zakwas`. Each [layer](#layers) repo gets the same rules. Worktrees agents create outside that checkout stay editable, so an agent can still propose a change as a branch; one created inside it is covered by the rule. On Windows a repo outside your home is written the way Claude Code normalizes paths, `//d/repo/**` for `D:\repo`. A repo that holds your home directory can't be denied, and the plan says so. These rules don't stop a shell command that writes a file; the command rules above are what stop `apply`. They match the command as the agent writes it, so a wrapper (`sh -c`, a script, a PTY) is outside what they stop.
+- **Refusal.** `zakwas apply`, `zakwas upgrade`, `zakwas approve` and `zakwas layer add` / `remove` started from an agent session exit 1 with an explanation, before they change anything. zakwas recognizes a session by the environment variables the agents set (`CLAUDECODE`, `CODEX_SANDBOX`, `OPENCODE`, `GEMINI_CLI`, `COPILOT_AGENT_SESSION_ID`, …). An agent can unset them, so this catches accidents and injections that don't know about it; the deny rules are the boundary. `plan` and `check` work in a session, so an agent can review drift and, with `zakwas propose`, save a change for you to [approve](commands.md#approve) in a terminal.
 - **Providers that can't be protected.** The plan lists a managed provider the guard can't cover, under `agents`: opencode when no template renders `agentPermissions "opencode"` into its `opencode.json`, and Copilot CLI, which has no user-level deny rules, so only the refusal covers it. Such a warning doesn't count as a change, so `check` stays clean.
 
 Codex, Gemini and Copilot are guarded only when `agents.providers`, a marketplace's or a plugin's `providers` names them; naming one only in an `mcp`, `skills`, `profiles`, `permissions` or `hooks` entry converges it but does not guard it. Run `apply` in a terminal outside the agent. `guard: false` removes the rules zakwas added on the next `apply` and turns the refusal off; rules you wrote yourself stay.
@@ -908,6 +908,46 @@ defaults:
   - {domain: com.apple.screencapture, key: type, value: png}
   - {domain: com.apple.HIToolbox, key: AppleFnUsageType, value: 0, currentHost: true}
 ```
+
+## Layers
+
+A machine can add a second config repo on top of the main one, for example a work repo next to a private one, without the main repo knowing it exists. Such a repo is a **local layer**: another `zakwas.yaml`, registered on this machine with [`zakwas layer add`](commands.md#layer) and merged into the main config in memory. The result is one config, one plan and one state, so an `apply` never removes what a layer installed, and removing a layer removes only what it brought.
+
+```
+zakwas layer add work ~/work/dotfiles/zakwas.yaml
+zakwas plan
+```
+
+The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. Running `plan`, `check` or `apply` from a layer's own checkout (or with `-c` on its file) is refused with a line naming the main config, since loaded alone it would plan the removal of everything the main config installed. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
+
+A layer is an ordinary `zakwas.yaml`; `protect`, `brew`, `mise` and `agents` are refused when the key is present, even empty. Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
+
+```yaml
+files:
+  - {src: git/work.gitconfig, dst: ~/.config/git/work}
+templates:
+  vars: {company: example}
+  files:
+    - {src: ssh_config.tmpl, dst: ~/.ssh/work_config}
+commands:
+  - name: Work CA bundle
+    check: test -e ~/.config/work/ca.pem
+    run: curl -fsSL -o ~/.config/work/ca.pem https://pki.example.com/ca.pem
+```
+
+How each section merges (the main config first, then the layers in the order they were added):
+
+| Section | Merge |
+|---|---|
+| `files`, `links`, `templates.files`, `defaults`, `launchd`, `commands`, `system.dirs` | entries are joined; `commands` run in that order |
+| `templates.vars` | maps are merged; a name set in two files is an error naming both |
+| `system.sshKey` | at most one file may set it |
+| `system.sudoTouchID` | on when any file sets it |
+| `protect`, `brew`, `mise`, `agents` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+
+The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.
+
+A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).
 
 ## Full example
 
