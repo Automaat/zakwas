@@ -2,6 +2,7 @@
 package brew
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -33,16 +34,17 @@ type Module struct {
 func (m *Module) Name() string { return "brew" }
 
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
-	file := m.Paths.Src(m.Brew.File)
-	entries, err := ParseBrewfile(file)
+	files, err := m.read()
 	if err != nil {
 		return nil, err
 	}
+	entries := files.entries()
+	src := files.source()
 	if !m.Runner.Installed("brew") {
-		return m.planBootstrap(file, entries)
+		return m.planBootstrap(src, files)
 	}
 
-	if err := requireTrust(entries); err != nil {
+	if err := files.requireTrust(); err != nil {
 		return nil, err
 	}
 
@@ -58,11 +60,11 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		wg                    sync.WaitGroup
 	)
 	wg.Go(func() { trust, trustErr = m.planTrust(ctx, entries) })
-	wg.Go(func() { missing, missingErr = m.missing(ctx, file) })
+	wg.Go(func() { missing, missingErr = m.missing(ctx, src) })
 	if m.Brew.Upgrade {
 		wg.Go(func() { outdated, outdatedErr = m.outdated(ctx, entries) })
 	}
-	wg.Go(func() { cleanup, cleanErr = m.planCleanup(ctx, file) })
+	wg.Go(func() { cleanup, cleanErr = m.planCleanup(ctx, src) })
 	wg.Wait()
 	if err := cmp.Or(trustErr, missingErr, outdatedErr, cleanErr); err != nil {
 		return nil, err
@@ -76,9 +78,120 @@ func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 		install = append(install, engine.Change{Action: engine.Update, Target: e.Name, From: e.From, To: e.To})
 	}
 	if len(install) > 0 {
-		install = append(install, m.bundleInstall(file))
+		install = append(install, m.bundleInstall(src))
 	}
 	return append(append(trust, install...), cleanup...), nil
+}
+
+// bundleFile is one Brewfile the module converges: the main config's, or the
+// one of a layer (layer is its name).
+type bundleFile struct {
+	path    string
+	layer   string
+	data    []byte
+	entries []Entry
+}
+
+// label names the file in errors: the Brewfile, or a layer's Brewfile.
+func (f bundleFile) label() string {
+	if f.layer == "" {
+		return "the Brewfile"
+	}
+	return fmt.Sprintf("the Brewfile of layer %q (%s)", f.layer, f.path)
+}
+
+type bundleFiles []bundleFile
+
+// read loads the main Brewfile and then each layer's, in registration order.
+// A layer's Brewfile that cannot be read fails the plan naming the layer.
+func (m *Module) read() (bundleFiles, error) {
+	fs := make(bundleFiles, 0, 1+len(m.Brew.Layers))
+	add := func(path, layer string) error {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if layer != "" {
+				return fmt.Errorf("layer %q: %w", layer, err)
+			}
+			return err
+		}
+		fs = append(fs, bundleFile{path: path, layer: layer, data: data, entries: ParseEntries(data)})
+		return nil
+	}
+	if err := add(m.Paths.Src(m.Brew.File), ""); err != nil {
+		return nil, err
+	}
+	for _, l := range m.Brew.Layers {
+		if err := add(l.File, l.Layer); err != nil {
+			return nil, err
+		}
+	}
+	return fs, fs.requireWholeFiles()
+}
+
+var endMarker = regexp.MustCompile(`(?m)^__END__\r?$`)
+
+// requireWholeFiles rejects a Brewfile with an `__END__` line. Each file is
+// wrapped in a lambda, so the marker would only break the wrapper with a
+// syntax error that names no file.
+func (fs bundleFiles) requireWholeFiles() error {
+	if len(fs) < 2 {
+		return nil
+	}
+	var errs []error
+	for _, f := range fs {
+		if endMarker.Match(f.data) {
+			errs = append(errs, fmt.Errorf("%s has an `__END__` line, which cannot be combined with the Brewfiles of other layers", f.label()))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// entries lists the tap/brew/cask entries of every Brewfile, in order.
+func (fs bundleFiles) entries() []Entry {
+	var out []Entry
+	for _, f := range fs {
+		out = append(out, f.entries...)
+	}
+	return out
+}
+
+// source is how brew bundle is pointed at the Brewfiles: the file itself, or
+// with layers all of them on stdin (`--file=-`), so brew sees one Brewfile and
+// cleanup keeps what any of them lists. Nothing is written to disk, so plan
+// and check stay read-only. A package listed in several files is harmless to
+// brew bundle. Each file runs in its own lambda, so a `return` ends that file
+// only and its local variables stay its own; a byte order mark is dropped
+// because brew reads it as part of the first word.
+type source struct {
+	file  string
+	piped bool
+	stdin string
+}
+
+func (fs bundleFiles) source() source {
+	if len(fs) == 1 {
+		return source{file: fs[0].path}
+	}
+	var b strings.Builder
+	for _, f := range fs {
+		b.WriteString("-> {\n")
+		b.Write(bytes.TrimPrefix(f.data, []byte("\xef\xbb\xbf")))
+		if !bytes.HasSuffix(f.data, []byte("\n")) {
+			b.WriteString("\n")
+		}
+		b.WriteString("}.call\n")
+	}
+	return source{piped: true, stdin: b.String()}
+}
+
+// cmd builds a brew bundle command: sub, the Brewfile flag, then rest.
+func (s source) cmd(sub, rest []string, stream bool) runner.Cmd {
+	flag := []string{"--file", s.file}
+	if s.piped {
+		flag = []string{"--file=-"}
+	}
+	args := slices.Concat(sub, flag, rest)
+	return runner.Cmd{Name: "brew", Args: args, Env: noAutoUpdate, Stdin: s.stdin, Stream: stream}
 }
 
 // installerCommit pins the Homebrew installer script, so a compromised or
@@ -94,8 +207,8 @@ const homebrewInstall = `sudo -v && NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL 
 // planBootstrap installs Homebrew, then everything in the Brewfile; taps are
 // trusted by `brew bundle install` from their `trusted:` options. A fresh
 // Homebrew has nothing to clean up.
-func (m *Module) planBootstrap(file string, entries []Entry) ([]engine.Change, error) {
-	if err := requireTrust(entries); err != nil {
+func (m *Module) planBootstrap(src source, files bundleFiles) ([]engine.Change, error) {
+	if err := files.requireTrust(); err != nil {
 		return nil, err
 	}
 	cmd := runner.Cmd{Name: "/bin/bash", Args: []string{"-c", homebrewInstall}, Stream: true}
@@ -103,10 +216,15 @@ func (m *Module) planBootstrap(file string, entries []Entry) ([]engine.Change, e
 		Action: engine.Create, Target: "Homebrew", Streams: true,
 		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
 	}}
-	for _, e := range entries {
-		changes = append(changes, engine.Change{Action: engine.Create, Target: e.Kind + " " + e.Name})
+	seen := map[string]bool{}
+	for _, e := range files.entries() {
+		target := e.Kind + " " + e.Name
+		if !seen[target] {
+			seen[target] = true
+			changes = append(changes, engine.Change{Action: engine.Create, Target: target})
+		}
 	}
-	return append(changes, m.bundleInstall(file)), nil
+	return append(changes, m.bundleInstall(src)), nil
 }
 
 type trustJSON struct {
@@ -117,15 +235,18 @@ func thirdParty(e Entry) bool {
 	return e.Kind == "tap" && !strings.HasPrefix(e.Name, "homebrew/")
 }
 
-// requireTrust makes the Brewfile the only source of tap trust: `brew bundle
-// cleanup --force` resets Homebrew's trust store to the Brewfile's `trusted:`
+// requireTrust makes the Brewfiles the only source of tap trust: `brew bundle
+// cleanup --force` resets Homebrew's trust store to the Brewfiles' `trusted:`
 // options, so trust granted any other way is wiped on the next cleanup and
-// installs from the tap start failing.
-func requireTrust(entries []Entry) error {
+// installs from the tap start failing. Each Brewfile answers for its own taps,
+// and the error names a layer's Brewfile.
+func (fs bundleFiles) requireTrust() error {
 	var errs []error
-	for _, e := range entries {
-		if thirdParty(e) && !e.Trusted {
-			errs = append(errs, fmt.Errorf("tap %q in the Brewfile needs `trusted: true`", e.Name))
+	for _, f := range fs {
+		for _, e := range f.entries {
+			if thirdParty(e) && !e.Trusted {
+				errs = append(errs, fmt.Errorf("tap %q in %s needs `trusted: true`", e.Name, f.label()))
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -137,7 +258,7 @@ func requireTrust(entries []Entry) error {
 func (m *Module) planTrust(ctx context.Context, entries []Entry) ([]engine.Change, error) {
 	var taps []string
 	for _, e := range entries {
-		if thirdParty(e) {
+		if thirdParty(e) && !slices.Contains(taps, e.Name) {
 			taps = append(taps, e.Name)
 		}
 	}
@@ -166,12 +287,12 @@ func (m *Module) planTrust(ctx context.Context, entries []Entry) ([]engine.Chang
 	return changes, nil
 }
 
-func (m *Module) bundleInstall(file string) engine.Change {
-	args := []string{"bundle", "install", "--file", file}
+func (m *Module) bundleInstall(src source) engine.Change {
+	var rest []string
 	if !m.Brew.Upgrade {
-		args = append(args, "--no-upgrade")
+		rest = append(rest, "--no-upgrade")
 	}
-	cmd := runner.Cmd{Name: "brew", Args: args, Env: noAutoUpdate, Stream: true}
+	cmd := src.cmd([]string{"bundle", "install"}, rest, true)
 	return engine.Change{
 		Action: engine.Run, Target: "brew bundle install", Streams: true,
 		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
@@ -180,8 +301,8 @@ func (m *Module) bundleInstall(file string) engine.Change {
 
 var missingLine = regexp.MustCompile(`^→ (\S+) (\S+) needs to be `)
 
-func (m *Module) missing(ctx context.Context, file string) ([]string, error) {
-	cmd := runner.Cmd{Name: "brew", Args: []string{"bundle", "check", "--file", file, "--verbose", "--no-upgrade"}, Env: noAutoUpdate}
+func (m *Module) missing(ctx context.Context, src source) ([]string, error) {
+	cmd := src.cmd([]string{"bundle", "check"}, []string{"--verbose", "--no-upgrade"}, false)
 	res, err := m.Runner.Run(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -192,7 +313,10 @@ func (m *Module) missing(ctx context.Context, file string) ([]string, error) {
 	var out []string
 	for line := range strings.Lines(res.Stdout + res.Stderr) {
 		if g := missingLine.FindStringSubmatch(strings.TrimSpace(line)); g != nil {
-			out = append(out, strings.ToLower(g[1])+" "+g[2])
+			// A package listed in two Brewfiles is reported by brew twice.
+			if entry := strings.ToLower(g[1]) + " " + g[2]; !slices.Contains(out, entry) {
+				out = append(out, entry)
+			}
 		}
 	}
 	if len(out) == 0 {
@@ -246,12 +370,12 @@ func (m *Module) outdated(ctx context.Context, entries []Entry) ([]Outdated, err
 	return res, nil
 }
 
-func (m *Module) planCleanup(ctx context.Context, file string) ([]engine.Change, error) {
+func (m *Module) planCleanup(ctx context.Context, src source) ([]engine.Change, error) {
 	mode := m.Brew.Cleanup
 	if mode == "" || mode == config.CleanupNone {
 		return nil, nil
 	}
-	dryRun := runner.Cmd{Name: "brew", Args: []string{"bundle", "cleanup", "--file", file}, Env: noAutoUpdate}
+	dryRun := src.cmd([]string{"bundle", "cleanup"}, nil, false)
 	res, err := m.Runner.Run(ctx, dryRun)
 	if err != nil {
 		return nil, err
@@ -267,11 +391,11 @@ func (m *Module) planCleanup(ctx context.Context, file string) ([]engine.Change,
 	for _, r := range removals {
 		changes = append(changes, engine.Change{Action: engine.Remove, Target: r, Destructive: true})
 	}
-	args := []string{"bundle", "cleanup", "--force", "--file", file}
+	var rest []string
 	if mode == config.CleanupZap {
-		args = append(args, "--zap")
+		rest = append(rest, "--zap")
 	}
-	cmd := runner.Cmd{Name: "brew", Args: args, Env: noAutoUpdate, Stream: true}
+	cmd := src.cmd([]string{"bundle", "cleanup", "--force"}, rest, true)
 	return append(changes, engine.Change{
 		Action: engine.Run, Target: "brew bundle cleanup",
 		Detail: mode, Destructive: true, Streams: true,

@@ -1,0 +1,151 @@
+[windows] skip 'the fake brew is an sh script'
+env ZAKWAS_TEST_GOOS=darwin
+
+chmod 755 bin/brew
+mkdir state
+cp state-installed state/installed
+
+zakwas layer add work work
+stdout 'Added layer work'
+
+zakwas plan
+stdout '\+ formula jq'
+stdout '\+ trust tap acme/work'
+stdout '\+ formula wireguard'
+stdout '- brew zoom'
+! stdout 'vpn'
+stdout 'brew bundle cleanup'
+exec grep -c -- '--file=-' calls
+! exec grep -e '--file ' calls
+! exec grep -e 'bundle install' -e '--force' calls
+! exists state/trusted
+
+rm calls
+zakwas apply -y
+stdout 'Applied \d+ of \d+ steps'
+grep '^acme/work$' state/trusted
+grep '^vpn$' state/installed
+grep '^jq$' state/installed
+! grep '^zoom$' state/installed
+grep '^wireguard$' state/installed
+grep 'brew bundle cleanup --force --file=- --zap' calls
+
+rm calls
+zakwas plan
+stdout 'No changes'
+zakwas check
+! exec grep -e 'bundle install' -e '--force' -e 'trust --tap' calls
+
+mv work/Brewfile work/Brewfile.good
+cp work/Brewfile.untrusted work/Brewfile
+! zakwas plan
+stdout 'tap "acme/bad" in the Brewfile of layer "work"'
+stdout 'work[/]Brewfile'
+stdout 'needs `trusted: true`'
+! zakwas check
+stdout 'tap "acme/bad"'
+rm work/Brewfile
+cp work/Brewfile.good work/Brewfile
+
+rm work/Brewfile
+! zakwas plan
+stdout 'layer "work"'
+stdout 'work[/]Brewfile'
+cp work/Brewfile.good work/Brewfile
+zakwas plan
+stdout 'No changes'
+
+! zakwas layer add cleanup cleanup
+stderr 'brew.cleanup is set in a layer'
+! zakwas layer add upgrade upgrade
+stderr 'brew.upgrade is set in a layer'
+zakwas layer list
+! stdout 'cleanup'
+! stdout 'upgrade'
+
+rm calls
+zakwas layer remove work
+zakwas plan
+stdout '- brew vpn'
+stdout '- brew wireguard'
+! stdout 'zoom'
+exec grep -c -- '--file ' calls
+! exec grep -e '--file=-' calls
+
+cd nobrew
+! zakwas layer add work ../work
+stderr 'the main zakwas.yaml has no brew section'
+stderr 'layer "work"'
+
+-- zakwas.yaml --
+brew: {file: Brewfile, cleanup: zap}
+-- Brewfile --
+brew "jq"
+-- state-installed --
+zoom
+vpn
+-- work/zakwas.yaml --
+brew: {file: Brewfile}
+-- work/Brewfile --
+tap "acme/work", trusted: true
+brew "vpn"
+brew "wireguard"
+-- work/Brewfile.untrusted --
+tap "acme/bad"
+brew "acme/bad/tool"
+-- cleanup/zakwas.yaml --
+brew: {file: Brewfile, cleanup: none}
+-- upgrade/zakwas.yaml --
+brew: {file: Brewfile, upgrade: false}
+-- nobrew/zakwas.yaml --
+files:
+  - {src: f, dst: ~/.f}
+-- nobrew/f --
+f
+-- bin/brew --
+#!/bin/sh
+echo "brew $*" >> "$WORK/calls"
+installed="$WORK/state/installed"
+case "$1" in
+  trust)
+    if [ "$2" = "--tap" ]; then echo "$3" >> "$WORK/state/trusted"; exit 0; fi
+    printf '{"taps":['
+    sep=
+    for t in $(cat "$WORK/state/trusted" 2>/dev/null); do printf '%s"%s"' "$sep" "$t"; sep=,; done
+    echo ']}' ;;
+  bundle)
+    file=
+    prev=
+    for a in "$@"; do
+      [ "$prev" = "--file" ] && file="$a"
+      [ "$a" = "--file=-" ] && file=-
+      prev="$a"
+    done
+    if [ "$file" = "-" ]; then listed=$(cat | sed -n 's/^brew "\(.*\)"$/\1/p'); else listed=$(sed -n 's/^brew "\(.*\)"$/\1/p' "$file"); fi
+    case "$2" in
+      check)
+        missing=0
+        for p in $listed; do
+          grep -qx "$p" "$installed" || { echo "→ Formula $p needs to be installed."; missing=1; }
+        done
+        exit $missing ;;
+      install)
+        for p in $listed; do grep -qx "$p" "$installed" || echo "$p" >> "$installed"; done ;;
+      cleanup)
+        extra=
+        for p in $(cat "$installed"); do
+          echo "$listed" | grep -qx "$p" || extra="$extra $p"
+        done
+        if [ "$3" = "--force" ]; then
+          for p in $extra; do grep -vx "$p" "$installed" > "$installed.tmp"; mv "$installed.tmp" "$installed"; done
+          exit 0
+        fi
+        if [ -n "$extra" ]; then
+          echo "Would uninstall formulae:"
+          for p in $extra; do echo "$p"; done
+          exit 1
+        fi ;;
+      *) echo "unexpected brew $*" >&2; exit 99 ;;
+    esac ;;
+  *) echo "unexpected brew $*" >&2; exit 99 ;;
+esac

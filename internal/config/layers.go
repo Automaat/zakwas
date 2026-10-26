@@ -117,8 +117,10 @@ func LoadLayered(path, home, goos string, layers []Layer) (*Config, error) {
 // the main config's; templates.vars merge, with a repeated name an error;
 // system.sshKey may be set once; sudoTouchID is on when any file sets it.
 // A layer may set mise.config when the main config has a mise section; a
-// tool pinned in two mise configs is an error naming both files. protect,
-// brew and mise.prune belong to the main config only. Agents sections merge
+// tool pinned in two mise configs is an error naming both files. A layer may
+// set brew.file, an extra Brewfile the main config's brew section converges
+// with its own, when the main config has one. protect, mise.prune and brew's
+// cleanup and upgrade belong to the main config only. Agents sections merge
 // into the main config's, which must have one; see agentsMerge. The merged
 // config is validated as a whole, so a destination two files both claim is
 // an error naming both. A layer that is missing or invalid fails the load.
@@ -168,6 +170,11 @@ func newMerge(c *Config) *merge {
 	m.System.Dirs = slices.Clone(c.System.Dirs)
 	m.Layers = nil
 	m.layerMise = nil
+	if c.Brew != nil {
+		b := *c.Brew
+		b.Layers = nil
+		m.Brew = &b
+	}
 	m.origins = map[string][]string{}
 	mg := &merge{cfg: &m, seen: map[string]bool{c.Path: true}, varFile: map[string]string{}}
 	mg.agents = newAgentsMerge(&m, c)
@@ -223,6 +230,13 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	c.System.Dirs = append(c.System.Dirs, lc.System.Dirs...)
 	c.System.SudoTouchID = c.System.SudoTouchID || lc.System.SudoTouchID
 	var errs []error
+	if lc.Brew != nil {
+		if c.Brew == nil {
+			errs = append(errs, fmt.Errorf("layer %q: brew.file is set in %s, but the main zakwas.yaml has no brew section; add one to apply it", l.Name, lc.Path))
+		} else {
+			c.Brew.Layers = append(c.Brew.Layers, LayerBrewfile{Layer: l.Name, File: abs(lc.Brew.File)})
+		}
+	}
 	if lc.Mise != nil {
 		if c.Mise == nil {
 			errs = append(errs, fmt.Errorf("layer %q: mise.config in %s needs a mise section in %s", l.Name, lc.Path, c.Path))
@@ -296,7 +310,7 @@ func rootOnly(data []byte) []error {
 		return nil
 	}
 	var errs []error
-	for _, name := range []string{"protect", "brew"} {
+	for _, name := range []string{"protect"} {
 		if _, set := top[name]; set {
 			errs = append(errs, fmt.Errorf("%s is set in a layer; only the main zakwas.yaml may set it", name))
 		}
@@ -304,7 +318,25 @@ func rootOnly(data []byte) []error {
 	if node, set := top["mise"]; set {
 		errs = append(errs, miseRootOnly(node)...)
 	}
+	if node, set := top["brew"]; set {
+		errs = append(errs, brewRootOnly(node)...)
+	}
 	return append(errs, rootOnlyAgents(top)...)
+}
+
+// brewRootOnly allows only brew.file in a layer: cleanup and upgrade are
+// machine-wide.
+func brewRootOnly(node yaml.Node) []error {
+	if node.Kind != yaml.MappingNode {
+		return []error{errors.New("brew.file is required")}
+	}
+	var errs []error
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if key := node.Content[i].Value; key != "file" {
+			errs = append(errs, fmt.Errorf("brew.%s is set in a layer; only the main zakwas.yaml may set it (a layer sets brew.file only)", key))
+		}
+	}
+	return errs
 }
 
 // miseRootOnly allows only mise.config in a layer: prune is machine-wide.

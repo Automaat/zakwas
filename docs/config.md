@@ -920,7 +920,7 @@ zakwas plan
 
 The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. Running `plan`, `check` or `apply` from a layer's own checkout (or with `-c` on its file) is refused with a line naming the main config, since loaded alone it would plan the removal of everything the main config installed. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
 
-A layer is an ordinary `zakwas.yaml`; `protect` and `brew` are refused when the key is present, even empty, and so is `mise.prune`; a layer may set only `mise.config` (see [mise configs](#mise-configs-in-layers)). `agents` is refused for the keys listed [below](#layer-agents). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
+A layer is an ordinary `zakwas.yaml`; `protect` is refused when the key is present, even empty, and so is `mise.prune`; a layer may set only `mise.config` (see [mise configs](#mise-configs-in-layers)) and only `brew.file` (see [Brewfiles in layers](#brewfiles-in-layers)). `agents` is refused for the keys listed [below](#layer-agents). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
 
 ```yaml
 files:
@@ -944,7 +944,8 @@ How each section merges (the main config first, then the layers in the order the
 | `system.sshKey` | at most one file may set it |
 | `system.sudoTouchID` | on when any file sets it |
 | `mise.config` | each layer's config is installed too; the main config needs a `mise` section; a tool pinned in two mise configs is an error naming both files |
-| `protect`, `brew`, `mise.prune` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+| `brew.file` | each layer's Brewfile is converged too; the main config needs a `brew` section (see [Brewfiles in layers](#brewfiles-in-layers)) |
+| `protect`, `mise.prune`, `brew.cleanup`, `brew.upgrade` | main config only; a layer that sets one fails with a line naming the layer file and the section |
 | `agents` | see [agents in layers](#layer-agents); the main config must have an `agents` section |
 
 The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.
@@ -977,6 +978,30 @@ files:
 - When `mise.prune` is on, a layer config whose installed copy differs from the repo file schedules the prune, like the main config does, so versions a bump supersedes go in the same `apply`.
 
 A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).
+
+### Brewfiles in layers
+
+A layer may set `brew.file` and nothing else, for taps and tools that belong to it. `brew.cleanup` and `brew.upgrade` stay with the main config, and a layer that sets either fails with a line naming the layer file and the key. The main `zakwas.yaml` must have a `brew` section for a layer's Brewfile to apply; without one, the layer is refused and the line names it.
+
+```yaml
+brew:
+  file: Brewfile.work
+```
+
+zakwas reads every Brewfile, the main one first and then each layer's in the order the layers were added, and runs `brew bundle` once against all of them:
+
+- `brew bundle check` and `install` cover the entries of every Brewfile, so the plan lists what is missing from any of them.
+- `cleanup` compares the machine with all of them together, so `cleanup: zap` in the main config never removes a package a layer's Brewfile lists. Removing a layer drops its Brewfile from the comparison, and what only that Brewfile listed shows up as a removal in the next plan.
+- Tap trust is checked per file. A third-party tap in a layer's Brewfile needs `trusted: true` there, and the error names the layer and its Brewfile.
+- With layers, zakwas passes the combined Brewfile to `brew bundle --file=-` on stdin, so nothing is written to disk. Without layers, the command line is unchanged (`--file <path>`).
+- The same package in two Brewfiles is fine: `brew bundle` accepts the duplicate, and the plan lists it once.
+- A layer's Brewfile that is missing fails the plan, like a missing layer.
+
+Because brew reads the files as one Brewfile, a few things reach across them:
+
+- `cask_args` in one file applies to the casks of every file after it, not to the ones before it.
+- Each Brewfile runs in its own block, so a `return` ends that file only and its local variables stay its own. An `__END__` line would cut the combined text, so a plan with layers fails naming the file that has one. A lone Brewfile, without layers, is passed to brew as is.
+- The commands that install and clean up get the Brewfile on stdin, so their child processes read an empty stdin instead of the terminal: `HOMEBREW_ASK` prompts are skipped. Installer password prompts use the terminal and still work.
 
 ## Full example
 
