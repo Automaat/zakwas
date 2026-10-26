@@ -380,3 +380,69 @@ func mustRealDir(t *testing.T, file string) string {
 	}
 	return dir
 }
+
+func TestParseLayeredWithReadsALayerFromSources(t *testing.T) {
+	root := writeConfig(t, "files: [{src: a, dst: ~/.a}]\n")
+	layer := writeLayer(t, "work", "files: [{src: f, dst: ~/.disk}]\n")
+	home := t.TempDir()
+	override := map[string][]byte{layer.Path: []byte("files: [{src: f, dst: ~/.override}]\n")}
+
+	c, err := ParseLayeredWith(mustReadBytes(t, root), root, home, platform.Darwin, []Layer{layer}, override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Files) != 2 || c.Files[1].Dst != "~/.override" {
+		t.Errorf("files = %+v, want the layer's entry from sources", c.Files)
+	}
+	if onDisk, _ := os.ReadFile(layer.Path); !strings.Contains(string(onDisk), "~/.disk") {
+		t.Error("sources must not write the layer's file")
+	}
+
+	override[layer.Path] = []byte("protect: {immutable: true}\n")
+	_, err = ParseLayeredWith(mustReadBytes(t, root), root, home, platform.Darwin, []Layer{layer}, override)
+	var le *LayerError
+	if !errors.As(err, &le) || le.Layer.Name != "work" {
+		t.Errorf("err = %v, want the invalid override reported as the layer's", err)
+	}
+}
+
+func TestMisePinsNameEveryFileThatPinsATool(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"zakwas.yaml": "mise: {config: mise.toml}\n", "mise.toml": "[tools]\njq = \"1.8\"\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	layer := writeLayer(t, "work", "mise: {config: layer.toml}\n")
+	if err := os.WriteFile(filepath.Join(filepath.Dir(layer.Path), "layer.toml"), []byte("[tools]\nkubectl = \"1.34\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	rootFile := filepath.Join(dir, "zakwas.yaml")
+	c, err := ParseLayered(mustReadBytes(t, rootFile), rootFile, home, platform.Darwin, []Layer{layer})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for tool, want := range map[string]MisePin{
+		"jq":      {Path: filepath.Join(dir, "mise.toml")},
+		"kubectl": {Layer: "work", Path: filepath.Join(filepath.Dir(layer.Path), "layer.toml")},
+	} {
+		got, err := c.MisePins(tool, home)
+		if err != nil || len(got) != 1 || got[0] != want {
+			t.Errorf("%s: pins = %+v, err = %v, want %+v", tool, got, err, want)
+		}
+	}
+	if got, err := c.MisePins("go", home); err != nil || len(got) != 0 {
+		t.Errorf("an unpinned tool: %+v, %v", got, err)
+	}
+
+	moved := *c
+	moved.RemapLayerMise(func(string) string { return "/elsewhere/layer.toml" })
+	if got := c.LayerMise()[0].Path; got == "/elsewhere/layer.toml" || moved.LayerMise()[0].Path != "/elsewhere/layer.toml" {
+		t.Errorf("RemapLayerMise changed the original (%s) or not the copy (%s)", got, moved.LayerMise()[0].Path)
+	}
+}

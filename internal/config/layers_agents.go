@@ -221,3 +221,22 @@ func IsLocalSource(src string) bool {
 		strings.HasPrefix(src, "."+string(filepath.Separator)) || strings.HasPrefix(src, ".."+string(filepath.Separator)) ||
 		filepath.IsAbs(src)
 }
+
+// EntryFile is the zakwas.yaml entry i of an agents list (such as
+// "agents.permissions.allow") came from, or "" when the merged config does
+// not track it: a config without layers.
+func (a *Agents) EntryFile(section string, i int) string {
+	if files := a.origins[section]; i < len(files) {
+		return files[i]
+	}
+	return ""
+}
+
+// KeyedFile is the layer file a map entry (section "marketplaces", "mcp" or
+// "profiles") came from, or "" when the main config declares it.
+func (a *Agents) KeyedFile(section, key string) string {
+	if files := a.origins["agents."+section+"."+key]; len(files) == 1 {
+		return files[0]
+	}
+	return ""
+}

@@ -1,0 +1,87 @@
+[windows] skip 'the fake mise is an sh script'
+env ZAKWAS_TEST_GOOS=darwin
+chmod 755 bin/mise
+
+zakwas layer add work work
+
+zakwas propose pin-mise kubectl 1.35.0
+stdout 'Proposal [0-9a-f]{8}: pin mise tool kubectl to 1.35.0 \(low risk\)'
+stdout 'for layer work'
+stdout '\+kubectl = "1.35.0"'
+stdout '\+ kubectl@1.35.0'
+cmp work/mise.toml mise.orig
+
+zakwas propose --layer work pin-mise stern 1.0.0
+stdout 'for layer work'
+stdout '\+stern = "1.0.0"'
+
+zakwas propose add-permission deny --layer work -- mkfs
+stdout 'for layer work'
+stdout '\+      - mkfs'
+
+zakwas propose remove-permission deny dd
+stdout 'for layer work'
+stdout '-      - dd'
+
+! zakwas propose --layer nope add-permission deny dd2
+stderr '^zakwas: operation 1 \(deny "dd2"\): layer "nope" is not registered for .*; list the layers with `zakwas layer list`\n$'
+
+! zakwas propose --layer work pin-mise jq 1.9.0
+stderr 'jq is pinned in the main config'
+stderr 'mise would pick one of two pins'
+
+! zakwas propose --layer work remove-permission deny rm
+stderr 'not in layer "work"'
+
+zakwas proposals
+stdout -count=4 '\(layer work\)$'
+cmp zakwas.yaml zakwas.orig
+cmp work/mise.toml mise.orig
+cmp work/zakwas.yaml work.orig
+
+-- zakwas.yaml --
+mise: {config: dotfiles/mise.toml}
+agents:
+  guard: false
+  providers: [opencode]
+  permissions:
+    deny:
+      - rm
+-- zakwas.orig --
+mise: {config: dotfiles/mise.toml}
+agents:
+  guard: false
+  providers: [opencode]
+  permissions:
+    deny:
+      - rm
+-- dotfiles/mise.toml --
+[tools]
+jq = "1.8.2"
+-- work/zakwas.yaml --
+mise: {config: mise.toml}
+agents:
+  permissions:
+    deny:
+      - dd
+-- work.orig --
+mise: {config: mise.toml}
+agents:
+  permissions:
+    deny:
+      - dd
+-- work/mise.toml --
+[tools]
+kubectl = "1.34.1"
+-- mise.orig --
+[tools]
+kubectl = "1.34.1"
+-- bin/mise --
+#!/bin/sh
+case "$1" in
+  ls)
+    if grep -q 'kubectl = "1.35.0"' "$MISE_GLOBAL_CONFIG_FILE"; then echo '{"kubectl":[{"version":"1.35.0","installed":false}]}'
+    elif grep -q 'stern = "1.0.0"' "$MISE_GLOBAL_CONFIG_FILE"; then echo '{"stern":[{"version":"1.0.0","installed":false}]}'
+    else echo '{}'; fi ;;
+  *) exit 99 ;;
+esac

@@ -65,11 +65,14 @@ func runApprove(ctx context.Context, env Env, args []string, out, errOut *consol
 	return ap.run(ctx, store)
 }
 
-// checkProposal refuses a proposal made for another config or too old.
+// checkProposal refuses a proposal made for another config, too old, or for
+// a layer that is no longer registered.
 func checkProposal(p *proposal.Proposal, cfg *config.Config, env Env) error {
 	switch {
 	case p.Config != cfg.Path:
 		return fmt.Errorf("proposal %s was made for %s, not %s", p.ID, p.Config, cfg.Path)
+	case p.Layer != "" && !slices.ContainsFunc(cfg.Layers, func(l config.LoadedLayer) bool { return l.Name == p.Layer }):
+		return fmt.Errorf("proposal %s edits layer %q, which is not registered for %s; discard the proposal or register the layer again", p.ID, printable(p.Layer), cfg.Path)
 	case p.Expired(env.now()):
 		return fmt.Errorf("proposal %s expired on %s (proposals last %d days); propose the change again", p.ID, p.Expires().Format("2006-01-02"), int(proposal.MaxAge.Hours()/24))
 	}
@@ -96,6 +99,24 @@ type approval struct {
 	applied  bool
 
 	summary, tier string
+	// root and file are the repo the proposal edits and its zakwas.yaml: the
+	// main config's, or a layer's.
+	root, file string
+}
+
+// target picks the repo the proposal edits: its layer's, if it names one.
+func (a *approval) target() error {
+	a.root, a.file = a.cfg.Root, a.cfg.Path
+	if a.p.Layer == "" {
+		return nil
+	}
+	for _, l := range a.cfg.Layers {
+		if l.Name == a.p.Layer {
+			a.root, a.file = l.Root, l.Path
+			return nil
+		}
+	}
+	return fmt.Errorf("proposal %s edits layer %q, which is not registered for %s", a.p.ID, printable(a.p.Layer), a.cfg.Path)
 }
 
 // Why an approval applied nothing.
@@ -118,12 +139,15 @@ func (a *approval) fail(err error) int {
 }
 
 func (a *approval) run(ctx context.Context, store proposal.Store) int {
+	if err := a.target(); err != nil {
+		return a.fail(err)
+	}
 	rels := make([]string, 0, len(a.p.Base))
 	for rel, want := range a.p.Base {
 		if !filepath.IsLocal(filepath.FromSlash(rel)) {
 			return a.fail(fmt.Errorf("proposal %s names %q, which is outside the config repo", a.p.ID, rel))
 		}
-		data, err := os.ReadFile(filepath.Join(a.cfg.Root, filepath.FromSlash(rel)))
+		data, err := os.ReadFile(filepath.Join(a.root, filepath.FromSlash(rel)))
 		if err != nil {
 			return a.fail(err)
 		}
@@ -133,7 +157,7 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		rels = append(rels, rel)
 	}
 	slices.Sort(rels)
-	cfgRel, err := filepath.Rel(a.cfg.Root, a.cfg.Path)
+	cfgRel, err := filepath.Rel(a.root, a.file)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -154,6 +178,9 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		editRels[i] = e.Rel
 	}
 	slices.Sort(editRels)
+	if ev.layer != a.p.Layer {
+		return a.fail(fmt.Errorf("proposal %s edits %s, which isn't what it was made against; propose the change again", a.p.ID, repoName(ev.layer)))
+	}
 	if !slices.Equal(editRels, rels) {
 		return a.fail(fmt.Errorf("proposal %s edits %s, which isn't what it was made against; propose the change again", a.p.ID, strings.Join(editRels, ", ")))
 	}
@@ -214,15 +241,33 @@ func (a *approval) run(ctx context.Context, store proposal.Store) int {
 		a.errOut.fail(fmt.Errorf("applied, but the commit failed; commit %s yourself: %w", strings.Join(rels, ", "), err))
 		return ExitErr
 	}
-	sha, _ := git(ctx, a.env.Runner, a.cfg.Root, "rev-parse", "--short", "HEAD")
-	a.out.printf("Committed %s on %s; not pushed.\n", sha, branch)
+	sha, _ := git(ctx, a.env.Runner, a.root, "rev-parse", "--short", "HEAD")
+	a.out.printf("Committed %s on %s%s; not pushed.\n", sha, branch, inLayer(a.p.Layer))
 	return ExitOK
+}
+
+func repoName(layer string) string {
+	if layer == "" {
+		return "the main config"
+	}
+	return "layer " + printable(layer)
+}
+
+// inLayer names the layer a commit goes to, for the text around it.
+func inLayer(layer string) string {
+	if layer == "" {
+		return ""
+	}
+	return " of layer " + printable(layer)
 }
 
 // showReview prints what the approver is asked to confirm: the proposal,
 // why it is rated as it is, the diff and the plan.
 func (a *approval) showReview(out *console, r *review) error {
 	out.printf("Proposal %s: %s (%s risk)\n", a.p.ID, a.summary, a.tier)
+	if a.p.Layer != "" {
+		out.printf("  for layer %s: the edit is committed in %s\n", printable(a.p.Layer), a.root)
+	}
 	for _, reason := range r.ev.reasons {
 		out.print("  " + reason + "\n")
 	}
@@ -231,7 +276,7 @@ func (a *approval) showReview(out *console, r *review) error {
 }
 
 func (a *approval) question(r *review) string {
-	return fmt.Sprintf("Approve %s: apply %d step(s) and commit %s to %s?", a.p.ID, r.ev.plan.Steps(), strings.Join(r.rels, ", "), r.branch)
+	return fmt.Sprintf("Approve %s: apply %d step(s) and commit %s to %s%s?", a.p.ID, r.ev.plan.Steps(), strings.Join(r.rels, ", "), r.branch, inLayer(a.p.Layer))
 }
 
 // askTerminal shows the review and reads y or yes from stdin.
@@ -248,7 +293,7 @@ func (a *approval) askTerminal(_ context.Context, r *review) (bool, error) {
 // checkGit requires the edited files to be tracked and clean in a git
 // checkout on a branch, since approve commits them, and returns the branch.
 func (a *approval) checkGit(ctx context.Context, rels []string) (string, error) {
-	root := a.cfg.Root
+	root := a.root
 	if _, ok := git(ctx, a.env.Runner, root, "rev-parse", "--git-dir"); !ok {
 		return "", fmt.Errorf("%s is not a git repository; approve commits the edit", root)
 	}
@@ -315,7 +360,7 @@ func (a *approval) apply(ctx context.Context, ev *evaluation, style engine.Style
 }
 
 func (a *approval) commit(ctx context.Context, rels []string) error {
-	root := a.cfg.Root
+	root := a.root
 	subject := "zakwas: " + a.summary
 	if r := []rune(subject); len(r) > 72 {
 		subject = string(r[:71]) + "…"
@@ -325,6 +370,9 @@ func (a *approval) commit(ctx context.Context, rels []string) error {
 		via = "a terminal"
 	}
 	body := fmt.Sprintf("Proposal %s (%s risk), approved in %s.", a.p.ID, a.tier, via)
+	if a.p.Layer != "" {
+		body = fmt.Sprintf("Proposal %s (%s risk) for layer %s, approved in %s.", a.p.ID, a.tier, a.p.Layer, via)
+	}
 	run := func(args ...string) error {
 		return runner.Check(ctx, a.env.Runner, runner.Cmd{Name: "git", Args: append([]string{"-C", root}, args...)})
 	}

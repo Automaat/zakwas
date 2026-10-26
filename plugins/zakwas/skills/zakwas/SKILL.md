@@ -16,7 +16,7 @@ zakwas converges this machine (macOS or Linux) to a `zakwas.yaml` in a config re
 
 ## Propose a change
 
-1. Read the current state: `zakwas_config` and `zakwas_plan`, or `zakwas plan` in a shell. Skip an operation the config already covers.
+1. Read the current state: `zakwas_config` (its `layers` lists the registered local layers) and `zakwas_plan`, or `zakwas plan` in a shell. Skip an operation the config already covers.
 2. Save related changes as one proposal: call `zakwas_propose` with `{"ops": [operation, ...]}`, or run `zakwas propose -json batch operations.json` (a JSON array; `-` reads stdin). Each target may be edited only once; order a new marketplace before its plugins. The whole batch gets one diff, plan and risk tier, and any high-risk operation requires terminal approval. Single changes retain their existing form. Prefer the MCP tool `zakwas_propose`; without the zakwas MCP server, run `zakwas propose -json OPERATION ...` in a shell. Proposing changes nothing on disk except the saved proposal.
 3. Report the proposal's `id`, `tier`, `summary` and `reasons` to the user, then follow the tier below.
 4. Remove a proposal the user no longer wants with `zakwas_discard`, or `zakwas proposals` to list them.
@@ -35,6 +35,17 @@ zakwas converges this machine (macOS or Linux) to a `zakwas.yaml` in a config re
 
 An `add-mcp` server with a pre-registered OAuth client takes `server.oauth` with `client_id` and optionally `callback_port` and `scope`. Never pass a client secret; there is no field for one.
 
+## Layers
+
+A machine may have local layers: extra config repos (a work repo next to a private one) merged into the config. Propose into the right repo:
+
+- Pass `layer` (MCP) or `--layer NAME` (shell, before the operation) to send an addition to that layer's `zakwas.yaml`, to the Brewfile it sets with `brew.file` or to the mise config it sets with `mise.config`. Without it an addition goes to the main config's repo. In `{"ops": [...]}`, a top-level `layer` is the default for the operations that name none.
+- Ask which repo the user means when the entry could live in either, such as a work-only plugin or tool: a layer name never comes from your guess.
+- A removal or a version bump needs no `layer`: it goes to the file that holds the entry. Naming a different layer than the one that holds it is refused.
+- One proposal edits one repo: the main config's or a single layer's. Propose the halves of a mixed change separately.
+- The proposal's `layer` field shows where it goes, and `zakwas approve ID` commits there. A layer name that isn't in `zakwas_config` fails with a one-line error: report it, do not register the layer (`zakwas layer` is denied to you).
+- A main-config plugin cannot come from a marketplace only a layer declares: add the plugin to that layer.
+
 `providers` limits an entry to some of `claude`, `codex`, `opencode`, `gemini` and `copilot`; leave it out unless the user names one. In the shell form, put every flag of zakwas (`-json`, `-c PATH`, `--providers`) before `--`, and every dash-prefixed word of a command after it: `zakwas propose -json add-permission review -- git log --oneline`.
 
 ## Tiers
@@ -52,5 +63,6 @@ An `add-mcp` server with a pre-registered OAuth client takes `server.oauth` with
 ## When a proposal is refused
 
 - Marketplace not declared, flow-style YAML (`plugins: [a@m]`), a duplicate entry or an invalid result: tell the user the exact reason and the edit they would need to make in `zakwas.yaml`. Do not make it.
+- Layer not registered, a layer without `brew.file` or `mise.config` for a package or tool, or an entry held by another layer: tell the user the exact reason; registering a layer or setting its file is their edit.
 - No operation covers the request (a hook, a profile): describe the `zakwas.yaml` change and let the user make it.
 - A proposal older than 7 days expires; propose again.

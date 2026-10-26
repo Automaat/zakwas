@@ -30,6 +30,7 @@ type Proposal struct {
 	ID            string              `json:"id"`
 	Created       time.Time           `json:"created"`
 	Config        string              `json:"config"`
+	Layer         string              `json:"layer,omitempty"`
 	Summary       string              `json:"summary"`
 	Ops           []Op                `json:"ops"`
 	Base          map[string]string   `json:"base"`
