@@ -687,7 +687,7 @@ func (a *Agents) validate() []error {
 	folded := map[string]string{}
 	for _, name := range a.MarketplaceNames() {
 		m := a.Marketplaces[name]
-		what := "agents.marketplaces." + name
+		what := a.keyed("agents.marketplaces", name)
 		if other, dup := folded[strings.ToLower(name)]; dup {
 			errs = append(errs, fmt.Errorf("%s: differs from %s only in case; macOS file names ignore case, so use distinct names", what, other))
 		}
@@ -836,8 +836,10 @@ func (a *Agents) validateMCP(checkProviders func(what string, list, allowed []st
 	folded := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(a.MCP)) {
 		s := a.MCP[name]
-		what := "agents.mcp." + name
-		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		what := a.keyed("agents.mcp", name)
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("%s: %s", what, fmt.Sprintf(format, args...)))
+		}
 		if !mcpName.MatchString(name) {
 			fail("name may only contain letters, digits, '_' and '-', and must start with a letter or digit")
 		}
@@ -1049,8 +1051,10 @@ func (a *Agents) validateProfiles(checkProviders func(what string, list, allowed
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(a.Profiles)) {
 		p := a.Profiles[name]
-		what := "agents.profiles." + name
-		fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(what+": "+format, args...)) }
+		what := a.keyed("agents.profiles", name)
+		fail := func(format string, args ...any) {
+			errs = append(errs, fmt.Errorf("%s: %s", what, fmt.Sprintf(format, args...)))
+		}
 		if !profileName.MatchString(name) {
 			fail("name may only contain lowercase letters, digits and '-', and must start with a letter")
 		}

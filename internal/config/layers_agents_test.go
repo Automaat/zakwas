@@ -223,6 +223,13 @@ func TestParseLayeredAgentsRejects(t *testing.T) {
 		{"a hook in two files", []string{"agents: {hooks: {commands: [{event: stop, command: /bin/true}]}}\n"}, []string{"duplicates", "agents.hooks.commands[0]"}},
 		{"a plugin of an undeclared marketplace", []string{"agents: {plugins: [x@nowhere]}\n"}, []string{"agents.plugins[1]", "marketplace \"nowhere\"", "{l0}"}},
 		{"a profile of an undeclared server", []string{"agents: {profiles: {p: {description: P, mcp: {nope: allow}}}}\n"}, []string{"agents.profiles.p", "mcp.nope: server is not declared in agents.mcp"}},
+		{"a skill at the layer's own directory", []string{"agents: {skills: ['.']}\n"}, []string{"{l0}: agents.skills[", `path "." must point at a skill directory`}},
+		{"a skill at the layer's parent", []string{"agents: {skills: ['..']}\n"}, []string{`path ".." must point at a skill directory`}},
+		{"a blank instruction file", []string{"agents: {instructions: ['  ']}\n"}, []string{"{l0}: agents.instructions[", "file is required"}},
+		{"a profile prompt with whitespace", []string{"agents: {profiles: {p: {description: P, prompt: ' a.md'}}}\n"}, []string{"{l0}: agents.profiles.p", "must be a file relative to the directory holding zakwas.yaml"}},
+		{"an invalid mcp server names its file", []string{"agents: {mcp: {bad: {}}}\n"}, []string{"{l0}: agents.mcp.bad", "set command for a stdio server or url"}},
+		{"an invalid profile names its file", []string{"agents: {profiles: {Bad: {description: x}}}\n"}, []string{"{l0}: agents.profiles.Bad"}},
+		{"a marketplace without a source names its file", []string{"agents: {marketplaces: {nosrc: {providers: [claude]}}}\n"}, []string{"{l0}: agents.marketplaces.nosrc", "source is required"}},
 		{"a provider outside the main config's", []string{"agents: {mcp: {codex-only: {command: /bin/true, providers: [codex]}}}\n"}, []string{"agents.mcp.codex-only", `provider "codex"`}},
 	}
 	for _, tt := range tests {
@@ -289,5 +296,20 @@ func TestParseLayeredAgentsLayerOrder(t *testing.T) {
 	}
 	if got, want := c.Agents.Instructions[1:], []string{absOne, absTwo}; !slices.Equal(got, want) {
 		t.Errorf("instructions = %q, want %q", got, want)
+	}
+}
+
+func TestParseLayeredAgentsOptInProviders(t *testing.T) {
+	const layer = "agents: {marketplaces: {work: {source: owner/work, providers: [codex]}}}\n"
+	c, _, _, err := parseAgentsLayers(t, "agents: {guard: false, mcp: {srv: {command: echo}}}\n", layer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Agents.Names(ProviderCodex) || len(c.Agents.MCPFor(ProviderCodex)) != 1 {
+		t.Error("a layer entry naming codex does not opt codex in for the merged agents config, as in a single file")
+	}
+	_, _, _, err = parseAgentsLayers(t, "agents: {guard: false, providers: [claude], mcp: {srv: {command: echo}}}\n", layer)
+	if err == nil || !strings.Contains(err.Error(), `provider "codex" is not in agents.providers`) {
+		t.Errorf("err = %v, want the main config's providers to stay the limit", err)
 	}
 }

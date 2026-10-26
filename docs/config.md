@@ -951,14 +951,14 @@ The checks that look across entries run on the merged config: a destination clai
 <a id="layer-agents"></a>
 **Agents in layers.** A layer may add marketplaces, plugins, instructions, hooks, permissions, MCP servers, profiles and skills to the agents the main config manages, for example a work marketplace and its MCP servers. The main config must declare an `agents` section (`agents: {}` is enough); a layer that sets `agents` without one fails, since its agents would otherwise never be converged. The sections merge like this:
 
-- `providers`, `prune`, `guard`, `upgrade`, `sharedInstructions`, `codex` and `opencode` are main config only; a layer that sets one fails. The layer's entries target the main config's providers, and `prune` sees the union, so the main config never prunes what a layer installed.
+- `providers`, `prune`, `guard`, `upgrade`, `sharedInstructions`, `codex` and `opencode` are main config only; a layer that sets one fails. A layer's entries can only target providers the main config manages. As in a single file, an entry that names `codex`, `gemini` or `copilot` opts that provider in for the whole merged section; set `agents.providers` in the main config to pin the set. `prune` sees the union, so the main config never prunes what a layer installed.
 - `marketplaces`, `mcp` and `profiles` are merged by name; a name set in two files is an error naming both.
 - `plugins`, `permissions`, `skills` and `hooks.commands` are joined, the main config first. The duplicate checks run across files: a plugin, a permission, a hook or a skill name declared twice is an error naming both files. A layer's plugin may come from a marketplace of the main config, and a layer's profile may name an MCP server of the main config.
 - `instructions` are appended after the main config's, in the order the layers were added, so each provider's rendered copy holds the main config's text first. `hooks.klaudiush` is on when any file sets it.
 - Relative paths in a layer (`instructions`, a profile's `prompt`, a local `skills` path, a local marketplace source) resolve against the layer's own directory.
 - The state files stay single, and the templates functions `agentPermissions` and `agentMCP` render the merged sets.
 
-A layer's agents section is validated together with the main config's, so an error in a layer entry names the layer's file when it can, and its key otherwise.
+A layer's agents section is validated together with the main config's, after the merge, so a layer entry that is wrong is reported with the layer's file and its key, without the `zakwas layer remove` hint a layer's other sections get.
 
 A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).
 

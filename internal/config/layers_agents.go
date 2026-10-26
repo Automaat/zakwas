@@ -87,6 +87,12 @@ func newAgentsMerge(m *Config, c *Config) *agentsMerge {
 	return am
 }
 
+// keyedFrom records the layer file a map entry came from.
+func (am *agentsMerge) keyedFrom(section, key, file string) {
+	am.file[section+"."+key] = file
+	am.cfg.Agents.origins["agents."+section+"."+key] = []string{file}
+}
+
 func (am *agentsMerge) label(section string, n int, file string) {
 	for range n {
 		am.cfg.Agents.origins[section] = append(am.cfg.Agents.origins[section], file)
@@ -109,7 +115,7 @@ func (am *agentsMerge) add(lc *Config) []error {
 		return []error{fmt.Errorf("%s sets agents, but the main zakwas.yaml has no agents section; add one there (even an empty 'agents: {}') to manage agents", lc.Path)}
 	}
 	abs := func(p string) string {
-		if p == "" || filepath.IsAbs(p) || IsHomePath(p) {
+		if p == "" || filepath.IsAbs(p) || IsHomePath(p) || strings.TrimSpace(p) != p || slices.Contains([]string{".", ".."}, filepath.Clean(p)) {
 			return p
 		}
 		return filepath.Join(lc.Root, p)
@@ -128,7 +134,7 @@ func (am *agentsMerge) add(lc *Config) []error {
 			dst.Marketplaces = map[string]Marketplace{}
 		}
 		dst.Marketplaces[k] = mk
-		am.file["marketplaces."+k] = lc.Path
+		am.keyedFrom("marketplaces", k, lc.Path)
 	}
 	for _, k := range slices.Sorted(maps.Keys(src.MCP)) {
 		if first, dup := am.file["mcp."+k]; dup {
@@ -139,7 +145,7 @@ func (am *agentsMerge) add(lc *Config) []error {
 			dst.MCP = map[string]MCPServer{}
 		}
 		dst.MCP[k] = src.MCP[k]
-		am.file["mcp."+k] = lc.Path
+		am.keyedFrom("mcp", k, lc.Path)
 	}
 	for _, k := range slices.Sorted(maps.Keys(src.Profiles)) {
 		if first, dup := am.file["profiles."+k]; dup {
@@ -152,7 +158,7 @@ func (am *agentsMerge) add(lc *Config) []error {
 			dst.Profiles = map[string]Profile{}
 		}
 		dst.Profiles[k] = p
-		am.file["profiles."+k] = lc.Path
+		am.keyedFrom("profiles", k, lc.Path)
 	}
 	dst.Plugins = append(dst.Plugins, src.Plugins...)
 	am.label("agents.plugins", len(src.Plugins), lc.Path)
@@ -187,6 +193,15 @@ func (am *agentsMerge) add(lc *Config) []error {
 		am.label("agents.permissions.deny", len(p.Deny), lc.Path)
 	}
 	return errs
+}
+
+// keyed names the entry of a map section: by key, and by the layer file it
+// came from, when it did not come from the main config.
+func (a *Agents) keyed(section, key string) string {
+	if files := a.origins[section+"."+key]; len(files) == 1 {
+		return fmt.Sprintf("%s: %s.%s", files[0], section, key)
+	}
+	return section + "." + key
 }
 
 // at names entry i of an agents list: by position, and by the file it came
