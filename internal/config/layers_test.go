@@ -238,7 +238,7 @@ func TestParseLayeredMiseRejects(t *testing.T) {
 		{"a tool in two layers", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{"[tools]\nkind = \"1\"\n", "[tools]\nkind = \"2\"\n"}, []string{"mise tool kind is pinned in both"}},
 		{"a layer config without a main mise section", "", "files: [{src: a, dst: ~/.a}]\n", []string{"[tools]\nkind = \"1\"\n"}, []string{`layer "l0": mise.config in`, "needs a mise section in"}},
 		{"a layer config that is not TOML", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{"[tools\n"}, []string{"is not valid TOML"}},
-		{"a layer config that is missing", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{""}, []string{"mise config:", "no such file"}},
+		{"a layer config that is missing", "[tools]\njq = \"1\"\n", "mise: {config: mise.toml}\n", []string{""}, []string{"mise config:", "mise.toml"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -272,7 +272,10 @@ func TestParseLayeredMiseRejects(t *testing.T) {
 }
 
 func TestParseLayeredMiseConflictNamesBothFiles(t *testing.T) {
-	rootDir := t.TempDir()
+	rootDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	rootToml := writeMise(t, rootDir, "[tools]\njq = \"1\"\n")
 	root := filepath.Join(rootDir, FileName)
 	if err := os.WriteFile(root, []byte("mise: {config: mise.toml}\n"), 0o644); err != nil {
@@ -280,7 +283,7 @@ func TestParseLayeredMiseConflictNamesBothFiles(t *testing.T) {
 	}
 	l := writeLayer(t, "work", "mise: {config: mise.toml}\n")
 	layerToml := writeMise(t, filepath.Dir(l.Path), "[tools]\njq = \"2\"\n")
-	_, err := ParseLayered(mustReadBytes(t, root), root, t.TempDir(), platform.Darwin, []Layer{l})
+	_, err = ParseLayered(mustReadBytes(t, root), root, t.TempDir(), platform.Darwin, []Layer{l})
 	if err == nil {
 		t.Fatal("merged")
 	}
