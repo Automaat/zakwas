@@ -55,7 +55,7 @@ zakwas plan --json -out plan.json
 
 ### apply
 
-Shows the plan, asks for confirmation, applies it, and appends the result to `~/.local/state/zakwas/history.jsonl`. Warns when the config repo is dirty, not on `main`, or behind upstream.
+Shows the plan, asks for confirmation, applies it, and appends the result to `~/.local/state/zakwas/history.jsonl`. Warns when the config repo is dirty, not on `main`, or behind upstream; with [layers](config.md#layers) it checks each layer's checkout too, and its warnings start with `layer NAME:`. The history entry holds the config repo's `commit` and `dirty`, and a `layers` list with each layer's `name`, `root`, `commit` and `dirty` (left out when there are no layers; entries from before layers still read the same).
 
 ```bash
 zakwas apply
@@ -145,7 +145,7 @@ zakwas plan -out plan.json      # save the reviewed plan
 zakwas apply -plan plan.json    # apply it, no prompt; refuses if anything changed since or on another host
 ```
 
-Every document carries `format_version` (currently `1`): new fields may appear, renamed or removed ones bump it. Actions are `create`, `update`, `delete`, `run`; each change has `target`, optional `from`/`to`/`detail`, `destructive`, and `step` (false for entries a later step of the module carries out). `--diff` adds `diff`. With `--json`, tool output streamed by apply goes to stderr, so stdout is always valid JSON. Apply history (`~/.local/state/zakwas/history.jsonl`) uses the same change objects plus the result.
+Every document carries `format_version` (currently `1`): new fields may appear, renamed or removed ones bump it. Actions are `create`, `update`, `delete`, `run`; each change has `target`, optional `from`/`to`/`detail`, `destructive`, and `step` (false for entries a later step of the module carries out). `--diff` adds `diff`. `commit` is the config repo's HEAD and, with layers, `layers` lists each one's `name`, `root` and `commit`. With `--json`, tool output streamed by apply goes to stderr, so stdout is always valid JSON. Apply history (`~/.local/state/zakwas/history.jsonl`) uses the same change objects plus the result.
 
 ## propose, proposals, approve
 
@@ -276,7 +276,7 @@ Pass `-c` (or set `ZAKWAS_CONFIG` in the agent's environment): an agent starts t
 
 | Tool | What it does |
 |---|---|
-| `zakwas_config` | the config path, repo root, modules, agent providers, MCP servers, the registered [layers](config.md#layers), whether the [guard](config.md#guard) is on, and the text of `zakwas.yaml` |
+| `zakwas_config` | the config path, repo root, modules, agent providers, MCP servers, the config repo's `commit`, the registered [layers](config.md#layers) with their commits, whether the [guard](config.md#guard) is on, and the text of `zakwas.yaml` |
 | `zakwas_plan` | the plan as JSON, like `zakwas plan --json`; arguments `only` (modules) and `diff` |
 | `zakwas_check` | the same, with `drift: true` when anything would change |
 | `zakwas_capture` | what the agents have that `zakwas.yaml` doesn't declare, like [`capture`](#capture): `findings`, `skipped` with the reason, and in `ops` the operations that declare the rest, each valid for `zakwas_propose`. Changes nothing |

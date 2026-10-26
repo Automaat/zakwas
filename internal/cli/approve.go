@@ -303,7 +303,7 @@ func (a *approval) apply(ctx context.Context, ev *evaluation, style engine.Style
 		obs = a.observer(style)
 	}
 	result, applyErr := engine.Apply(ctx, obs, plan)
-	if err := recordHistory(ctx, a.env, cfg.Root, plan, result, applyErr); err != nil {
+	if err := recordHistory(ctx, a.env, cfg.Root, cfg.Layers, plan, result, applyErr); err != nil {
 		a.errOut.print("zakwas: warning: history not recorded: " + err.Error() + "\n")
 	}
 	a.out.print("\n" + recap(result, style) + "\n")

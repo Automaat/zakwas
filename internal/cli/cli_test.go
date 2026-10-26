@@ -281,7 +281,7 @@ func TestInterruptedApplyRecordsCommit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	env := Env{Home: home, Runner: cancelAware{fake}}
-	if err := recordHistory(ctx, env, "/repo", nil, engine.Result{}, ctx.Err()); err != nil {
+	if err := recordHistory(ctx, env, "/repo", nil, nil, engine.Result{}, ctx.Err()); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(HistoryPath(home))
@@ -303,7 +303,7 @@ func TestRepoWarnings(t *testing.T) {
 		OnOK("git -C /repo status --porcelain", " M zakwas.yaml\n").
 		OnOK("git -C /repo rev-parse --abbrev-ref HEAD", "feat/x\n").
 		OnOK("git -C /repo rev-list --count HEAD..@{upstream}", "3\n")
-	got := strings.Join(repoWarnings(context.Background(), fake, root), "\n")
+	got := strings.Join(repoWarnings(context.Background(), fake, root, nil), "\n")
 	for _, want := range []string{"uncommitted changes", "branch feat/x", "3 commit(s) behind"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("warnings %q missing %q", got, want)
@@ -314,10 +314,10 @@ func TestRepoWarnings(t *testing.T) {
 		OnOK("git -C /repo status --porcelain", "").
 		OnOK("git -C /repo rev-parse --abbrev-ref HEAD", "main\n").
 		OnOK("git -C /repo rev-list --count HEAD..@{upstream}", "0\n")
-	if w := repoWarnings(context.Background(), clean, root); len(w) != 0 {
+	if w := repoWarnings(context.Background(), clean, root, nil); len(w) != 0 {
 		t.Errorf("clean main: %v", w)
 	}
-	if w := repoWarnings(context.Background(), runnertest.New(), root); len(w) != 0 {
+	if w := repoWarnings(context.Background(), runnertest.New(), root, nil); len(w) != 0 {
 		t.Errorf("not a git repo must not warn: %v", w)
 	}
 }
