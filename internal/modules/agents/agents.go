@@ -269,12 +269,7 @@ func (m *Module) Refresh(ctx context.Context) error {
 }
 
 // IsLocalSource reports whether a marketplace source is a filesystem path.
-func IsLocalSource(src string) bool {
-	return src == "." || src == ".." || config.IsHomePath(src) ||
-		strings.HasPrefix(src, "./") || strings.HasPrefix(src, "../") ||
-		strings.HasPrefix(src, "."+string(filepath.Separator)) || strings.HasPrefix(src, ".."+string(filepath.Separator)) ||
-		filepath.IsAbs(src)
-}
+func IsLocalSource(src string) bool { return config.IsLocalSource(src) }
 
 // source resolves a local path against home and the config root; other
 // sources are passed through.
