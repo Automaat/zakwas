@@ -88,6 +88,18 @@ type Brew struct {
 	File    string `yaml:"file" jsonschema:"required,minLength=1" jsonschema_description:"Brewfile path in the config repo, relative to the directory holding zakwas.yaml (or absolute). Every third-party tap in it needs 'trusted: true'."`
 	Cleanup string `yaml:"cleanup" jsonschema:"enum=none,enum=uninstall,enum=zap,default=none" jsonschema_description:"What to do with installed packages missing from the Brewfile: 'none' keeps them, 'uninstall' removes them ('brew bundle cleanup --force'), 'zap' also removes cask app data ('--zap'). Removals are shown in 'zakwas plan' first. Default none."`
 	Upgrade bool   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Upgrade outdated Brewfile packages on apply. When false, only missing packages are installed ('--no-upgrade'). Run 'zakwas upgrade' to refresh Homebrew's package list first. Default false."`
+
+	// Layers are the Brewfiles of the local layers merged into this config,
+	// in registration order; see ParseLayered. They are read, trusted,
+	// installed and kept by cleanup together with File.
+	Layers []LayerBrewfile `yaml:"-"`
+}
+
+// LayerBrewfile is the Brewfile a local layer adds to the main config's. File
+// is absolute, resolved against the layer's own directory.
+type LayerBrewfile struct {
+	Layer string
+	File  string
 }
 
 const (

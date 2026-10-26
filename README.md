@@ -120,7 +120,7 @@ Windows PowerShell 5.1 blocks scripts by default (`Restricted`), so the command 
 
 ## Layers
 
-A machine can add a second config repo (say a work one next to your private one) without the main repo referencing it: `zakwas layer add work ~/work/dotfiles/zakwas.yaml`. The layers merge into one config, one plan and one state, so neither repo's `apply` prunes the other's files. A layer's `brew`, `mise` and `agents` sections are not merged yet, and `protect` stays with the main config. See [Layers](docs/config.md#layers).
+A machine can add a second config repo (say a work one next to your private one) without the main repo referencing it: `zakwas layer add work ~/work/dotfiles/zakwas.yaml`. The layers merge into one config, one plan and one state, so neither repo's `apply` prunes the other's files. A layer can add its own Brewfile (`brew.file`); its `mise` and `agents` sections are not merged yet, and `protect` stays with the main config. See [Layers](docs/config.md#layers).
 
 ## Security model
 

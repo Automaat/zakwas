@@ -103,7 +103,9 @@ func LoadLayered(path, home, goos string, layers []Layer) (*Config, error) {
 // templates, commands, launchd jobs, defaults and system directories follow
 // the main config's; templates.vars merge, with a repeated name an error;
 // system.sshKey may be set once; sudoTouchID is on when any file sets it.
-// protect, brew, mise and agents belong to the main config only. The merged
+// protect, mise and agents belong to the main config only, and so do brew's
+// cleanup and upgrade: a layer sets brew.file, an extra Brewfile the main
+// config's brew section converges with its own. The merged
 // config is validated as a whole, so a destination two files both claim is
 // an error naming both. A layer that is missing or invalid fails the load.
 func ParseLayered(data []byte, path, home, goos string, layers []Layer) (*Config, error) {
@@ -149,6 +151,11 @@ func newMerge(c *Config) *merge {
 	m.Launchd = slices.Clone(c.Launchd)
 	m.System.Dirs = slices.Clone(c.System.Dirs)
 	m.Layers = nil
+	if c.Brew != nil {
+		b := *c.Brew
+		b.Layers = nil
+		m.Brew = &b
+	}
 	m.origins = map[string][]string{}
 	mg := &merge{cfg: &m, seen: map[string]bool{c.Path: true}, varFile: map[string]string{}}
 	mg.label("files", len(c.Files), c.Path)
@@ -208,6 +215,13 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	m.label("defaults", len(lc.Defaults), lc.Path)
 	m.label("launchd", len(lc.Launchd), lc.Path)
 	var errs []error
+	if lc.Brew != nil {
+		if c.Brew == nil {
+			errs = append(errs, fmt.Errorf("layer %q: brew.file is set in %s, but the main zakwas.yaml has no brew section; add one to apply it", l.Name, lc.Path))
+		} else {
+			c.Brew.Layers = append(c.Brew.Layers, LayerBrewfile{Layer: l.Name, File: abs(lc.Brew.File)})
+		}
+	}
 	for _, k := range slices.Sorted(maps.Keys(lc.Templates.Vars)) {
 		if first, dup := m.varFile[k]; dup {
 			errs = append(errs, fmt.Errorf("templates.vars.%s is set in both %s and %s", k, first, lc.Path))
@@ -256,9 +270,19 @@ func rootOnly(data []byte) []error {
 		return nil
 	}
 	var errs []error
-	for _, name := range []string{"protect", "brew", "mise", "agents"} {
+	for _, name := range []string{"protect", "mise", "agents"} {
 		if _, set := top[name]; set {
 			errs = append(errs, fmt.Errorf("%s is set in a layer; only the main zakwas.yaml may set it", name))
+		}
+	}
+	// A layer's brew section may name a Brewfile and nothing else.
+	if brew, set := top["brew"]; set && brew.Kind != yaml.MappingNode {
+		errs = append(errs, errors.New("brew.file is required"))
+	} else if set {
+		for i := 0; i+1 < len(brew.Content); i += 2 {
+			if key := brew.Content[i].Value; key != "file" {
+				errs = append(errs, fmt.Errorf("brew.%s is set in a layer; only the main zakwas.yaml may set it (a layer sets brew.file only)", key))
+			}
 		}
 	}
 	return errs

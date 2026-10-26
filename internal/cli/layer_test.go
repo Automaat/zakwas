@@ -229,7 +229,8 @@ func TestLayerAddValidatesTheMerge(t *testing.T) {
 		body string
 		want []string
 	}{
-		{"a root-only section", "brew: {file: Brewfile}\n", []string{"can't add layer", "brew is set in a layer"}},
+		{"a Brewfile without a brew section in the main config", "brew: {file: Brewfile}\n", []string{"brew.file is set in", "the main zakwas.yaml has no brew section"}},
+		{"a root-only brew key", "brew: {file: Brewfile, cleanup: zap}\n", []string{"can't add layer", "brew.cleanup is set in a layer"}},
 		{"a protect section", "protect: {immutable: true}\n", []string{"protect is set in a layer"}},
 		{"an invalid entry", "files: [{src: x}]\n", []string{"can't add layer", "src and dst are required"}},
 		{"a destination the main config uses", "files: [{src: payload, dst: ~/.zshrc}]\n", []string{"overlaps"}},

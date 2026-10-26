@@ -64,7 +64,7 @@ zakwas plan
 stdout '\+ ~/.zshrc'
 
 ! zakwas layer add bad bad
-stderr 'brew is set in a layer'
+stderr 'protect is set in a layer'
 ! zakwas layer add clash clash
 stderr 'overlaps'
 stderr 'clash[/]zakwas.yaml'
@@ -105,7 +105,7 @@ files:
 -- other/o --
 other
 -- bad/zakwas.yaml --
-brew: {file: Brewfile}
+protect: {immutable: true}
 -- clash/zakwas.yaml --
 files:
   - {src: c, dst: ~/.zshrc}
