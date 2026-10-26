@@ -316,6 +316,32 @@ func TestApplyMiseRefusesArrayValue(t *testing.T) {
 	}
 }
 
+func TestApplyMiseRefusesToolPinnedByLayer(t *testing.T) {
+	cfg, home := newRepo(t, baseConfig)
+	layerDir := t.TempDir()
+	layer := config.Layer{Name: "work", Path: filepath.Join(layerDir, "zakwas.yaml")}
+	for name, text := range map[string]string{"zakwas.yaml": "mise: {config: mise.toml}\n", "mise.toml": "[tools]\nkubectl = \"1.34.1\"\n"} {
+		if err := os.WriteFile(filepath.Join(layerDir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, err := os.ReadFile(cfg.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layered, err := config.ParseLayered(data, cfg.Path, home, platform.Darwin, []config.Layer{layer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Apply([]Op{{Kind: PinMise, Name: "kubectl", Version: "1.0.0"}}, layered, home)
+	if err == nil || !strings.Contains(err.Error(), `pinned by layer "work"`) {
+		t.Fatalf("err = %v, want a refusal naming the layer", err)
+	}
+	if _, err := Apply([]Op{{Kind: PinMise, Name: "go", Version: "1.28"}}, layered, home); err != nil {
+		t.Errorf("a tool no layer pins: %v", err)
+	}
+}
+
 func TestClassify(t *testing.T) {
 	tests := []struct {
 		name string

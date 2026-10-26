@@ -166,3 +166,21 @@ func TestWriteMiseConfigLeavesToolsOfOtherConfigs(t *testing.T) {
 		t.Errorf("ran %v; a tool from another config must not be pinned into the copy", got)
 	}
 }
+
+func TestOtherConfigTools(t *testing.T) {
+	t.Setenv("MISE_GLOBAL_CONFIG_FILE", "")
+	a := testutil.Abs
+	from := func(path string) []miseTool {
+		var m miseTool
+		m.Source.Path = path
+		return []miseTool{m}
+	}
+	work, main := a("/h/.config/mise/conf.d/work.toml"), a("/h/.config/mise/config.toml")
+	tools := map[string][]miseTool{
+		"kubectl": from(work), "yq": from(work), "jq": from(main), "legacy": from(a("/h/.tool-versions")),
+	}
+	got := otherConfigTools(tools, a("/h"))
+	if want := []string{"jq (" + main + ")"}; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q (the copy is of %s)", got, want, work)
+	}
+}

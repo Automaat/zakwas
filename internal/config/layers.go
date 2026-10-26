@@ -325,19 +325,12 @@ func (c *Config) miseConflicts(home string) []error {
 	var errs []error
 	pinned := map[string]string{}
 	for _, file := range files {
-		data, err := os.ReadFile(file)
+		names, err := miseTools(file)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("mise config: %w", err))
+			errs = append(errs, err)
 			continue
 		}
-		var parsed struct {
-			Tools map[string]any `toml:"tools"`
-		}
-		if err := toml.Unmarshal(data, &parsed); err != nil {
-			errs = append(errs, fmt.Errorf("mise config %s is not valid TOML: %w", file, err))
-			continue
-		}
-		for _, tool := range slices.Sorted(maps.Keys(parsed.Tools)) {
+		for _, tool := range names {
 			if first, dup := pinned[tool]; dup {
 				errs = append(errs, fmt.Errorf("mise tool %s is pinned in both %s and %s; mise would pick one", tool, first, file))
 				continue
@@ -355,4 +348,34 @@ func (c *Config) where(section string, i int) string {
 		return labels[i]
 	}
 	return fmt.Sprintf("%s[%d]", section, i)
+}
+
+// miseTools lists the tools a mise config pins, sorted.
+func miseTools(file string) ([]string, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("mise config: %w", err)
+	}
+	var parsed struct {
+		Tools map[string]any `toml:"tools"`
+	}
+	if err := toml.Unmarshal(data, &parsed); err != nil {
+		return nil, fmt.Errorf("mise config %s is not valid TOML: %w", file, err)
+	}
+	return slices.Sorted(maps.Keys(parsed.Tools)), nil
+}
+
+// LayerPinning returns the layer mise config that pins tool, if any: an edit
+// of the main mise config must not pin it a second time.
+func (c *Config) LayerPinning(tool string) (MiseConfig, bool, error) {
+	for _, mc := range c.layerMise {
+		names, err := miseTools(mc.Path)
+		if err != nil {
+			return MiseConfig{}, false, err
+		}
+		if slices.Contains(names, tool) {
+			return mc, true, nil
+		}
+	}
+	return MiseConfig{}, false, nil
 }

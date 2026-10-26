@@ -140,6 +140,22 @@ func fromOtherConfig(versions []miseTool, global string) bool {
 	})
 }
 
+// otherConfigTools lists the tools the copy of the global config lacks
+// because they come from another one, as "name (path)".
+func otherConfigTools(tools map[string][]miseTool, home string) []string {
+	global := globalConfigPath(tools, home)
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(tools)) {
+		i := slices.IndexFunc(tools[name], func(t miseTool) bool {
+			return strings.HasSuffix(t.Source.Path, ".toml") && t.Source.Path != global
+		})
+		if i >= 0 {
+			out = append(out, name+" ("+tools[name][i].Source.Path+")")
+		}
+	}
+	return out
+}
+
 // pinArgs returns the `mise use` arguments pinning name, nil when every
 // version is already exact, or why it can't be pinned. Only installed
 // versions are pinned: `mise use` would install the others. mise writes
