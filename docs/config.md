@@ -920,6 +920,8 @@ zakwas plan
 
 The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. Running `plan`, `check` or `apply` from a layer's own checkout (or with `-c` on its file) is refused with a line naming the main config, since loaded alone it would plan the removal of everything the main config installed. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
 
+Agents change a layer the same way as the main config, by proposal: [`zakwas propose --layer NAME`](commands.md#propose-layers) (or the `layer` argument of `zakwas_propose`) edits the layer's files and `zakwas approve` commits them in the layer's repo only.
+
 A layer is an ordinary `zakwas.yaml`; `protect` is refused when the key is present, even empty, and so is `mise.prune`; a layer may set only `mise.config` (see [mise configs](#mise-configs-in-layers)) and only `brew.file` (see [Brewfiles in layers](#brewfiles-in-layers)). `agents` is refused for the keys listed [below](#layer-agents). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
 
 ```yaml
@@ -974,7 +976,7 @@ files:
 
 - The main config must have a `mise` section; a layer's `mise.config` without one fails validation. `mise.prune` is machine-wide and stays in the main config: `mise prune` already counts every mise config on the machine, so it never removes a layer's tools.
 - `plan` and `apply` install the tools of every config, running `mise install` once per config with that config as the only global config (`MISE_GLOBAL_CONFIG_FILE` hides `conf.d`, so each is queried on its own).
-- A tool pinned in two configs, the main one and a layer or two layers, fails validation with both file names: mise would pick one silently. Names are compared as written, so `node` and its alias `nodejs` count as different. `zakwas propose` refuses to pin a tool a layer's config already pins.
+- A tool pinned in two configs, the main one and a layer or two layers, fails validation with both file names: mise would pick one silently. Names are compared as written, so `node` and its alias `nodejs` count as different. `zakwas propose pin-mise` bumps a tool in the file that pins it, and `--layer NAME` adds a new pin to that layer's config; it refuses a pin that would make a second one (see [proposals and layers](commands.md#propose-layers)).
 - When `mise.prune` is on, a layer config whose installed copy differs from the repo file schedules the prune, like the main config does, so versions a bump supersedes go in the same `apply`.
 
 A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).

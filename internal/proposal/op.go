@@ -66,6 +66,27 @@ type Op struct {
 	Cask          bool     `json:"cask,omitempty"`
 	Providers     []string `json:"providers,omitempty"`
 	Server        *Server  `json:"server,omitempty"`
+	// Layer is the local layer whose repo the edit goes to; empty means the
+	// main config's, or, for an edit or removal, wherever the entry is.
+	Layer string `json:"layer,omitempty"`
+}
+
+// DefaultLayer makes layer the target of the operations that name none. An
+// operation that names another layer is an error.
+func DefaultLayer(ops []Op, layer string) error {
+	if layer == "" {
+		return nil
+	}
+	for i := range ops {
+		switch ops[i].Layer {
+		case "":
+			ops[i].Layer = layer
+		case layer:
+		default:
+			return fmt.Errorf("operation %d (%s) names layer %q, but the proposal's layer is %q", i+1, ops[i].Summary(), ops[i].Layer, layer)
+		}
+	}
+	return nil
 }
 
 // ValidateOps rejects empty batches, invalid operations and repeated targets.
@@ -162,6 +183,9 @@ func (o Op) Validate() error {
 	}
 	for _, p := range o.Providers {
 		need(slices.Contains(config.Providers, p), fmt.Sprintf("unknown provider %q", p))
+	}
+	if o.Layer != "" {
+		need(config.ValidLayerName(o.Layer), "layer name may only hold lowercase letters, digits and '-'")
 	}
 	if o.Kind != AddBrew {
 		need(!o.Cask, "only add-brew takes a cask")

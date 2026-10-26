@@ -20,7 +20,7 @@ import (
 )
 
 // Edit is one file an operation list changes. Rel is its path relative to
-// the config repo, with forward slashes.
+// the root of the repo it belongs to, with forward slashes.
 type Edit struct {
 	Path string
 	Rel  string
@@ -29,10 +29,14 @@ type Edit struct {
 }
 
 // Result is the outcome of applying operations to the files on disk, which
-// stay untouched: the new contents, and the config they parse to.
+// stay untouched: the new contents, and the config they parse to. Layer
+// names the local layer whose repo holds every edit, empty for the main
+// config's; Root is that repo's directory.
 type Result struct {
 	Edits  []Edit
 	Config *config.Config
+	Layer  string
+	Root   string
 }
 
 type editor struct {
@@ -40,9 +44,27 @@ type editor struct {
 	home  string
 	files map[string]*Edit
 	order []string
-	// markets are the marketplaces earlier operations declared, which later
-	// plugins may come from.
-	markets map[string]bool
+	// markets are the marketplaces earlier operations declared, with the
+	// layer each went to ("" for the main config), which later plugins may
+	// come from.
+	markets map[string]string
+	// repo is the one repo the operations edit, once the first has chosen it.
+	repo *target
+}
+
+// target is where an operation's edits go: the main config's repo, or the
+// repo of a local layer.
+type target struct {
+	layer string
+	root  string
+	yaml  string
+}
+
+func (t target) String() string {
+	if t.layer == "" {
+		return "the main config"
+	}
+	return fmt.Sprintf("layer %q", t.layer)
 }
 
 // Apply runs the operations against the config repo's files in memory. The
@@ -51,7 +73,7 @@ func Apply(ops []Op, cfg *config.Config, home string) (*Result, error) {
 	if err := ValidateOps(ops); err != nil {
 		return nil, err
 	}
-	e := &editor{cfg: cfg, home: home, files: map[string]*Edit{}, markets: map[string]bool{}}
+	e := &editor{cfg: cfg, home: home, files: map[string]*Edit{}, markets: map[string]string{}}
 	for i, op := range ops {
 		if err := e.apply(op); err != nil {
 			return nil, fmt.Errorf("operation %d (%s): %w", i+1, op.Summary(), err)
@@ -66,15 +88,72 @@ func Apply(ops []Op, cfg *config.Config, home string) (*Result, error) {
 	if len(res.Edits) == 0 {
 		return nil, errors.New("the operations change nothing")
 	}
-	newCfg, err := config.ParseLayered(e.files[cfg.Path].New, cfg.Path, home, cfg.GOOS, cfg.LayerRefs())
+	sources := map[string][]byte{}
+	for _, l := range cfg.Layers {
+		if f, ok := e.files[l.Path]; ok {
+			sources[l.Path] = f.New
+		}
+	}
+	newCfg, err := config.ParseLayeredWith(e.files[cfg.Path].New, cfg.Path, home, cfg.GOOS, cfg.LayerRefs(), sources)
 	if err != nil {
 		return nil, fmt.Errorf("the edited config is invalid: %w", err)
 	}
 	res.Config = newCfg
+	res.Layer, res.Root = e.repo.layer, e.repo.root
 	return res, nil
 }
 
-func (e *editor) file(path string) (*Edit, error) {
+// main is the target of the main config's repo.
+func (e *editor) main() target { return target{root: e.cfg.Root, yaml: e.cfg.Path} }
+
+// layerNamed is the target of a registered layer's repo.
+func (e *editor) layerNamed(name string) (target, error) {
+	for _, l := range e.cfg.Layers {
+		if l.Name == name {
+			return target{layer: name, root: l.Root, yaml: l.Path}, nil
+		}
+	}
+	return target{}, fmt.Errorf("layer %q is not registered for %s; list the layers with `zakwas layer list`", name, e.cfg.Path)
+}
+
+// choose records the repo an operation edits. A proposal is committed in one
+// repo, so every operation must edit the same one.
+func (e *editor) choose(t target) error {
+	if e.repo == nil {
+		e.repo = &t
+		return nil
+	}
+	if *e.repo != t {
+		return fmt.Errorf("it edits %s, but earlier operations edit %s; a proposal is committed in one repo, so propose them separately", t, e.repo)
+	}
+	return nil
+}
+
+// addTarget is the repo an operation that adds an entry edits: the layer it
+// names, else the main config's.
+func (e *editor) addTarget(op Op) (target, error) {
+	if op.Layer == "" {
+		return e.main(), nil
+	}
+	return e.layerNamed(op.Layer)
+}
+
+// holderTarget is the repo of the file that holds an entry. An operation
+// that names a layer must name the one that holds it.
+func (e *editor) holderTarget(op Op, file string) (target, error) {
+	holder := e.main()
+	for _, l := range e.cfg.Layers {
+		if l.Path == file {
+			holder = target{layer: l.Name, root: l.Root, yaml: l.Path}
+		}
+	}
+	if op.Layer != "" && op.Layer != holder.layer {
+		return target{}, fmt.Errorf("the entry is in %s (%s), not in layer %q", holder, file, op.Layer)
+	}
+	return holder, nil
+}
+
+func (e *editor) file(path, root string) (*Edit, error) {
 	if f, ok := e.files[path]; ok {
 		return f, nil
 	}
@@ -85,9 +164,9 @@ func (e *editor) file(path string) (*Edit, error) {
 	if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("%s is a symlink; edit the file it points to by hand", path)
 	}
-	rel, err := filepath.Rel(e.cfg.Root, real)
+	rel, err := filepath.Rel(root, real)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("%s is outside the config repo %s, so an edit couldn't be committed", path, e.cfg.Root)
+		return nil, fmt.Errorf("%s is outside the config repo %s, so an edit couldn't be committed", path, root)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -100,62 +179,223 @@ func (e *editor) file(path string) (*Edit, error) {
 }
 
 func (e *editor) apply(op Op) error {
-	cfgFile, err := e.file(e.cfg.Path)
-	if err != nil {
+	// The main zakwas.yaml is always read: the edited config is parsed from it.
+	if _, err := e.file(e.cfg.Path, e.cfg.Root); err != nil {
 		return err
 	}
 	paths := config.Paths{Home: e.home, Root: e.cfg.Root}
 	switch op.Kind {
 	case AddBrew:
-		if err := platform.ModuleError("brew", e.cfg.OS()); err != nil {
-			return fmt.Errorf("add-brew: %w", err)
-		}
-		if e.cfg.Brew == nil {
-			return errors.New("zakwas.yaml has no brew section")
-		}
-		f, err := e.file(paths.Src(e.cfg.Brew.File))
-		if err != nil {
-			return err
-		}
-		f.New, err = addBrew(f.New, op.Name, op.Cask)
-		return err
+		return e.brewOp(op, paths)
 	case PinMise:
-		if err := platform.ModuleError("mise", e.cfg.OS()); err != nil {
-			return fmt.Errorf("pin-mise: %w", err)
-		}
-		if e.cfg.Mise == nil {
-			return errors.New("zakwas.yaml has no mise section")
-		}
-		if mc, pinned, err := e.cfg.LayerPinning(op.Name); err != nil {
-			return fmt.Errorf("pin-mise: %w", err)
-		} else if pinned {
-			return fmt.Errorf("pin-mise: %s is pinned by layer %q in %s; change the pin there, since mise would pick one of two", op.Name, mc.Layer, mc.Path)
-		}
-		f, err := e.file(paths.Src(e.cfg.Mise.Config))
-		if err != nil {
-			return err
-		}
-		f.New, err = pinMise(f.New, op.Name, op.Version)
-		return err
+		return e.miseOp(op, paths)
 	}
-	y, err := parseYAML(cfgFile.New)
+	t, err := e.yamlTarget(op)
 	if err != nil {
-		return fmt.Errorf("%s: %w", e.cfg.Path, err)
-	}
-	if err := e.editYAML(y, op); err != nil {
 		return err
 	}
-	cfgFile.New = y.bytes()
+	if err := e.choose(t); err != nil {
+		return err
+	}
+	f, err := e.file(t.yaml, t.root)
+	if err != nil {
+		return err
+	}
+	y, err := parseYAML(f.New)
+	if err != nil {
+		return fmt.Errorf("%s: %w", t.yaml, err)
+	}
+	if err := e.editYAML(y, op, t); err != nil {
+		return err
+	}
+	f.New = y.bytes()
 	return nil
 }
 
-func (e *editor) editYAML(y *yamlFile, op Op) error {
+// yamlTarget is the repo of the zakwas.yaml an operation edits.
+func (e *editor) yamlTarget(op Op) (target, error) {
+	if op.Kind != RemovePermission {
+		return e.addTarget(op)
+	}
+	if op.Layer != "" {
+		if _, err := e.layerNamed(op.Layer); err != nil {
+			return target{}, err
+		}
+	}
+	want := normalize(op.Command)
+	var files []string
+	for i, rule := range e.rules(op.Decision) {
+		if normalize(rule.Command) != want {
+			continue
+		}
+		file := e.cfg.Agents.EntryFile("agents.permissions."+op.Decision, i)
+		if file == "" {
+			file = e.cfg.Path
+		}
+		if !slices.Contains(files, file) {
+			files = append(files, file)
+		}
+	}
+	switch len(files) {
+	case 0:
+		// Not declared anywhere: editing reports it.
+		return e.addTarget(op)
+	case 1:
+		return e.holderTarget(op, files[0])
+	}
+	return target{}, fmt.Errorf("%s has a rule for %q in %s; remove it with the layer that holds it named", op.Decision, want, strings.Join(files, " and "))
+}
+
+// rules are the merged permission rules of one decision.
+func (e *editor) rules(decision string) []config.AgentPermission {
+	if e.cfg.Agents == nil || e.cfg.Agents.Permissions == nil {
+		return nil
+	}
+	p := e.cfg.Agents.Permissions
+	switch decision {
+	case config.PermissionAllow:
+		return p.Allow
+	case config.PermissionReview:
+		return p.Review
+	}
+	return p.Deny
+}
+
+func (e *editor) brewOp(op Op, paths config.Paths) error {
+	if err := platform.ModuleError("brew", e.cfg.OS()); err != nil {
+		return fmt.Errorf("add-brew: %w", err)
+	}
+	if e.cfg.Brew == nil {
+		return errors.New("zakwas.yaml has no brew section")
+	}
+	t, err := e.addTarget(op)
+	if err != nil {
+		return err
+	}
+	file := paths.Src(e.cfg.Brew.File)
+	if t.layer != "" {
+		file = ""
+		for _, lb := range e.cfg.Brew.Layers {
+			if lb.Layer == t.layer {
+				file = lb.File
+			}
+		}
+		if file == "" {
+			return fmt.Errorf("layer %q has no brew.file; set it in %s first", t.layer, t.yaml)
+		}
+	}
+	if err := e.choose(t); err != nil {
+		return err
+	}
+	kind := "brew"
+	if op.Cask {
+		kind = "cask"
+	}
+	for _, other := range e.brewfiles(paths) {
+		if other == file {
+			continue
+		}
+		data, err := os.ReadFile(other)
+		if err != nil {
+			return err
+		}
+		if hasBrewEntry(data, kind, op.Name) {
+			return fmt.Errorf("%s %q is already in the Brewfile %s", kind, op.Name, other)
+		}
+	}
+	f, err := e.file(file, t.root)
+	if err != nil {
+		return err
+	}
+	f.New, err = addBrew(f.New, op.Name, op.Cask)
+	return err
+}
+
+// brewfiles lists the Brewfiles of the config and its layers.
+func (e *editor) brewfiles(paths config.Paths) []string {
+	out := []string{paths.Src(e.cfg.Brew.File)}
+	for _, lb := range e.cfg.Brew.Layers {
+		out = append(out, lb.File)
+	}
+	return out
+}
+
+func (e *editor) miseOp(op Op, paths config.Paths) error {
+	if err := platform.ModuleError("mise", e.cfg.OS()); err != nil {
+		return fmt.Errorf("pin-mise: %w", err)
+	}
+	if e.cfg.Mise == nil {
+		return errors.New("zakwas.yaml has no mise section")
+	}
+	pins, err := e.cfg.MisePins(op.Name, e.home)
+	if err != nil {
+		return fmt.Errorf("pin-mise: %w", err)
+	}
+	var (
+		t    target
+		file string
+	)
+	switch {
+	case len(pins) > 0:
+		// Bumping a pin edits the file that holds it.
+		pin := pins[0]
+		file = pin.Path
+		if t, err = e.pinHolder(op, pin); err != nil {
+			return fmt.Errorf("pin-mise: %w", err)
+		}
+	case op.Layer == "":
+		t, file = e.main(), paths.Src(e.cfg.Mise.Config)
+	default:
+		if t, err = e.layerNamed(op.Layer); err != nil {
+			return err
+		}
+		for _, mc := range e.cfg.LayerMise() {
+			if mc.Layer == t.layer {
+				file = mc.Path
+			}
+		}
+		if file == "" {
+			return fmt.Errorf("pin-mise: layer %q has no mise.config; set it in %s first", t.layer, t.yaml)
+		}
+	}
+	if err := e.choose(t); err != nil {
+		return err
+	}
+	f, err := e.file(file, t.root)
+	if err != nil {
+		return err
+	}
+	f.New, err = pinMise(f.New, op.Name, op.Version)
+	return err
+}
+
+// pinHolder is the repo of the mise config that pins a tool already. A
+// layer named for a tool the main config pins, or another layer, is refused:
+// a second pin would make mise pick one of two.
+func (e *editor) pinHolder(op Op, pin config.MisePin) (target, error) {
+	holder := e.main()
+	if pin.Layer != "" {
+		var err error
+		if holder, err = e.layerNamed(pin.Layer); err != nil {
+			return target{}, err
+		}
+	}
+	if op.Layer != "" && op.Layer != pin.Layer {
+		return target{}, fmt.Errorf("%s is pinned in %s (%s), not in layer %q; mise would pick one of two pins", op.Name, holder, pin.Path, op.Layer)
+	}
+	return holder, nil
+}
+
+func (e *editor) editYAML(y *yamlFile, op Op, t target) error {
 	switch op.Kind {
 	case AddMarketplace:
-		if e.cfg.Agents != nil && hasKey(e.cfg.Agents.Marketplaces, op.Name) || e.markets[op.Name] {
+		if e.cfg.Agents != nil && hasKey(e.cfg.Agents.Marketplaces, op.Name) {
 			return fmt.Errorf("marketplace %s is already declared", op.Name)
 		}
-		e.markets[op.Name] = true
+		if _, declared := e.markets[op.Name]; declared {
+			return fmt.Errorf("marketplace %s is already declared", op.Name)
+		}
+		e.markets[op.Name] = t.layer
 		return y.add([]string{"agents", "marketplaces"}, yaml.MappingNode, func(indent string) []string {
 			lines := []string{indent + keyText(op.Name) + ":", indent + "  source: " + scalar(op.Source, false)}
 			if len(op.Providers) > 0 {
@@ -165,9 +405,8 @@ func (e *editor) editYAML(y *yamlFile, op Op) error {
 		})
 	case AddPlugin:
 		_, mkt, _ := strings.Cut(op.Name, "@")
-		declared := e.cfg.Agents != nil && hasKey(e.cfg.Agents.Marketplaces, mkt)
-		if !declared && !e.markets[mkt] {
-			return fmt.Errorf("marketplace %q is not declared under agents.marketplaces", mkt)
+		if err := e.marketplaceFor(mkt, t); err != nil {
+			return err
 		}
 		path := []string{"agents", "plugins"}
 		if len(itemsWhere(y, path, func(n *yaml.Node) bool { return itemField(n, "id") == op.Name })) > 0 {
@@ -222,6 +461,33 @@ func (e *editor) editYAML(y *yamlFile, op Op) error {
 		})
 	}
 	return fmt.Errorf("unsupported operation %q", op.Kind)
+}
+
+// marketplaceFor checks a plugin's marketplace is declared where the plugin
+// can use it. The main config can't lean on a marketplace only a layer
+// declares: the repo would stop validating on a machine without the layer.
+func (e *editor) marketplaceFor(mkt string, t target) error {
+	var declaredIn string
+	switch {
+	case e.cfg.Agents != nil && hasKey(e.cfg.Agents.Marketplaces, mkt):
+		if file := e.cfg.Agents.KeyedFile("marketplaces", mkt); file != "" {
+			for _, l := range e.cfg.Layers {
+				if l.Path == file {
+					declaredIn = l.Name
+				}
+			}
+		}
+	default:
+		layer, ok := e.markets[mkt]
+		if !ok {
+			return fmt.Errorf("marketplace %q is not declared under agents.marketplaces", mkt)
+		}
+		declaredIn = layer
+	}
+	if t.layer == "" && declaredIn != "" {
+		return fmt.Errorf("marketplace %q is declared only by layer %q, and the main config can't depend on a layer; add the plugin to that layer", mkt, declaredIn)
+	}
+	return nil
 }
 
 func mcpEntry(indent string, op Op) []string {
@@ -298,20 +564,29 @@ func itemField(n *yaml.Node, field string) string {
 	return ""
 }
 
+// hasBrewEntry reports whether the Brewfile declares the package, in either
+// quote style.
+func hasBrewEntry(data []byte, kind, name string) bool {
+	for _, en := range brew.ParseEntries(data) {
+		if en.Kind == kind && en.Name == name {
+			return true
+		}
+	}
+	for line := range strings.Lines(string(data)) {
+		if g := singleQuoted.FindStringSubmatch(strings.TrimSpace(line)); g != nil && g[1] == kind && g[2] == name {
+			return true
+		}
+	}
+	return false
+}
+
 func addBrew(data []byte, name string, cask bool) ([]byte, error) {
 	kind := "brew"
 	if cask {
 		kind = "cask"
 	}
-	for _, en := range brew.ParseEntries(data) {
-		if en.Kind == kind && en.Name == name {
-			return nil, fmt.Errorf("%s %q is already in the Brewfile", kind, name)
-		}
-	}
-	for line := range strings.Lines(string(data)) {
-		if g := singleQuoted.FindStringSubmatch(strings.TrimSpace(line)); g != nil && g[1] == kind && g[2] == name {
-			return nil, fmt.Errorf("%s %q is already in the Brewfile", kind, name)
-		}
+	if hasBrewEntry(data, kind, name) {
+		return nil, fmt.Errorf("%s %q is already in the Brewfile", kind, name)
 	}
 	if err := plainBrewfile(data); err != nil {
 		return nil, err

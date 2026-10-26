@@ -38,6 +38,10 @@ Operations:
   pin-mise TOOL VERSION
   add-mcp NAME (--command CMD [--arg A]... [--env-var NAME]... | --url URL [--bearer-token-env NAME | --oauth-client-id ID [--oauth-callback-port PORT] [--oauth-scope SCOPES]]) [--providers ...]
 
+A change goes to the main config's repo unless --layer names a local layer,
+whose repo it goes to instead. An edit or removal goes to the file that holds
+the entry. A proposal is committed in one repo.
+
 Flags:
 `
 
@@ -79,6 +83,7 @@ func (l *listFlag) Set(s string) error {
 
 type proposeOptions struct {
 	cfgPath        string
+	layer          string
 	asJSON         bool
 	providers      string
 	justification  string
@@ -106,6 +111,7 @@ func newProposeFlags(errOut io.Writer) (*flag.FlagSet, *proposeOptions) {
 	}
 	fs.StringVar(&o.cfgPath, "c", "", "path to zakwas.yaml (default: search upward from cwd, then $ZAKWAS_CONFIG)")
 	fs.BoolVar(&o.asJSON, "json", false, "print the proposal as JSON")
+	fs.StringVar(&o.layer, "layer", "", "name of the local layer whose repo the change goes to (default: the main config's)")
 	fs.StringVar(&o.providers, "providers", "", "comma-separated providers the entry targets (default: the section's)")
 	fs.StringVar(&o.justification, "justification", "", "add-permission: one-line reason Codex shows for a prompting or forbidden command")
 	fs.BoolVar(&o.cask, "cask", false, "add-brew: the package is a cask")
@@ -185,13 +191,13 @@ func parseSub(fs *flag.FlagSet, out *console, args []string) (pos []string, code
 }
 
 var opFlags = map[string][]string{
-	proposal.AddMarketplace:   {"providers"},
-	proposal.AddPlugin:        {"providers"},
-	proposal.AddPermission:    {"providers", "justification"},
-	proposal.RemovePermission: {},
-	proposal.AddBrew:          {"cask"},
-	proposal.PinMise:          {},
-	proposal.AddMCP:           {"providers", "command", "url", "bearer-token-env", "arg", "env-var", "oauth-client-id", "oauth-callback-port", "oauth-scope"},
+	proposal.AddMarketplace:   {"layer", "providers"},
+	proposal.AddPlugin:        {"layer", "providers"},
+	proposal.AddPermission:    {"layer", "providers", "justification"},
+	proposal.RemovePermission: {"layer"},
+	proposal.AddBrew:          {"layer", "cask"},
+	proposal.PinMise:          {"layer"},
+	proposal.AddMCP:           {"layer", "providers", "command", "url", "bearer-token-env", "arg", "env-var", "oauth-client-id", "oauth-callback-port", "oauth-scope"},
 }
 
 func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string, goos string) (proposal.Op, error) {
@@ -215,7 +221,7 @@ func opFromArgs(fs *flag.FlagSet, o *proposeOptions, pos []string, goos string) 
 	if len(stray) > 0 {
 		return proposal.Op{}, fmt.Errorf("%s doesn't take %s", kind, strings.Join(stray, ", "))
 	}
-	op := proposal.Op{Kind: kind, Justification: o.justification, Cask: o.cask}
+	op := proposal.Op{Kind: kind, Justification: o.justification, Cask: o.cask, Layer: o.layer}
 	for p := range strings.SplitSeq(o.providers, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			op.Providers = append(op.Providers, p)
@@ -278,7 +284,7 @@ func proposalOps(fs *flag.FlagSet, o *proposeOptions, pos []string, env Env) ([]
 	}
 	var stray []string
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name != "c" && f.Name != "json" {
+		if f.Name != "c" && f.Name != "json" && f.Name != "layer" {
 			stray = append(stray, "-"+f.Name)
 		}
 	})
@@ -302,6 +308,9 @@ func proposalOps(fs *flag.FlagSet, o *proposeOptions, pos []string, env Env) ([]
 	}
 	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("batch must contain exactly one JSON array")
+	}
+	if err := proposal.DefaultLayer(ops, o.layer); err != nil {
+		return nil, err
 	}
 	if err := proposal.ValidateOps(ops); err != nil {
 		return nil, err
@@ -351,6 +360,9 @@ func runPropose(ctx context.Context, env Env, args []string, out, errOut *consol
 func printProposal(out *console, env Env, p *proposal.Proposal, ev *evaluation) int {
 	style := engine.Style{Color: env.Color, ShowDiffs: true}
 	out.printf("Proposal %s: %s (%s risk)\n", p.ID, p.Summary, p.Tier)
+	if p.Layer != "" {
+		out.printf("  for layer %s: approve commits the edit in that layer's repo\n", printable(p.Layer))
+	}
 	for _, r := range p.Reasons {
 		out.print("  " + r + "\n")
 	}
@@ -375,7 +387,7 @@ func saveProposal(ctx context.Context, env Env, cfg *config.Config, ops ...propo
 	}
 	p := &proposal.Proposal{
 		FormatVersion: engine.FormatVersion, ID: id, Created: env.now().UTC().Truncate(time.Second),
-		Config: cfg.Path, Summary: proposal.Summaries(ev.ops), Ops: ev.ops, Base: ev.base,
+		Config: cfg.Path, Layer: ev.layer, Summary: proposal.Summaries(ev.ops), Ops: ev.ops, Base: ev.base,
 		Tier: ev.tier, Reasons: ev.reasons, Modules: ev.modules, Diff: ev.diff, Plan: ev.plan.JSONModules(false),
 	}
 	if err := (proposal.Store{Dir: proposal.Dir(env.Home)}).Save(p); err != nil {
@@ -421,9 +433,17 @@ func runProposals(env Env, args []string, out, errOut *console) int {
 	}
 	now := env.now()
 	for _, p := range mine {
-		out.printf("%s  %-4s  %-8s  %s\n", p.ID, printable(p.Tier), expiry(p, now), printable(p.Summary))
+		out.printf("%s  %-4s  %-8s  %s%s\n", p.ID, printable(p.Tier), expiry(p, now), printable(p.Summary), layerNote(p))
 	}
 	return ExitOK
+}
+
+// layerNote marks a proposal that goes to a layer's repo.
+func layerNote(p *proposal.Proposal) string {
+	if p.Layer == "" {
+		return ""
+	}
+	return " (layer " + printable(p.Layer) + ")"
 }
 
 func expiry(p *proposal.Proposal, now time.Time) string {
@@ -440,14 +460,17 @@ func expiry(p *proposal.Proposal, now time.Time) string {
 // evaluation is what a proposal's operations do to the current config repo:
 // the edits, the plan of the modules they affect, and the tier of both.
 type evaluation struct {
-	ops     []proposal.Op
-	edits   []proposal.Edit
-	base    map[string]string
-	modules []string
-	plan    engine.Plan
-	tier    string
-	reasons []string
-	diff    string
+	// layer names the local layer whose repo the edits belong to, empty for
+	// the main config's; root is that repo's directory.
+	layer, root string
+	ops         []proposal.Op
+	edits       []proposal.Edit
+	base        map[string]string
+	modules     []string
+	plan        engine.Plan
+	tier        string
+	reasons     []string
+	diff        string
 }
 
 // evaluate applies ops in memory and plans the affected modules against the
@@ -458,7 +481,7 @@ func evaluate(ctx context.Context, env Env, cfg *config.Config, ops []proposal.O
 	if err != nil {
 		return nil, err
 	}
-	ev := &evaluation{ops: ops, edits: res.Edits, base: map[string]string{}}
+	ev := &evaluation{ops: ops, edits: res.Edits, base: map[string]string{}, layer: res.Layer, root: res.Root}
 	var diffs []string
 	for _, e := range res.Edits {
 		ev.base[e.Rel] = proposal.Hash(e.Old)
@@ -550,8 +573,13 @@ func configWithEdits(res *proposal.Result, dir, home string) (*config.Config, er
 	if c.Brew != nil {
 		b := *c.Brew
 		b.File = sub(b.File)
+		b.Layers = slices.Clone(b.Layers)
+		for i := range b.Layers {
+			b.Layers[i].File = sub(b.Layers[i].File)
+		}
 		c.Brew = &b
 	}
+	c.RemapLayerMise(sub)
 	if c.Mise != nil {
 		m := *c.Mise
 		m.Config = sub(m.Config)

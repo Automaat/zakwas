@@ -168,7 +168,7 @@ func (t *mcpTools) tools() []mcp.Tool {
 		},
 		{
 			Name: "zakwas_propose", Title: "Propose a config change", Schema: proposalRequestSchema(t.env.goos()),
-			Description: "Saves a change to the config repo as a proposal, with its diff, plan and risk tier, and changes nothing else. Pass one operation or {\"ops\": [operation, ...]} for one combined proposal. Operations: " +
+			Description: "Saves a change to the config repo as a proposal, with its diff, plan and risk tier, and changes nothing else. Pass one operation or {\"ops\": [operation, ...]} for one combined proposal; set layer to send it to a registered local layer's repo. Operations: " +
 				strings.Join(proposal.KindsFor(t.env.goos()), ", ") + ". Returns the proposal and what to do next.",
 			Handler: t.propose,
 		},
@@ -199,7 +199,7 @@ func proposalRequestSchema(goos string) map[string]any {
 	props := maps.Clone(single["properties"].(map[string]any))
 	props["ops"] = map[string]any{
 		"type": "array", "minItems": 1, "items": single,
-		"description": "Ordered operations saved and approved as one proposal. Do not combine with single-operation fields.",
+		"description": "Ordered operations saved and approved as one proposal, all in one repo. Do not combine with single-operation fields except layer, which applies to the operations that name none.",
 	}
 	schema := objectSchema(props)
 	schema["oneOf"] = []any{map[string]any{"required": []string{"kind"}}, map[string]any{"required": []string{"ops"}}}
@@ -229,6 +229,7 @@ func proposeSchema(goos string) map[string]any {
 		"version":       stringProp("pin-mise: the version."),
 		"cask":          map[string]any{"type": "boolean", "description": "add-brew: the package is a cask."},
 		"providers":     stringsProp("Providers the entry targets; default the section's."),
+		"layer":         stringProp("Name of a registered local layer (zakwas_config lists them): the change goes to that layer's zakwas.yaml, Brewfile or mise config and is committed in its repo. Default: the main config. An edit or removal goes to the file that holds the entry; naming another layer is an error."),
 		"server":        server,
 	}
 	if !platform.Supported("brew", goos) {
@@ -373,13 +374,24 @@ func (t *mcpTools) propose(ctx context.Context, c *mcp.Call) (mcp.Result, error)
 	}
 	var ops []proposal.Op
 	if data, batch := fields["ops"]; batch {
-		if len(fields) != 1 {
-			return mcp.Result{}, errors.New("ops cannot be combined with single-operation fields")
+		var layer string
+		allowed := 1
+		if raw, ok := fields["layer"]; ok {
+			allowed++
+			if err := json.Unmarshal(raw, &layer); err != nil {
+				return mcp.Result{}, fmt.Errorf("layer must be a string: %w", err)
+			}
+		}
+		if len(fields) != allowed {
+			return mcp.Result{}, errors.New("ops cannot be combined with single-operation fields other than layer")
 		}
 		dec := json.NewDecoder(bytes.NewReader(data))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&ops); err != nil {
 			return mcp.Result{}, fmt.Errorf("ops must be an array of operations: %w", err)
+		}
+		if err := proposal.DefaultLayer(ops, layer); err != nil {
+			return mcp.Result{}, err
 		}
 	} else {
 		var op proposal.Op
@@ -418,6 +430,7 @@ func (t *mcpTools) proposals(context.Context, *mcp.Call) (mcp.Result, error) {
 		ID      string    `json:"id"`
 		Tier    string    `json:"tier"`
 		Summary string    `json:"summary"`
+		Layer   string    `json:"layer,omitempty"`
 		Expires time.Time `json:"expires"`
 		Expired bool      `json:"expired"`
 	}
@@ -425,7 +438,7 @@ func (t *mcpTools) proposals(context.Context, *mcp.Call) (mcp.Result, error) {
 	now := t.env.now()
 	for _, p := range all {
 		if p.Config == cfg.Path {
-			out = append(out, entry{p.ID, printable(p.Tier), printable(p.Summary), p.Expires(), p.Expired(now)})
+			out = append(out, entry{p.ID, printable(p.Tier), printable(p.Summary), printable(p.Layer), p.Expires(), p.Expired(now)})
 		}
 	}
 	return jsonResult(struct {

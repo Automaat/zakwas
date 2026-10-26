@@ -50,7 +50,7 @@ func (f complFlag) spellings() []string {
 	return []string{"-" + f.name, "--" + f.name}
 }
 
-var freeFlags = []string{"version", "providers", "justification", "command", "url", "arg", "env-var", "bearer-token-env"}
+var freeFlags = []string{"version", "layer", "providers", "justification", "command", "url", "arg", "env-var", "bearer-token-env"}
 
 func flagsOf(fs *flag.FlagSet) []complFlag {
 	var out []complFlag

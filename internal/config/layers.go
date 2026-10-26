@@ -125,6 +125,13 @@ func LoadLayered(path, home, goos string, layers []Layer) (*Config, error) {
 // config is validated as a whole, so a destination two files both claim is
 // an error naming both. A layer that is missing or invalid fails the load.
 func ParseLayered(data []byte, path, home, goos string, layers []Layer) (*Config, error) {
+	return ParseLayeredWith(data, path, home, goos, layers, nil)
+}
+
+// ParseLayeredWith is ParseLayered reading a layer's zakwas.yaml from sources,
+// keyed by the layer's Path, instead of from disk where it has an entry: how
+// a proposal checks an edited layer file before writing it.
+func ParseLayeredWith(data []byte, path, home, goos string, layers []Layer, sources map[string][]byte) (*Config, error) {
 	c, err := ParseFor(data, path, home, goos)
 	if err != nil || len(layers) == 0 {
 		return c, err
@@ -132,7 +139,7 @@ func ParseLayered(data []byte, path, home, goos string, layers []Layer) (*Config
 	m := newMerge(c)
 	var errs []error
 	for _, l := range layers {
-		lc, err := loadLayer(l, home, goos)
+		lc, err := loadLayer(l, home, goos, sources)
 		if err != nil {
 			return nil, err
 		}
@@ -275,8 +282,12 @@ func (m *merge) add(l Layer, lc *Config) []error {
 }
 
 // loadLayer reads and validates one layer on its own.
-func loadLayer(l Layer, home, goos string) (*Config, error) {
-	data, err := os.ReadFile(l.Path)
+func loadLayer(l Layer, home, goos string, sources map[string][]byte) (*Config, error) {
+	data, ok := sources[l.Path]
+	var err error
+	if !ok {
+		data, err = os.ReadFile(l.Path)
+	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, &LayerError{Layer: l, Missing: true, Err: err}
 	}
@@ -407,17 +418,40 @@ func miseTools(file string) ([]string, error) {
 	return slices.Sorted(maps.Keys(parsed.Tools)), nil
 }
 
-// LayerPinning returns the layer mise config that pins tool, if any: an edit
-// of the main mise config must not pin it a second time.
-func (c *Config) LayerPinning(tool string) (MiseConfig, bool, error) {
+// RemapLayerMise points the layers' mise configs at the files f names, for a
+// copy of the config that is planned against edited contents.
+func (c *Config) RemapLayerMise(f func(path string) string) {
+	c.layerMise = slices.Clone(c.layerMise)
+	for i := range c.layerMise {
+		c.layerMise[i].Path = f(c.layerMise[i].Path)
+	}
+}
+
+// MisePin is a mise config that pins a tool: Layer is empty for the main
+// config's.
+type MisePin struct {
+	Layer string
+	Path  string
+}
+
+// MisePins lists the mise configs, the main one first, that pin tool.
+func (c *Config) MisePins(tool, home string) ([]MisePin, error) {
+	if c.Mise == nil {
+		return nil, nil
+	}
+	files := []MisePin{{Path: Paths{Home: home, Root: c.Root}.Src(c.Mise.Config)}}
 	for _, mc := range c.layerMise {
-		names, err := miseTools(mc.Path)
+		files = append(files, MisePin{Layer: mc.Layer, Path: mc.Path})
+	}
+	var out []MisePin
+	for _, f := range files {
+		names, err := miseTools(f.Path)
 		if err != nil {
-			return MiseConfig{}, false, err
+			return nil, err
 		}
 		if slices.Contains(names, tool) {
-			return mc, true, nil
+			out = append(out, f)
 		}
 	}
-	return MiseConfig{}, false, nil
+	return out, nil
 }

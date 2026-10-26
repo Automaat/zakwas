@@ -171,7 +171,7 @@ Saves the edit with its diff, plan and risk tier under `~/.local/state/zakwas/pr
 | `pin-mise TOOL VERSION` | the `[tools]` table of the mise config (`mise.config`) | |
 | `add-mcp NAME` | `agents.mcp` | `--command CMD` with `--arg A` and `--env-var NAME`, or `--url URL` with `--bearer-token-env NAME` or with `--oauth-client-id ID`, `--oauth-callback-port PORT` and `--oauth-scope SCOPES`; `--providers LIST` |
 
-`--providers`, `--arg` and `--env-var` take a comma list or repeat. Also `-c PATH` and `-json`, which prints the proposal as JSON. Flags go before `--`; any command word that starts with a dash goes after it: `zakwas propose -json add-permission allow -- ls -la`.
+`--providers`, `--arg` and `--env-var` take a comma list or repeat. Also `-c PATH`, `-json`, which prints the proposal as JSON, and `--layer NAME` (see [below](#propose-layers)). Flags go before `--`; any command word that starts with a dash goes after it: `zakwas propose -json add-permission allow -- ls -la`.
 
 For several changes, use `zakwas propose batch operations.json` (or `zakwas propose batch -` to read stdin). The input is a non-empty JSON array of the same operation fields used by MCP:
 
@@ -183,9 +183,14 @@ For several changes, use `zakwas propose batch operations.json` (or `zakwas prop
 ]
 ```
 
-A batch returns one proposal ID with a combined diff, plan and risk tier. One `zakwas approve ID` reviews, applies and commits the entire batch. Operations run in order in memory, so a marketplace can precede its plugins. Empty, invalid or conflicting batches save nothing; each target can be edited only once (including a mise tool or the same permission list and command). A cask or any other high-risk operation makes the whole proposal high risk. Configuration changes after creation still make the proposal stale. Only `-c` and `-json` apply to the batch command; set each operation's fields in the JSON.
+<a id="propose-layers"></a>
+**Layers.** With [local layers](config.md#layers) registered, `--layer NAME` sends the change to that layer's repo instead of the main config's: an added entry goes to the layer's `zakwas.yaml`, to the Brewfile it sets with `brew.file` or to the mise config it sets with `mise.config` (the layer must set the file the operation edits, or the proposal is refused naming it). Without `--layer`, an added entry goes to the main config's files, and an operation that changes an entry that already exists goes to the file that holds it: `remove-permission` removes the rule from the layer that declares it, and `pin-mise` bumps a tool in the mise config that pins it. Naming a different layer than the one that holds the entry is an error, since a second pin would make mise pick one of two. A name that isn't registered for this config fails with a one-line message, and nothing is saved.
 
-Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared (one declared by an earlier operation of the same proposal counts), a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the config repo.
+A proposal is committed in one repo, so all its operations must edit the same one: the main config's or one layer's. A batch that spans two is refused; propose the halves separately. In a batch, `--layer` is the layer of the operations that name none; each operation may also set `"layer"` in its JSON. Adding a package that another file's Brewfile already has is refused, and so is a plugin in the main config from a marketplace only a layer declares: the main repo would stop validating on a machine without the layer. The edited layer file is validated together with the main config, like any other edit. The proposal records the layer, and `proposals` lists it as `(layer NAME)`.
+
+A batch returns one proposal ID with a combined diff, plan and risk tier. One `zakwas approve ID` reviews, applies and commits the entire batch. Operations run in order in memory, so a marketplace can precede its plugins. Empty, invalid or conflicting batches save nothing; each target can be edited only once (including a mise tool or the same permission list and command). A cask or any other high-risk operation makes the whole proposal high risk. Configuration changes after creation still make the proposal stale. Only `-c`, `-json` and `--layer` apply to the batch command; set each operation's fields in the JSON.
+
+Edits splice the original bytes: every line outside the added or removed entries stays as it was, comments, quoting and folded `>-` scalars included. A flow-style collection (`plugins: [a@m]`) can't be spliced and is rejected with a message; so are an edit that makes `zakwas.yaml` invalid, a duplicate entry, a plugin whose marketplace isn't declared (one declared by an earlier operation of the same proposal counts), a `zakwas.yaml` with more than one YAML document, a Brewfile with Ruby blocks or entries spanning lines, and a brew or mise edit when the config file is a symlink or outside the repo it belongs to (the layer's, for a layer).
 
 **Risk tier.** `low` or `high`, from the operations and the plan of the modules they affect (a permission or MCP edit also plans `templates`, a mise pin `files`):
 
@@ -202,12 +207,12 @@ Lists the pending proposals of this config: id, tier, time left and what they do
 
 ### approve
 
-Loads the proposal, computes the diff, plan and tier again from its operations against the current files, shows them and asks. On `y` it writes the files, applies only the affected modules (same lock, history and progress as `apply`), deletes the proposal and commits the edited files, and only those, to the current branch of the config repo. It never pushes. Needs a terminal on stdin and has no `-y`.
+Loads the proposal, computes the diff, plan and tier again from its operations against the current files, shows them and asks. On `y` it writes the files, applies only the affected modules (same lock, history and progress as `apply`), deletes the proposal and commits the edited files, and only those, to the current branch of the config repo. It never pushes. For a [layer](#propose-layers) proposal everything below happens in the layer's repo: the base hashes, the clean and tracked checks, the restore and the commit, which names the layer in its message; the main config's repo is not touched, even if it has uncommitted changes. Needs a terminal on stdin and has no `-y`.
 
 It refuses, changing nothing, when:
 
 - the config file, Brewfile or mise config the proposal was made against has changed (propose again); a file saved while the prompt waits is detected before anything is written, and never overwritten;
-- the proposal is older than 7 days, or was made for another config;
+- the proposal is older than 7 days, or was made for another config, or for a layer that is no longer registered (discard it, or register the layer again);
 - an edited file has uncommitted changes, the config repo isn't a git repository, or `HEAD` is detached;
 - a module can't be planned;
 - it runs from an agent session while [`agents.guard`](config.md#guard) is on. The guard also denies the managed agents `zakwas approve`.
@@ -280,8 +285,8 @@ Pass `-c` (or set `ZAKWAS_CONFIG` in the agent's environment): an agent starts t
 | `zakwas_plan` | the plan as JSON, like `zakwas plan --json`; arguments `only` (modules) and `diff` |
 | `zakwas_check` | the same, with `drift: true` when anything would change |
 | `zakwas_capture` | what the agents have that `zakwas.yaml` doesn't declare, like [`capture`](#capture): `findings`, `skipped` with the reason, and in `ops` the operations that declare the rest, each valid for `zakwas_propose`. Changes nothing |
-| `zakwas_propose` | saves a proposal like [`propose`](#propose); arguments are either `{"ops": [operation, ...]}` for one combined proposal or the single operation's fields (`kind`, `name`, `decision`, `command`, `version`, `cask`, `providers`, `justification`, `server`). Returns the proposal and what to do next |
-| `zakwas_proposals` | pending proposals of this config |
+| `zakwas_propose` | saves a proposal like [`propose`](#propose); arguments are either `{"ops": [operation, ...]}` for one combined proposal or the single operation's fields (`kind`, `name`, `decision`, `command`, `version`, `cask`, `providers`, `justification`, `server`, `layer`). `layer` names a registered [layer](#propose-layers) (`zakwas_config` lists them) and may also sit beside `ops` as the layer of the operations that name none. Returns the proposal, which records the layer, and what to do next |
+| `zakwas_proposals` | pending proposals of this config, with the layer of each that targets one |
 | `zakwas_discard` | deletes a pending proposal of this config |
 | `zakwas_apply` | only with `--enable-apply`: applies a low-risk proposal after you confirm it in the agent |
 
