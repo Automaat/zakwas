@@ -708,7 +708,11 @@ func (a *Agents) validate() []error {
 		case strings.TrimSpace(f) == "":
 			errs = append(errs, fmt.Errorf("%s: file is required", a.at("agents.instructions", i)))
 		case IsHomePath(f):
-			errs = append(errs, fmt.Errorf("agents.instructions: %q must be relative to the directory holding zakwas.yaml, or absolute", f))
+			what := "agents.instructions"
+			if a.origins[what] != nil {
+				what = a.at(what, i)
+			}
+			errs = append(errs, fmt.Errorf("%s: %q must be relative to the directory holding zakwas.yaml, or absolute", what, f))
 		case slices.Contains(a.Instructions[:i], f):
 			errs = append(errs, fmt.Errorf("%s: %q is already listed", a.at("agents.instructions", i), f))
 		}

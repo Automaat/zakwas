@@ -215,13 +215,13 @@ func TestParseLayeredAgentsRejects(t *testing.T) {
 		{"an mcp server in two files", []string{"agents: {mcp: {root-srv: {command: /bin/true}}}\n"}, []string{"agents.mcp.root-srv is set in both"}},
 		{"a profile in two files", []string{"agents: {profiles: {reviewer: {description: Again}}}\n"}, []string{"agents.profiles.reviewer is set in both"}},
 		{"a marketplace in two layers", []string{"agents: {marketplaces: {w: owner/w}}\n", "agents: {marketplaces: {w: owner/v}}\n"}, []string{"agents.marketplaces.w is set in both", "{l0}", "{l1}"}},
-		{"a plugin in two files", []string{"agents: {plugins: [humanize@sai]}\n"}, []string{"agents.plugins[1]", "humanize@sai is already declared by", "agents.plugins[0]", "{root}", "{l0}"}},
-		{"a permission in two files", []string{"agents: {permissions: {allow: [{command: git status}]}}\n"}, []string{"agents.permissions.allow[1]", `"git status" duplicates`, "{root}", "{l0}"}},
+		{"a plugin in two files", []string{"agents: {plugins: [humanize@sai]}\n"}, []string{"{l0}: agents.plugins[0]", "humanize@sai is already declared by", "agents.plugins[0]", "{root}", "{l0}"}},
+		{"a permission in two files", []string{"agents: {permissions: {allow: [{command: git status}]}}\n"}, []string{"{l0}: agents.permissions.allow[0]", `"git status" duplicates`, "{root}", "{l0}"}},
 		{"a permission decided twice", []string{"agents: {permissions: {deny: [{command: git status}]}}\n"}, []string{"is also listed in", "give each command one decision per provider"}},
 		{"an instruction file in two files", []string{"agents: {instructions: '" + absShared + "'}\n", "agents: {instructions: '" + absShared + "'}\n"}, []string{"is already listed"}},
 		{"a skill in two files", []string{"agents: {skills: [{path: elsewhere/root-skill}]}\n"}, []string{`skill "root-skill" is already declared by`, "{root}", "{l0}"}},
 		{"a hook in two files", []string{"agents: {hooks: {commands: [{event: stop, command: /bin/true}]}}\n"}, []string{"duplicates", "agents.hooks.commands[0]"}},
-		{"a plugin of an undeclared marketplace", []string{"agents: {plugins: [x@nowhere]}\n"}, []string{"agents.plugins[1]", "marketplace \"nowhere\"", "{l0}"}},
+		{"a plugin of an undeclared marketplace", []string{"agents: {plugins: [x@nowhere]}\n"}, []string{"{l0}: agents.plugins[0]", "marketplace \"nowhere\""}},
 		{"a profile of an undeclared server", []string{"agents: {profiles: {p: {description: P, mcp: {nope: allow}}}}\n"}, []string{"agents.profiles.p", "mcp.nope: server is not declared in agents.mcp"}},
 		{"a skill at the layer's own directory", []string{"agents: {skills: ['.']}\n"}, []string{"{l0}: agents.skills[", `path "." must point at a skill directory`}},
 		{"a skill at the layer's parent", []string{"agents: {skills: ['..']}\n"}, []string{`path ".." must point at a skill directory`}},
@@ -230,6 +230,8 @@ func TestParseLayeredAgentsRejects(t *testing.T) {
 		{"an invalid mcp server names its file", []string{"agents: {mcp: {bad: {}}}\n"}, []string{"{l0}: agents.mcp.bad", "set command for a stdio server or url"}},
 		{"an invalid profile names its file", []string{"agents: {profiles: {Bad: {description: x}}}\n"}, []string{"{l0}: agents.profiles.Bad"}},
 		{"a marketplace without a source names its file", []string{"agents: {marketplaces: {nosrc: {providers: [claude]}}}\n"}, []string{"{l0}: agents.marketplaces.nosrc", "source is required"}},
+		{"a layer entry is numbered within its file", []string{"agents: {plugins: [extra@sai, bad]}\n"}, []string{"{l0}: agents.plugins[1]: id \"bad\""}},
+		{"a home instruction file names its file", []string{"agents: {instructions: ~/x.md}\n"}, []string{"{l0}: agents.instructions[0]", "must be relative"}},
 		{"a provider outside the main config's", []string{"agents: {mcp: {codex-only: {command: /bin/true, providers: [codex]}}}\n"}, []string{"agents.mcp.codex-only", `provider "codex"`}},
 	}
 	for _, tt := range tests {
@@ -311,5 +313,19 @@ func TestParseLayeredAgentsOptInProviders(t *testing.T) {
 	_, _, _, err = parseAgentsLayers(t, "agents: {guard: false, providers: [claude], mcp: {srv: {command: echo}}}\n", layer)
 	if err == nil || !strings.Contains(err.Error(), `provider "codex" is not in agents.providers`) {
 		t.Errorf("err = %v, want the main config's providers to stay the limit", err)
+	}
+}
+
+func TestParseLayeredAgentsMarketplaceAtTheLayerRoot(t *testing.T) {
+	c, _, layers, err := parseAgentsLayers(t, agentsRoot, "agents: {marketplaces: {self: {source: .}, up: {source: ..}}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(layers[0].Path)
+	if got := c.Agents.Marketplaces["self"].Source; got != dir {
+		t.Errorf("source . = %q, want the layer's directory %q", got, dir)
+	}
+	if got, want := c.Agents.Marketplaces["up"].Source, filepath.Dir(dir); got != want {
+		t.Errorf("source .. = %q, want the layer's parent %q", got, want)
 	}
 }

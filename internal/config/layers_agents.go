@@ -115,7 +115,7 @@ func (am *agentsMerge) add(lc *Config) []error {
 		return []error{fmt.Errorf("%s sets agents, but the main zakwas.yaml has no agents section; add one there (even an empty 'agents: {}') to manage agents", lc.Path)}
 	}
 	abs := func(p string) string {
-		if p == "" || filepath.IsAbs(p) || IsHomePath(p) || strings.TrimSpace(p) != p || slices.Contains([]string{".", ".."}, filepath.Clean(p)) {
+		if p == "" || filepath.IsAbs(p) || IsHomePath(p) || strings.TrimSpace(p) != p {
 			return p
 		}
 		return filepath.Join(lc.Root, p)
@@ -167,7 +167,7 @@ func (am *agentsMerge) add(lc *Config) []error {
 	}
 	am.label("agents.instructions", len(src.Instructions), lc.Path)
 	for _, s := range src.Skills {
-		if s.Git == "" {
+		if s.Git == "" && !slices.Contains([]string{".", ".."}, filepath.Clean(s.Path)) {
 			s.Path = abs(s.Path)
 		}
 		dst.Skills = append(dst.Skills, s)
@@ -208,7 +208,8 @@ func (a *Agents) keyed(section, key string) string {
 // from when layers are merged, so two entries in conflict name both files.
 func (a *Agents) at(section string, i int) string {
 	if files := a.origins[section]; i < len(files) {
-		return fmt.Sprintf("%s: %s[%d]", files[i], section, i)
+		first := slices.Index(files, files[i])
+		return fmt.Sprintf("%s: %s[%d]", files[i], section, i-first)
 	}
 	return fmt.Sprintf("%s[%d]", section, i)
 }
