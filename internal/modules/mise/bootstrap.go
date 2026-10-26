@@ -16,7 +16,6 @@ import (
 
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/install"
-	"github.com/Automaat/zakwas/internal/runner"
 )
 
 // Version is the mise release installed when mise is missing.
@@ -41,15 +40,16 @@ func Asset() string {
 // planBootstrap installs mise, then every tool in the config. Without mise
 // there is nothing to list or prune yet; the next plan does that.
 func (m *Module) planBootstrap() []engine.Change {
-	install := m.cmd("install", "--yes")
-	install.Stream = true
-	return []engine.Change{
-		{Action: engine.Create, Target: "mise@" + Version, Detail: Bin, Apply: m.installMise},
-		{
-			Action: engine.Run, Target: "mise install", Detail: "every tool in " + m.Mise.Config, Streams: true,
-			Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, install) },
-		},
+	changes := []engine.Change{{Action: engine.Create, Target: "mise@" + Version, Detail: Bin, Apply: m.installMise}}
+	for _, src := range m.sources() {
+		c := m.installChange(src)
+		c.Detail = "every tool in " + m.Mise.Config
+		if src.layer != "" {
+			c.Detail = "every tool in " + m.Paths.Pretty(src.path) + " (layer " + src.layer + ")"
+		}
+		changes = append(changes, c)
 	}
+	return changes
 }
 
 // installMise skips the download when an earlier module (brew) installed

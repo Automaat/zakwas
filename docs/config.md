@@ -281,7 +281,7 @@ CLI tools pinned in a global [mise](https://mise.jdx.dev) config. Omit the secti
 | `config` | string | yes | | mise `config.toml` in the config repo. Its tools are installed with `mise install`. |
 | `prune` | bool | no | `false` | Remove installed tool versions no mise config on the machine references (`mise prune`). Other projects' configs count, so their tools stay. |
 
-zakwas runs mise with this file as the global config, so bumped pins apply even before the installed copy is updated. Install the same file to `~/.config/mise/config.toml` with a `files` entry so mise uses it outside zakwas too.
+zakwas runs mise with this file as the global config, so bumped pins apply even before the installed copy is updated. Install the same file to `~/.config/mise/config.toml` with a `files` entry so mise uses it outside zakwas too. A [local layer](#layers) can add a config of its own; see [mise configs in layers](#mise-configs-in-layers).
 
 ```yaml
 files:
@@ -920,7 +920,7 @@ zakwas plan
 
 The registry is `~/.local/state/zakwas/layers.json`, keyed by the real path of the main config's directory. Layers apply only when that config is loaded: `-c some/other/zakwas.yaml` gets none, and so does a clone in another directory. Running `plan`, `check` or `apply` from a layer's own checkout (or with `-c` on its file) is refused with a line naming the main config, since loaded alone it would plan the removal of everything the main config installed. The same registration applies to every command that loads the config (`plan`, `check`, `apply`, `upgrade`, `propose`, `approve`, `zakwas mcp`).
 
-A layer is an ordinary `zakwas.yaml`; `protect`, `brew` and `mise` are refused when the key is present, even empty, and `agents` is refused for the keys listed [below](#layer-agents). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
+A layer is an ordinary `zakwas.yaml`; `protect` and `brew` are refused when the key is present, even empty, and so is `mise.prune`; a layer may set only `mise.config` (see [mise configs](#mise-configs-in-layers)). `agents` is refused for the keys listed [below](#layer-agents). Its relative `src` paths resolve against the layer's own directory, and it is validated on its own first, with errors naming its file.
 
 ```yaml
 files:
@@ -943,7 +943,8 @@ How each section merges (the main config first, then the layers in the order the
 | `templates.vars` | maps are merged; a name set in two files is an error naming both |
 | `system.sshKey` | at most one file may set it |
 | `system.sudoTouchID` | on when any file sets it |
-| `protect`, `brew`, `mise` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+| `mise.config` | each layer's config is installed too; the main config needs a `mise` section; a tool pinned in two mise configs is an error naming both files |
+| `protect`, `brew`, `mise.prune` | main config only; a layer that sets one fails with a line naming the layer file and the section |
 | `agents` | see [agents in layers](#layer-agents); the main config must have an `agents` section |
 
 The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.
@@ -959,6 +960,21 @@ The checks that look across entries run on the merged config: a destination clai
 - The state files stay single, and the templates functions `agentPermissions` and `agentMCP` render the merged sets.
 
 A layer's agents section is validated together with the main config's, after the merge, so a layer entry that is wrong is reported with the layer's file and its key, without the `zakwas layer remove` hint a layer's other sections get.
+
+### mise configs in layers
+
+A layer pins its own tools with `mise.config`, without touching the main repo's mise config. Like the main one, the config is installed with a `files` entry, here into `~/.config/mise/conf.d/`, which mise reads as global config next to `~/.config/mise/config.toml`:
+
+```yaml
+mise: {config: mise/work.toml}
+files:
+  - {src: mise/work.toml, dst: ~/.config/mise/conf.d/work.toml}
+```
+
+- The main config must have a `mise` section; a layer's `mise.config` without one fails validation. `mise.prune` is machine-wide and stays in the main config: `mise prune` already counts every mise config on the machine, so it never removes a layer's tools.
+- `plan` and `apply` install the tools of every config, running `mise install` once per config with that config as the only global config (`MISE_GLOBAL_CONFIG_FILE` hides `conf.d`, so each is queried on its own).
+- A tool pinned in two configs, the main one and a layer or two layers, fails validation with both file names: mise would pick one silently. Names are compared as written, so `node` and its alias `nodejs` count as different. `zakwas propose` refuses to pin a tool a layer's config already pins.
+- When `mise.prune` is on, a layer config whose installed copy differs from the repo file schedules the prune, like the main config does, so versions a bump supersedes go in the same `apply`.
 
 A registered layer is never skipped. If its file is missing or no longer valid, `plan`, `check`, `apply` and every other command that loads the config fail with exit 1 and one line naming the layer and the fix (`zakwas layer remove NAME`), and nothing is applied: skipping it would make the next `apply` remove everything the layer installed. A layer runs shell commands and writes files with your rights, like the main config does, so register only repos you control. See [security.md](security.md#layers).
 

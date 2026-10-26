@@ -126,6 +126,11 @@ func (e *editor) apply(op Op) error {
 		if e.cfg.Mise == nil {
 			return errors.New("zakwas.yaml has no mise section")
 		}
+		if mc, pinned, err := e.cfg.LayerPinning(op.Name); err != nil {
+			return fmt.Errorf("pin-mise: %w", err)
+		} else if pinned {
+			return fmt.Errorf("pin-mise: %s is pinned by layer %q in %s; change the pin there, since mise would pick one of two", op.Name, mc.Layer, mc.Path)
+		}
 		f, err := e.file(paths.Src(e.cfg.Mise.Config))
 		if err != nil {
 			return err

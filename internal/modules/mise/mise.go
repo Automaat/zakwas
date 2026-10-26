@@ -26,7 +26,10 @@ import (
 const Dir = "/"
 
 type Module struct {
-	Mise   config.Mise
+	Mise config.Mise
+	// Layers are the mise configs local layers brought; their tools are
+	// installed too.
+	Layers []config.MiseConfig
 	Paths  config.Paths
 	Runner runner.Runner
 	// ReleaseURL overrides where mise is downloaded from (tests).
@@ -41,12 +44,46 @@ type tool struct {
 }
 
 func (m *Module) cmd(args ...string) runner.Cmd {
+	return m.cmdFor(m.Paths.Src(m.Mise.Config), args...)
+}
+
+// cmdFor runs mise with cfg as its only global config: MISE_GLOBAL_CONFIG_FILE
+// also hides ~/.config/mise/conf.d, so each config is queried on its own.
+func (m *Module) cmdFor(cfg string, args ...string) runner.Cmd {
 	return runner.Cmd{
 		Name: "mise",
 		Args: args,
 		Dir:  Dir,
-		Env:  []string{"MISE_GLOBAL_CONFIG_FILE=" + m.Paths.Src(m.Mise.Config)},
+		Env:  []string{"MISE_GLOBAL_CONFIG_FILE=" + cfg},
 	}
+}
+
+// source is one mise config to install: the main one, then each layer's.
+type source struct {
+	path  string
+	layer string
+}
+
+func (m *Module) sources() []source {
+	out := []source{{path: m.Paths.Src(m.Mise.Config)}}
+	for _, l := range m.Layers {
+		out = append(out, source{path: l.Path, layer: l.Layer})
+	}
+	return out
+}
+
+// installChange runs `mise install` for one config. Output is passed through.
+func (m *Module) installChange(src source) engine.Change {
+	install := m.cmdFor(src.path, "install", "--yes")
+	install.Stream = true
+	c := engine.Change{
+		Action: engine.Run, Target: "mise install", Streams: true,
+		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, install) },
+	}
+	if src.layer != "" {
+		c.Detail = "layer " + src.layer
+	}
+	return c
 }
 
 func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
@@ -112,25 +149,32 @@ func mergeBumps(changes []engine.Change) []engine.Change {
 }
 
 func (m *Module) planInstall(ctx context.Context) ([]engine.Change, error) {
-	tools, err := m.ls(ctx, "--global", "--missing")
-	if err != nil {
-		return nil, err
-	}
-	var changes []engine.Change
-	for _, t := range tools {
-		if !t.Installed {
-			changes = append(changes, engine.Change{Action: engine.Create, Target: t.Name + "@" + t.Version})
+	var missing []namedTool
+	var installs []engine.Change
+	for _, src := range m.sources() {
+		tools, err := m.ls(ctx, src.path, "--global", "--missing")
+		if err != nil {
+			return nil, err
+		}
+		n := len(missing)
+		for _, t := range tools {
+			if !t.Installed {
+				missing = append(missing, t)
+			}
+		}
+		if len(missing) > n {
+			installs = append(installs, m.installChange(src))
 		}
 	}
-	if len(changes) == 0 {
+	if len(missing) == 0 {
 		return nil, nil
 	}
-	install := m.cmd("install", "--yes")
-	install.Stream = true
-	return append(changes, engine.Change{
-		Action: engine.Run, Target: "mise install", Streams: true,
-		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, install) },
-	}), nil
+	slices.SortStableFunc(missing, func(a, b namedTool) int { return strings.Compare(a.Name, b.Name) })
+	var changes []engine.Change
+	for _, t := range missing {
+		changes = append(changes, engine.Change{Action: engine.Create, Target: t.Name + "@" + t.Version})
+	}
+	return append(changes, installs...), nil
 }
 
 type namedTool struct {
@@ -138,9 +182,10 @@ type namedTool struct {
 	Name string
 }
 
-// ls returns the tool versions `mise ls` lists, sorted by name.
-func (m *Module) ls(ctx context.Context, flags ...string) ([]namedTool, error) {
-	out, err := runner.Output(ctx, m.Runner, m.cmd(append(append([]string{"ls"}, flags...), "--json")...))
+// ls returns the tool versions `mise ls` lists with cfg as the global
+// config, sorted by name.
+func (m *Module) ls(ctx context.Context, cfg string, flags ...string) ([]namedTool, error) {
+	out, err := runner.Output(ctx, m.Runner, m.cmdFor(cfg, append(append([]string{"ls"}, flags...), "--json")...))
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +208,7 @@ func (m *Module) ls(ctx context.Context, flags ...string) ([]namedTool, error) {
 // copy is stale, prune is scheduled anyway: at apply time it runs after the
 // new config is in place and removes the superseded versions in one pass.
 func (m *Module) planPrune(ctx context.Context, installing bool) ([]engine.Change, error) {
-	prunable, err := m.ls(ctx, "--prunable")
+	prunable, err := m.ls(ctx, m.Paths.Src(m.Mise.Config), "--prunable")
 	if err != nil {
 		return nil, err
 	}
@@ -198,17 +243,31 @@ func (m *Module) planPrune(ctx context.Context, installing bool) ([]engine.Chang
 // module keeps it in sync with the repo copy.
 const InstalledConfig = "~/.config/mise/config.toml"
 
+// installedConfigStale reports whether a config mise reads from home differs
+// from its repo copy: the main one, and the copies of the layers' configs
+// that their files entries install.
 func (m *Module) installedConfigStale() (bool, error) {
-	want, err := os.ReadFile(m.Paths.Src(m.Mise.Config))
-	if err != nil {
-		return false, err
+	pairs := [][2]string{{m.Paths.Src(m.Mise.Config), m.Paths.Dst(InstalledConfig)}}
+	for _, l := range m.Layers {
+		for _, dst := range l.Installed {
+			pairs = append(pairs, [2]string{l.Path, m.Paths.Dst(dst)})
+		}
 	}
-	have, err := os.ReadFile(m.Paths.Dst(InstalledConfig))
-	if errors.Is(err, fs.ErrNotExist) {
-		return true, nil
+	for _, p := range pairs {
+		want, err := os.ReadFile(p[0])
+		if err != nil {
+			return false, err
+		}
+		have, err := os.ReadFile(p[1])
+		if errors.Is(err, fs.ErrNotExist) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if !bytes.Equal(want, have) {
+			return true, nil
+		}
 	}
-	if err != nil {
-		return false, err
-	}
-	return !bytes.Equal(want, have), nil
+	return false, nil
 }
