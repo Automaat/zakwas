@@ -18,7 +18,7 @@ import (
 const (
 	rootBrewfile = "tap \"automaat/tap\", trusted: true\nbrew \"jq\"\ncask \"ghostty\"\n"
 	workBrewfile = "tap \"acme/work\", trusted: true\nbrew \"acme/work/vpn\"\ncask \"slack\""
-	allBrewfiles = rootBrewfile + workBrewfile + "\n"
+	allBrewfiles = "-> {\n" + rootBrewfile + "}.call\n-> {\n" + workBrewfile + "\n}.call\n"
 )
 
 func layered(t *testing.T, b config.Brew, root, work string) (*Module, *runnertest.Fake, string) {
@@ -214,13 +214,13 @@ func TestWithoutLayersBrewReadsTheFile(t *testing.T) {
 	}
 }
 
-func TestLayeredBrewfileThatEndsEarlyIsRejected(t *testing.T) {
+func TestLayeredBrewfileWithEndMarkerIsRejected(t *testing.T) {
 	tests := []struct {
 		name, root, work, want string
 	}{
-		{"__END__ in the main Brewfile", rootBrewfile + "__END__\nnotes\n", workBrewfile, "the Brewfile has a top-level `__END__`"},
-		{"return in the main Brewfile", "brew \"jq\"\n  return\n", workBrewfile, "the Brewfile has a top-level `return`"},
+		{"__END__ in the main Brewfile", rootBrewfile + "__END__\nnotes\n", workBrewfile, "the Brewfile has an `__END__` line"},
 		{"__END__ in a layer Brewfile", rootBrewfile, workBrewfile + "\n__END__\n", `the Brewfile of layer "work"`},
+		{"__END__ with CRLF", rootBrewfile, workBrewfile + "\r\n__END__\r\n", `the Brewfile of layer "work"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -236,7 +236,7 @@ func TestLayeredBrewfileThatEndsEarlyIsRejected(t *testing.T) {
 	}
 }
 
-func TestEarlyEndIsFineWithoutLayersAndInComments(t *testing.T) {
+func TestEndMarkerIsFineWithoutLayersAndWhenIndented(t *testing.T) {
 	m, fake, file := newModuleWith(t, config.Brew{}, "brew \"jq\"\n__END__\nnotes\n")
 	fake.OnOK("brew trust --json=v1", `{"taps":[]}`)
 	fake.OnOK("brew bundle check --file "+file+" --verbose --no-upgrade", "")
@@ -244,10 +244,27 @@ func TestEarlyEndIsFineWithoutLayersAndInComments(t *testing.T) {
 		t.Fatalf("a lone Brewfile is passed to brew as is: %v", err)
 	}
 
-	m, fake, _ = layered(t, config.Brew{}, "# return early\n"+rootBrewfile, workBrewfile)
+	m, fake, _ = layered(t, config.Brew{}, "# __END__\n  __END__\n"+rootBrewfile, workBrewfile)
 	fake.OnOK("brew trust --json=v1", `{"taps":["automaat/tap","acme/work"]}`)
 	fake.OnOK("brew bundle check --file=- --verbose --no-upgrade", "")
 	if _, err := m.Plan(context.Background()); err != nil {
-		t.Fatalf("a comment is not a directive: %v", err)
+		t.Fatalf("only a line that is exactly __END__ is the marker: %v", err)
+	}
+}
+
+func TestLayeredBrewfilesAreIsolatedFromEachOther(t *testing.T) {
+	root := "brew \"jq\"; return\nbrew \"after-return\"\n"
+	work := "\xef\xbb\xbfdef helper(x)\n  return x if x\nend\nbrew \"vpn\" if helper(true)"
+	m, fake, _ := layered(t, config.Brew{}, root, work)
+	fake.OnOK("brew trust --json=v1", `{"taps":[]}`)
+	fake.OnOK("brew bundle check --file=- --verbose --no-upgrade", "")
+	if _, err := m.Plan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := "-> {\nbrew \"jq\"; return\nbrew \"after-return\"\n}.call\n-> {\ndef helper(x)\n  return x if x\nend\nbrew \"vpn\" if helper(true)\n}.call\n"
+	for _, c := range fake.Calls {
+		if strings.HasPrefix(c.String(), "brew bundle") && c.Stdin != want {
+			t.Errorf("stdin = %q, want %q", c.Stdin, want)
+		}
 	}
 }

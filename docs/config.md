@@ -971,7 +971,7 @@ zakwas reads every Brewfile, the main one first and then each layer's in the ord
 Because brew reads the files as one Brewfile, a few things reach across them:
 
 - `cask_args` in one file applies to the casks of every file after it, not to the ones before it.
-- A top-level `__END__` or `return` would make brew stop reading there and ignore the later files, so a plan with layers fails naming the file that has one. A lone Brewfile, without layers, is passed to brew as is.
+- Each Brewfile runs in its own block, so a `return` ends that file only and its local variables stay its own. An `__END__` line would cut the combined text, so a plan with layers fails naming the file that has one. A lone Brewfile, without layers, is passed to brew as is.
 - The commands that install and clean up get the Brewfile on stdin, so their child processes read an empty stdin instead of the terminal: `HOMEBREW_ASK` prompts are skipped. Installer password prompts use the terminal and still work.
 
 ## Full example

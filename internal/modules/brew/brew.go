@@ -128,20 +128,19 @@ func (m *Module) read() (bundleFiles, error) {
 	return fs, fs.requireWholeFiles()
 }
 
-var endsEarly = regexp.MustCompile(`(?m)^\s*(__END__|return)\b`)
+var endMarker = regexp.MustCompile(`(?m)^__END__\r?$`)
 
-// requireWholeFiles rejects a Brewfile that stops brew reading early. With
-// layers the files are one Ruby program, so a top-level `__END__` or `return`
-// would hide every later Brewfile from brew while zakwas still counts its
-// entries, and cleanup would remove what the layer lists.
+// requireWholeFiles rejects a Brewfile with an `__END__` line. Each file is
+// wrapped in a lambda, so the marker would only break the wrapper with a
+// syntax error that names no file.
 func (fs bundleFiles) requireWholeFiles() error {
 	if len(fs) < 2 {
 		return nil
 	}
 	var errs []error
 	for _, f := range fs {
-		if g := endsEarly.FindSubmatch(f.data); g != nil {
-			errs = append(errs, fmt.Errorf("%s has a top-level `%s`; with layers brew would stop reading there and ignore the Brewfiles after it", f.label(), g[1]))
+		if endMarker.Match(f.data) {
+			errs = append(errs, fmt.Errorf("%s has an `__END__` line, which cannot be combined with the Brewfiles of other layers", f.label()))
 		}
 	}
 	return errors.Join(errs...)
@@ -157,10 +156,12 @@ func (fs bundleFiles) entries() []Entry {
 }
 
 // source is how brew bundle is pointed at the Brewfiles: the file itself, or
-// with layers their concatenation on stdin (`--file=-`), so brew sees one
-// Brewfile and cleanup keeps what any of them lists. Nothing is written to
-// disk, so plan and check stay read-only. A package listed in several files
-// is harmless to brew bundle.
+// with layers all of them on stdin (`--file=-`), so brew sees one Brewfile and
+// cleanup keeps what any of them lists. Nothing is written to disk, so plan
+// and check stay read-only. A package listed in several files is harmless to
+// brew bundle. Each file runs in its own lambda, so a `return` ends that file
+// only and its local variables stay its own; a byte order mark is dropped
+// because brew reads it as part of the first word.
 type source struct {
 	file  string
 	piped bool
@@ -173,10 +174,12 @@ func (fs bundleFiles) source() source {
 	}
 	var b strings.Builder
 	for _, f := range fs {
-		b.Write(f.data)
+		b.WriteString("-> {\n")
+		b.Write(bytes.TrimPrefix(f.data, []byte("\xef\xbb\xbf")))
 		if !bytes.HasSuffix(f.data, []byte("\n")) {
 			b.WriteString("\n")
 		}
+		b.WriteString("}.call\n")
 	}
 	return source{piped: true, stdin: b.String()}
 }
