@@ -197,7 +197,7 @@ func (s source) cmd(sub, rest []string, stream bool) runner.Cmd {
 // installerCommit pins the Homebrew installer script, so a compromised or
 // broken upstream HEAD can't reach machines until Renovate proposes it.
 // renovate: datasource=git-refs depName=https://github.com/Homebrew/install branch=main
-const installerCommit = "85d1a3fc80d8a63932f632aca8f787de11d14a64"
+const installerCommit = "8c82c081753d4263da0cfe615ef8d9433425f22b"
 
 // homebrewInstall primes sudo while a terminal is attached, so the official
 // installer can run NONINTERACTIVE (no "press RETURN") with cached credentials.
