@@ -20,7 +20,7 @@ import (
 
 // Version is the mise release installed when mise is missing.
 // renovate: datasource=github-releases depName=jdx/mise
-const Version = "2026.10.10"
+const Version = "2026.10.21"
 
 const releaseURL = "https://github.com/jdx/mise/releases/download"
 
