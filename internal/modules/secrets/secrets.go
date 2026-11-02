@@ -222,6 +222,9 @@ func (m *Module) restoreFile(ctx context.Context, f keyFile, session []string) e
 		return err
 	}
 	if len(fresh.missing) == 0 {
+		if fresh.perm&^fileMode != 0 {
+			return os.Chmod(f.path, fileMode)
+		}
 		return nil
 	}
 	candidate := slices.Clone(fresh.content)

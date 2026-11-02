@@ -530,3 +530,45 @@ func TestSymlinkedParentIsRefused(t *testing.T) {
 		t.Errorf("wrote through the link: %v", entries)
 	}
 }
+
+func TestKeysAddedDuringThePromptStillEndOwnerOnly(t *testing.T) {
+	f := setup(t)
+	f.write(t, f.one.String()+"\n", 0o644)
+	f.during["bw get notes note two"] = func() { f.write(t, f.one.String()+"\n"+f.two.String()+"\n", 0o644) }
+	if err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(f.keysPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %o", info.Mode().Perm())
+	}
+	if changes := f.plan(t); len(changes) != 0 {
+		t.Errorf("second plan = %v", changes)
+	}
+}
+
+func TestParentTurningIntoASymlinkDuringThePromptIsRefused(t *testing.T) {
+	f := setup(t)
+	other := filepath.Join(f.home, "other")
+	if err := os.Mkdir(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f.during["bw get notes note two"] = func() {
+		if err := os.Symlink(other, filepath.Dir(f.keysPath)); err != nil {
+			t.Error(err)
+		}
+	}
+	err := f.apply(t)
+	if err == nil || !strings.Contains(err.Error(), "is a symlink") {
+		t.Fatalf("err = %v", err)
+	}
+	if entries, _ := os.ReadDir(other); len(entries) != 0 {
+		t.Errorf("wrote through the link: %v", entries)
+	}
+	if calls := f.bwCalls(); calls[len(calls)-1] != "bw lock" {
+		t.Errorf("last call = %q", calls[len(calls)-1])
+	}
+}
