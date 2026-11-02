@@ -35,7 +35,7 @@ zakwas plan
 stdout 'No changes'
 
 zakwas check --offline
-stdout 'offline: not checked: system, agents, commands'
+stdout 'offline: not checked: system, secrets, agents, commands'
 ! stdout 'brew|mise|launchd|defaults'
 
 -- zakwas.yaml --

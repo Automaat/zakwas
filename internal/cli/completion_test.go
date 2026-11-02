@@ -43,7 +43,7 @@ func TestCompletionCoversEverything(t *testing.T) {
 }
 
 func TestCompletionModulesMatchCLI(t *testing.T) {
-	env, _ := setup(t, "brew: {file: Brewfile}\nmise: {config: m.toml}\nagents: {prune: true}\nlaunchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]\n")
+	env, _ := setup(t, "brew: {file: Brewfile}\nmise: {config: m.toml}\nsecrets: {age: [{dst: ~/k.txt, keys: [{bitwarden: note, publicKey: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p}]}]}\nagents: {prune: true}\nlaunchd: [{label: dev.example.job, program: [/bin/true], schedule: {every: 1h}}]\n")
 	cfg, err := loadConfig("", env)
 	if err != nil {
 		t.Fatal(err)

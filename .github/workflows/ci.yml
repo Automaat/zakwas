@@ -333,7 +333,19 @@ jobs:
           "$hash  $asset" | Set-Content -Encoding ascii -Path $sums
           $server = Start-Process -PassThru -WindowStyle Hidden -FilePath python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $site
           try {
-            Start-Sleep -Seconds 3
+            $deadline = (Get-Date).AddSeconds(60)
+            while ($true) {
+              $probe = [Net.Sockets.TcpClient]::new()
+              try {
+                $probe.Connect('127.0.0.1', 8765)
+                break
+              } catch {
+                if ($server.HasExited -or (Get-Date) -gt $deadline) { throw 'the test release server did not start' }
+                Start-Sleep -Milliseconds 250
+              } finally {
+                $probe.Dispose()
+              }
+            }
             foreach ($shell in 'pwsh', 'powershell') {
               $dir = Join-Path $env:RUNNER_TEMP "bin-$shell"
               & $shell -NoProfile -File ./install.ps1 -Version $version -BaseUrl http://127.0.0.1:8765 -Dir $dir
@@ -458,7 +470,19 @@ jobs:
           $log = Join-Path $env:RUNNER_TEMP 'fakegh.log'
           $server = Start-Process -PassThru -WindowStyle Hidden -FilePath python -ArgumentList '-m', 'http.server', '8766', '--bind', '127.0.0.1', '--directory', $site
           try {
-            Start-Sleep -Seconds 3
+            $deadline = (Get-Date).AddSeconds(60)
+            while ($true) {
+              $probe = [Net.Sockets.TcpClient]::new()
+              try {
+                $probe.Connect('127.0.0.1', 8766)
+                break
+              } catch {
+                if ($server.HasExited -or (Get-Date) -gt $deadline) { throw 'the test release server did not start' }
+                Start-Sleep -Milliseconds 250
+              } finally {
+                $probe.Dispose()
+              }
+            }
             foreach ($shell in 'pwsh', 'powershell') {
               $n = 0
               foreach ($case in @(

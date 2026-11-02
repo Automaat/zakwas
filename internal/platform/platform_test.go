@@ -62,7 +62,7 @@ func TestDarwinSupportsEveryModule(t *testing.T) {
 }
 
 func TestModuleLists(t *testing.T) {
-	if got, want := SupportedModules(Linux), []string{"system", "files", "links", "templates", "agents", "commands"}; !slices.Equal(got, want) {
+	if got, want := SupportedModules(Linux), []string{"system", "files", "links", "templates", "secrets", "agents", "commands"}; !slices.Equal(got, want) {
 		t.Errorf("SupportedModules(linux) = %v, want %v", got, want)
 	}
 	if got, want := UnsupportedModules(Linux), []string{"brew", "mise", "launchd", "defaults"}; !slices.Equal(got, want) {
@@ -122,7 +122,7 @@ func TestWindowsModuleLists(t *testing.T) {
 	if got, want := SupportedModules(Windows), []string{"files", "links", "templates", "agents", "commands"}; !slices.Equal(got, want) {
 		t.Errorf("SupportedModules(windows) = %v, want %v", got, want)
 	}
-	if got, want := UnsupportedModules(Windows), []string{"system", "brew", "mise", "launchd", "defaults"}; !slices.Equal(got, want) {
+	if got, want := UnsupportedModules(Windows), []string{"system", "brew", "mise", "secrets", "launchd", "defaults"}; !slices.Equal(got, want) {
 		t.Errorf("UnsupportedModules(windows) = %v, want %v", got, want)
 	}
 }

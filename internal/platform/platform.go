@@ -47,6 +47,7 @@ var Modules = []Module{
 	{Name: "templates", OS: allOS},
 	{Name: "brew", OS: darwinOnly, Why: "it bootstraps Homebrew for macOS and manages casks"},
 	{Name: "mise", OS: darwinOnly, Why: "its bootstrap installs the macOS build of mise", WhyOS: map[string]string{Windows: "it has no Windows bootstrap yet"}},
+	{Name: "secrets", OS: unixOnly, Why: "its owner-only file modes are not ported to Windows"},
 	{Name: "agents", OS: allOS},
 	{Name: "commands", OS: allOS},
 	{Name: "launchd", OS: darwinOnly, Why: "launchd is macOS's service manager"},

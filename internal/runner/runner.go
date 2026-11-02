@@ -26,6 +26,9 @@ type Cmd struct {
 	Env    []string
 	Stdin  string
 	Stream bool
+	// Terminal connects stdin and stderr to the user and captures stdout, for a
+	// tool that prompts and then prints its answer: `bw unlock --raw`.
+	Terminal bool
 	// Group asks for the command to run in its own process group, which is
 	// interrupted on cancel and killed after the grace period, so a shell
 	// that forks its last command (dash) or a child that ignores SIGINT
@@ -130,14 +133,17 @@ func (e *Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	cmd.Env = slices.Concat(os.Environ(), e.Env, c.Env)
 	if c.Stdin != "" {
 		cmd.Stdin = strings.NewReader(c.Stdin)
-	} else if c.Stream && !e.NoStdin {
+	} else if (c.Stream || c.Terminal) && !e.NoStdin {
 		cmd.Stdin = os.Stdin
 	}
 
 	var stdout, stderr bytes.Buffer
-	if c.Stream {
+	switch {
+	case c.Stream:
 		cmd.Stdout, cmd.Stderr = e.Stdout, e.Stderr
-	} else {
+	case c.Terminal:
+		cmd.Stdout, cmd.Stderr = &stdout, e.Stderr
+	default:
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	}
 

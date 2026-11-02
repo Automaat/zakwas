@@ -331,6 +331,63 @@
         "null"
       ]
     },
+    "secrets": {
+      "properties": {
+        "age": {
+          "items": {
+            "properties": {
+              "dst": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Identity file: absolute or starting with '~/'. It is kept owner-only (0600). Keys and comments already in it stay."
+              },
+              "keys": {
+                "items": {
+                  "properties": {
+                    "bitwarden": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Name of the Bitwarden secure note holding the private key."
+                    },
+                    "publicKey": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The key's public half (age1...), which identifies it without opening the vault."
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "bitwarden",
+                    "publicKey"
+                  ]
+                },
+                "type": "array",
+                "minItems": 1,
+                "description": "The keys the file must hold."
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "dst",
+              "keys"
+            ]
+          },
+          "description": "Files of age private keys, such as the identities sops reads. Apply adds the keys a file is missing from Bitwarden; plan and check compare public keys and never open the vault.",
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "Private keys restored from a password manager on apply. Plan and check never open the vault.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "commands": {
       "items": {
         "properties": {
@@ -1407,7 +1464,7 @@
   },
   "additionalProperties": false,
   "title": "zakwas.yaml",
-  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, agents, defaults, system, commands, launchd.",
+  "description": "Declarative macOS setup converged by zakwas: files, links, templates, brew, mise, secrets, agents, defaults, system, commands, launchd.",
   "type": [
     "object",
     "null"

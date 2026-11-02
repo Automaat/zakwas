@@ -152,7 +152,7 @@ func TestDarwinImmutableDoesNotWarn(t *testing.T) {
 func TestLinuxOfflineCheckListsOnlyWhatLinuxSkips(t *testing.T) {
 	env := linuxSetup(t, linksOnly)
 	r := invoke(env, "", "check", "--offline")
-	if !strings.Contains(r.stdout, "offline: not checked: system, agents, commands;") {
+	if !strings.Contains(r.stdout, "offline: not checked: system, secrets, agents, commands;") {
 		t.Errorf("%+v", r)
 	}
 	for _, name := range platform.UnsupportedModules(platform.Linux) {
@@ -317,8 +317,8 @@ func TestOfflineNotCheckedSkipsWhatThePlatformDoesNotHave(t *testing.T) {
 		goos string
 		want []string
 	}{
-		{platform.Darwin, []string{"system", "brew", "mise", "agents", "commands", "launchd", "defaults"}},
-		{platform.Linux, []string{"system", "agents", "commands"}},
+		{platform.Darwin, []string{"system", "brew", "mise", "secrets", "agents", "commands", "launchd", "defaults"}},
+		{platform.Linux, []string{"system", "secrets", "agents", "commands"}},
 		{platform.Windows, []string{"agents", "commands"}},
 	}
 	for _, tt := range tests {

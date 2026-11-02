@@ -14,4 +14,4 @@ zakwas is pre-1.0: only the latest release gets fixes.
 
 ## What zakwas verifies
 
-See [docs/security.md](docs/security.md): release checksums and build provenance, the pinned mise release and Homebrew installer.
+See [docs/security.md](docs/security.md): release checksums and build provenance, the pinned mise release and Homebrew installer, and how the `secrets` module handles private keys.

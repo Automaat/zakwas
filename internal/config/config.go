@@ -29,6 +29,7 @@ type Config struct {
 	Mise      *Mise        `yaml:"mise" jsonschema_description:"Tools pinned in a global mise config. mise is installed first when missing. Omit the section to leave mise alone."`
 	Defaults  []Default    `yaml:"defaults" jsonschema_description:"macOS preferences written with 'defaults write'. Each domain + key (+ currentHost) may appear once."`
 	System    System       `yaml:"system" jsonschema_description:"Machine-level setup: directories, Touch ID for sudo, an SSH key."`
+	Secrets   Secrets      `yaml:"secrets" jsonschema_description:"Private keys restored from a password manager on apply. Plan and check never open the vault."`
 	Commands  []Command    `yaml:"commands" jsonschema_description:"One-off setup steps: 'run' executes only while 'check' fails. Entries run in order and stop at the first failure."`
 	Launchd   []LaunchdJob `yaml:"launchd" jsonschema_description:"launchd user agents for scheduled jobs, such as a daily drift check. Each job's plist is written to ~/Library/LaunchAgents and loaded; changing a job reloads it, and removing it unloads it and deletes its plist. Only jobs zakwas created are ever unloaded or deleted. Labels must be unique."`
 	Agents    *Agents      `yaml:"agents" jsonschema_description:"Coding-agent plugins and the marketplaces they come from, converged per provider: claude (Claude Code), codex (Codex) and opencode (skills linked into its skills directory). Omit the section to leave agent plugins alone."`
@@ -355,6 +356,9 @@ func (c *Config) Validate(home string) error {
 	if here("launchd") {
 		errs = append(errs, c.validateLaunchd(paths, claimDst)...)
 	}
+	if here("secrets") {
+		errs = append(errs, c.validateSecrets(paths, claimDst)...)
+	}
 	for i, cmd := range c.Commands {
 		if cmd.Name == "" || cmd.Check == "" || cmd.Run == "" {
 			errs = append(errs, fmt.Errorf("commands[%d]: name, check and run are required", i))
@@ -376,6 +380,7 @@ func (c *Config) platformErrors(goos string) []error {
 		"system":   len(c.System.Dirs) > 0 || c.System.SSHKey != nil,
 		"links":    len(c.Links) > 0,
 		"commands": len(c.Commands) > 0,
+		"secrets":  len(c.Secrets.Age) > 0,
 		"brew":     c.Brew != nil,
 		"mise":     c.Mise != nil,
 		"launchd":  len(c.Launchd) > 0,
@@ -434,6 +439,9 @@ func (c *Config) Destinations(paths Paths) []Destination {
 	}
 	for i, t := range c.Templates.Files {
 		add(c.where("templates.files", i), t.Dst)
+	}
+	for i, f := range c.Secrets.Age {
+		add(c.where("secrets.age", i), f.Dst)
 	}
 	return out
 }

@@ -24,6 +24,9 @@ var version = "dev"
 // empty means the real one.
 var goosOverride string
 
+// ttyOverride is set by tests to run the CLI as if stdin were a terminal.
+var ttyOverride bool
+
 func main() {
 	os.Exit(run())
 }
@@ -67,7 +70,7 @@ func run() int {
 		LockHeldBy:      os.Getenv(cli.LockHeldEnv),
 		AgentSession:    cli.DetectAgentSession(os.Getenv),
 
-		StdinTTY:      term.IsTerminal(int(os.Stdin.Fd())),
+		StdinTTY:      ttyOverride || term.IsTerminal(int(os.Stdin.Fd())),
 		Color:         colorOutput(),
 		GitHubActions: os.Getenv("GITHUB_ACTIONS") == "true",
 		Version:       version,

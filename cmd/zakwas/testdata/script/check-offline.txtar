@@ -7,7 +7,7 @@ chmod 755 bin/defaults
 
 ! zakwas check --offline
 stdout '\+ ~/.zshrc'
-stdout 'offline: not checked: system, brew, mise, agents, commands, launchd, defaults'
+stdout 'offline: not checked: system, brew, mise, secrets, agents, commands, launchd, defaults'
 
 zakwas apply -y --only files,links
 

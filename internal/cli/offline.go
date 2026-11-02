@@ -18,8 +18,8 @@ import (
 var offlineChecked = []string{"files", "links", "templates"}
 
 // offlineSkipped are the modules `check --offline` never runs, because they
-// ask a tool (brew, mise, an agent CLI, launchctl, defaults, sudo) or run commands.
-var offlineSkipped = []string{"system", "brew", "mise", "agents", "commands", "launchd", "defaults"}
+// ask a tool (brew, mise, an agent CLI, launchctl, defaults, sudo) or run commands, or read private keys.
+var offlineSkipped = []string{"system", "brew", "mise", "secrets", "agents", "commands", "launchd", "defaults"}
 
 // errOffline is what a module gets when it tries to start a command under
 // --offline, so a module that wrongly joins the offline set fails loudly.
