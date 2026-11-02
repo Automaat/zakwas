@@ -29,6 +29,7 @@ import (
 	"github.com/Automaat/zakwas/internal/modules/launchd"
 	"github.com/Automaat/zakwas/internal/modules/links"
 	"github.com/Automaat/zakwas/internal/modules/mise"
+	"github.com/Automaat/zakwas/internal/modules/secrets"
 	"github.com/Automaat/zakwas/internal/modules/system"
 	"github.com/Automaat/zakwas/internal/modules/templates"
 	"github.com/Automaat/zakwas/internal/platform"
@@ -642,8 +643,19 @@ func configPath(flagPath string, env Env) (string, error) {
 	return "", err
 }
 
+// canPrompt reports whether a person can answer a password prompt: not an
+// agent, whose transcript would see the exchange, and not the MCP server, whose
+// commands run without stdin.
+func canPrompt(env Env) bool {
+	if ex, ok := env.Runner.(*runner.Exec); ok && ex.NoStdin {
+		return false
+	}
+	return env.StdinTTY && env.AgentSession == ""
+}
+
 // Modules returns every configured module in apply order. Order matters:
-// files put the mise config in place, brew installs mise, agents need the
+// files put the mise config in place, brew installs mise, secrets may need
+// the bw they install, agents need the
 // agent CLIs brew or mise install, commands may need tools from any, and
 // launchd jobs may run what commands set up.
 func Modules(cfg *config.Config, env Env) []engine.Module {
@@ -666,6 +678,9 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	}
 	if cfg.Mise != nil && here("mise") {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Layers: cfg.LayerMise(), Paths: paths, Runner: env.Runner})
+	}
+	if len(cfg.Secrets.Age) > 0 && here("secrets") {
+		mods = append(mods, &secrets.Module{Secrets: cfg.Secrets, Paths: paths, Runner: env.Runner, Interactive: canPrompt(env)})
 	}
 	agentsCfg := cfg.Agents
 	for _, state := range []string{agents.InstructionsStatePath(env.Home), agents.InstructionFilesStatePath(env.Home)} {

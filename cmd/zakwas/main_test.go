@@ -18,6 +18,7 @@ func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
 		"zakwas": func() {
 			goosOverride = os.Getenv("ZAKWAS_TEST_GOOS")
+			ttyOverride = os.Getenv("ZAKWAS_TEST_TTY") != ""
 			os.Exit(run())
 		},
 	})

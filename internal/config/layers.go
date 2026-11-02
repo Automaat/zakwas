@@ -174,6 +174,7 @@ func newMerge(c *Config) *merge {
 	m.Defaults = slices.Clone(c.Defaults)
 	m.Commands = slices.Clone(c.Commands)
 	m.Launchd = slices.Clone(c.Launchd)
+	m.Secrets.Age = slices.Clone(c.Secrets.Age)
 	m.System.Dirs = slices.Clone(c.System.Dirs)
 	m.Layers = nil
 	m.layerMise = nil
@@ -190,6 +191,7 @@ func newMerge(c *Config) *merge {
 	mg.label("templates.files", len(c.Templates.Files), c.Path)
 	mg.label("defaults", len(c.Defaults), c.Path)
 	mg.label("launchd", len(c.Launchd), c.Path)
+	mg.label("secrets.age", len(c.Secrets.Age), c.Path)
 	for k, v := range c.Templates.Vars {
 		m.Templates.Vars[k] = v
 		mg.varFile[k] = c.Path
@@ -233,6 +235,7 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	}
 	c.Defaults = append(c.Defaults, lc.Defaults...)
 	c.Launchd = append(c.Launchd, lc.Launchd...)
+	c.Secrets.Age = append(c.Secrets.Age, lc.Secrets.Age...)
 	c.Commands = append(c.Commands, lc.Commands...)
 	c.System.Dirs = append(c.System.Dirs, lc.System.Dirs...)
 	c.System.SudoTouchID = c.System.SudoTouchID || lc.System.SudoTouchID
@@ -262,6 +265,7 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	m.label("templates.files", len(lc.Templates.Files), lc.Path)
 	m.label("defaults", len(lc.Defaults), lc.Path)
 	m.label("launchd", len(lc.Launchd), lc.Path)
+	m.label("secrets.age", len(lc.Secrets.Age), lc.Path)
 	errs = append(errs, m.agents.add(lc)...)
 	for _, k := range slices.Sorted(maps.Keys(lc.Templates.Vars)) {
 		if first, dup := m.varFile[k]; dup {

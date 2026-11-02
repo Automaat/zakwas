@@ -130,6 +130,18 @@ A [layer](config.md#layers) is another `zakwas.yaml` that a machine merges into 
 - **Agents can't register one.** `layer` is a guarded command: the deny rules cover it and `layer add` / `remove` refuse an agent session. A layer path that an agent can write to is a way to run commands at the next `apply`, which is why the guard's edit rules cover every layer repo's checkout, not just the main one.
 - **A broken layer stops everything.** A missing or invalid layer fails the plan instead of being skipped, so a moved checkout can never turn into a prune of what it installed.
 
+## Secrets
+
+The `secrets` module is the one place zakwas handles private keys. `zakwas.yaml` holds only note names and public keys.
+
+- Plan, check and apply output, `-json`, apply history and state files carry note names and public keys, never a private key or the Bitwarden session. Tests assert this.
+- The session reaches `bw` through its environment, not its arguments, and is dropped when `apply` ends.
+- A key is written only after it matches the `publicKey` in your config, through a `0600` temporary file in the same directory that replaces the original.
+- Key files are refused inside a config repo, so a private key can't get committed by accident.
+- A person has to be at the terminal. An agent session or `zakwas_apply` can't start the prompt.
+
+Anyone who can edit `zakwas.yaml` chooses which notes `apply` reads and where their keys go, and you still type the password. Review a change to `secrets` as you would any change to your shell config.
+
 ## sudo
 
 zakwas runs `sudo` in two places only, and only during `apply`:

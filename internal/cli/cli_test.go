@@ -588,3 +588,22 @@ func TestCommandsSeeTheRunLockHolder(t *testing.T) {
 		t.Errorf("command saw ZAKWAS_LOCK_HELD=%q, want %q", got, want)
 	}
 }
+
+func TestCanPrompt(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  Env
+		want bool
+	}{
+		{"a person at a terminal", Env{StdinTTY: true, Runner: &runner.Exec{}}, true},
+		{"no terminal", Env{Runner: &runner.Exec{}}, false},
+		{"an agent session", Env{StdinTTY: true, AgentSession: "Codex", Runner: &runner.Exec{}}, false},
+		{"the MCP server", Env{StdinTTY: true, Runner: &runner.Exec{NoStdin: true}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := canPrompt(test.env); got != test.want {
+				t.Errorf("canPrompt = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

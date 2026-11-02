@@ -3,6 +3,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -89,5 +90,28 @@ func TestExecGroupOnlyWithoutATerminal(t *testing.T) {
 				t.Errorf("child pgid %d, ours %d, want same group = %v", got, ours, tt.sameAsUs)
 			}
 		})
+	}
+}
+
+func TestExecTerminalCapturesOnlyStdout(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	ex := &Exec{Stdout: &stdout, Stderr: &stderr}
+	res, err := ex.Run(context.Background(), Cmd{
+		Name: "sh", Args: []string{"-c", "echo the-answer; echo the-prompt >&2"}, Terminal: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Stdout != "the-answer\n" {
+		t.Errorf("captured stdout = %q", res.Stdout)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout reached the writer: %q", stdout.String())
+	}
+	if stderr.String() != "the-prompt\n" {
+		t.Errorf("stderr writer = %q", stderr.String())
+	}
+	if res.Stderr != "" {
+		t.Errorf("captured stderr = %q", res.Stderr)
 	}
 }

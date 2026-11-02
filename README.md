@@ -12,6 +12,7 @@ What it manages:
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: apps and formulae from a `Brewfile`, with optional cleanup
 - **mise**: CLI tools pinned in a global mise config
+- **secrets**: age private keys restored from Bitwarden, only when missing
 - **agents**: Claude Code, opencode and, when named, Codex, Gemini CLI and Copilot CLI: plugins, MCP servers, instructions, skills, permissions
 - **defaults**: macOS preferences
 - **system**: Touch ID for sudo, directories, SSH key
@@ -97,7 +98,7 @@ agents:
     docs: {command: npx, args: [-y, "@example/docs-mcp"], envVars: [DOCS_TOKEN]}
 ```
 
-Secrets stay environment references. With an `agents` section, a guard denies the managed agents `zakwas apply`; they can `propose` changes, and you `approve` them in a terminal. See [docs/agents.md](docs/agents.md).
+MCP server secrets stay environment references. With an `agents` section, a guard denies the managed agents `zakwas apply`; they can `propose` changes, and you `approve` them in a terminal. See [docs/agents.md](docs/agents.md).
 
 ## Windows (early)
 

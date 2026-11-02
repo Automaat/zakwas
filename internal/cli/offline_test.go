@@ -173,7 +173,7 @@ func TestOfflineCheckWithOnlyNamesTheUnselectedModules(t *testing.T) {
 	if r.code != ExitDrift || strings.Contains(r.stdout, ".greeting") {
 		t.Fatalf("%+v", r)
 	}
-	want := "offline: not checked: system, brew, mise, agents, commands, launchd, defaults, files, templates;"
+	want := "offline: not checked: system, brew, mise, secrets, agents, commands, launchd, defaults, files, templates;"
 	if !strings.Contains(r.stdout, want) {
 		t.Errorf("note does not name files and templates as unchecked:\n%s", r.stdout)
 	}
@@ -183,7 +183,7 @@ func TestOfflineCheckWithOnlyNamesTheUnselectedModules(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.stdout), &doc); err != nil {
 		t.Fatalf("%v\n%s", err, r.stdout)
 	}
-	if got := strings.Join(doc.Skipped, ","); got != "system,brew,mise,agents,commands,launchd,defaults,files,templates" {
+	if got := strings.Join(doc.Skipped, ","); got != "system,brew,mise,secrets,agents,commands,launchd,defaults,files,templates" {
 		t.Errorf("skipped = %s", got)
 	}
 

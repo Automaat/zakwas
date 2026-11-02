@@ -114,7 +114,7 @@ Other editors (Helix, JetBrains, Sublime) that run yaml-language-server honor th
 
 **Backups.** When zakwas replaces a file it didn't write, or one that was edited in place, it moves it to `<file>.zakwas-bak` (`.zakwas-bak.N` if taken) first. It never deletes or overwrites such a file.
 
-**Module order**: system → files → links → templates → brew → mise → agents → commands → launchd → defaults. `--only brew,defaults` runs a subset.
+**Module order**: system → files → links → templates → brew → mise → secrets → agents → commands → launchd → defaults. `--only brew,defaults` runs a subset.
 
 ## Platform support
 
@@ -128,6 +128,7 @@ zakwas runs on macOS, Linux and, in part, Windows. Each section below is support
 | `templates` | yes | yes | yes | |
 | `brew` | yes | no | no | bootstraps Homebrew for macOS and manages casks |
 | `mise` | yes | no | no | its bootstrap installs the macOS build of mise; on Linux install mise yourself and use `commands` or a `files` entry for its config; Windows has no bootstrap yet |
+| `secrets` | yes | yes | no | its owner-only file modes are not ported to Windows |
 | `agents` | yes | yes | yes | paths follow `$HOME` (`%USERPROFILE%` on Windows), `$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$XDG_CONFIG_HOME` and the other variables the agents read |
 | `commands` | yes | yes | yes | `sh -c` in your home directory; on Windows PowerShell, or the `shell` you name |
 | `launchd` | yes | no | no | launchd is macOS's service manager |
@@ -795,6 +796,31 @@ system:
     path: ~/.ssh/id_ed25519
     comment: you@example.com
 ```
+
+## secrets
+
+Private keys restored from Bitwarden on `apply`. Each `age` entry is an identity file, such as the one sops reads, and the keys it must hold.
+
+```yaml
+secrets:
+  age:
+    - dst: ~/.config/sops/age/keys.txt
+      keys:
+        - {bitwarden: "sops age - main", publicKey: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p}
+```
+
+| Key | Type | Required | Description |
+|---|---|---|---|
+| `age[].dst` | string | yes | Identity file: absolute or `~/…`, outside every config repo. |
+| `age[].keys[].bitwarden` | string | yes | Name of the Bitwarden secure note that holds the private key. |
+| `age[].keys[].publicKey` | string | yes | The key's public half (`age1…`). X25519 keys only. |
+
+- **`plan` and `check`** read the file, compare public keys and list what is missing by note name. They never start `bw` or ask for a password, and `check --offline` skips this module.
+- **`apply`** logs in or unlocks `bw` once, adds only the missing keys and locks `bw` at the end, even after a failure. A vault you had already unlocked stays unlocked. Install `bw` with `brew` or `mise`; both run first.
+- **Only the matching line is copied.** Anything else in the note stays in the vault. Keys, comments and other lines already in the file stay too, so zakwas never removes a key and makes no backup of the file.
+- **A wrong or missing note** changes nothing in that file. Every key is checked against its `publicKey` before the file is replaced.
+- **Modes:** the file is kept at `0600`, and a wider mode shows up as drift. Directories it creates are `0700`.
+- **It needs you at a terminal.** Without one, in an agent session or through `zakwas_apply`, `apply` stops with an error once it reaches a missing key.
 
 ## commands
 
