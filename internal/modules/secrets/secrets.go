@@ -23,6 +23,7 @@ import (
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/fsutil"
+	"github.com/Automaat/zakwas/internal/install"
 	"github.com/Automaat/zakwas/internal/runner"
 )
 
@@ -55,6 +56,9 @@ type keyFile struct {
 
 func (m *Module) inspect(entry config.AgeFile) (keyFile, error) {
 	f := keyFile{entry: entry, path: m.Paths.Dst(entry.Dst), missing: entry.Keys}
+	if err := install.CheckParents(m.Paths, f.path); err != nil {
+		return f, fmt.Errorf("secrets: %w", err)
+	}
 	info, err := os.Lstat(f.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return f, nil
@@ -126,7 +130,7 @@ func (m *Module) restore(ctx context.Context) (err error) {
 		return errors.New("secrets: restoring age keys needs your master password; run zakwas apply yourself in a terminal")
 	}
 	if !m.Runner.Installed(bw) {
-		return errors.New("secrets: the Bitwarden CLI (bw) isn't installed; add it to your Brewfile or mise config")
+		return errors.New("secrets: the Bitwarden CLI (bw) isn't installed; install it and run zakwas apply again")
 	}
 	session, opened, err := m.open(ctx)
 	if err != nil {
@@ -202,16 +206,32 @@ func (m *Module) lock(ctx context.Context, session []string) error {
 }
 
 // restoreFile reads every missing key before writing, so one wrong note
-// leaves the whole file as it was.
+// leaves the whole file as it was. It builds on a fresh read of the file: the
+// password prompt can last long enough for someone to add a key to it.
 func (m *Module) restoreFile(ctx context.Context, f keyFile, session []string) error {
-	candidate := slices.Clone(f.content)
-	if len(candidate) > 0 && candidate[len(candidate)-1] != '\n' {
-		candidate = append(candidate, '\n')
-	}
+	identities := make(map[string]string, len(f.missing))
 	for _, key := range f.missing {
 		identity, err := m.readIdentity(ctx, key, session)
 		if err != nil {
 			return fmt.Errorf("%w; %s is unchanged", err, f.entry.Dst)
+		}
+		identities[key.PublicKey] = identity
+	}
+	fresh, err := m.inspect(f.entry)
+	if err != nil {
+		return err
+	}
+	if len(fresh.missing) == 0 {
+		return nil
+	}
+	candidate := slices.Clone(fresh.content)
+	if len(candidate) > 0 && candidate[len(candidate)-1] != '\n' {
+		candidate = append(candidate, '\n')
+	}
+	for _, key := range fresh.missing {
+		identity, ok := identities[key.PublicKey]
+		if !ok {
+			return fmt.Errorf("secrets: %s changed during the restore; it is unchanged, so run zakwas apply again", f.entry.Dst)
 		}
 		candidate = append(candidate, identity...)
 		candidate = append(candidate, '\n')

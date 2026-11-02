@@ -16,6 +16,7 @@ import (
 	"github.com/Automaat/zakwas/internal/engine"
 	"github.com/Automaat/zakwas/internal/runner"
 	"github.com/Automaat/zakwas/internal/runner/runnertest"
+	"github.com/Automaat/zakwas/internal/testutil"
 )
 
 const token = "SESSION-TOKEN-VALUE"
@@ -23,11 +24,15 @@ const token = "SESSION-TOKEN-VALUE"
 // scripted replaces a Fake response for one test, since Fake queues them.
 type scripted struct {
 	*runnertest.Fake
-	over map[string]runner.Result
+	over   map[string]runner.Result
+	during map[string]func()
 }
 
 func (s *scripted) Run(ctx context.Context, c runner.Cmd) (runner.Result, error) {
 	res, err := s.Fake.Run(ctx, c)
+	if hook, ok := s.during[c.String()]; ok {
+		hook()
+	}
 	if over, ok := s.over[c.String()]; ok {
 		return over, nil
 	}
@@ -38,6 +43,7 @@ type fixture struct {
 	home         string
 	fake         *runnertest.Fake
 	over         map[string]runner.Result
+	during       map[string]func()
 	module       *Module
 	one, two     *age.X25519Identity
 	keysPath     string
@@ -55,7 +61,8 @@ func identity(t *testing.T) *age.X25519Identity {
 
 func setup(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{home: t.TempDir(), fake: runnertest.New(), over: map[string]runner.Result{}, one: identity(t), two: identity(t), keysEntryDst: "~/keys/keys.txt"}
+	testutil.SkipOnWindows(t, "the module is not supported there and file modes don't apply")
+	f := &fixture{home: t.TempDir(), fake: runnertest.New(), over: map[string]runner.Result{}, during: map[string]func(){}, one: identity(t), two: identity(t), keysEntryDst: "~/keys/keys.txt"}
 	f.keysPath = filepath.Join(f.home, "keys", "keys.txt")
 	f.fake.OnOK("bw status", `{"serverUrl":null,"status":"locked","userEmail":"me@example.com"}`)
 	f.fake.OnOK("bw unlock --raw", token+"\n")
@@ -68,7 +75,7 @@ func setup(t *testing.T) *fixture {
 			{Bitwarden: "note one", PublicKey: f.one.Recipient().String()},
 			{Bitwarden: "note two", PublicKey: f.two.Recipient().String()},
 		}}}},
-		Paths: config.Paths{Home: f.home}, Runner: &scripted{Fake: f.fake, over: f.over}, Interactive: true,
+		Paths: config.Paths{Home: f.home}, Runner: &scripted{Fake: f.fake, over: f.over, during: f.during}, Interactive: true,
 	}
 	return f
 }
@@ -462,5 +469,64 @@ func TestNoBackupOfAKeyFile(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name() != "keys.txt" {
 		t.Errorf("entries = %v", entries)
+	}
+}
+
+func TestKeyAddedDuringThePromptStays(t *testing.T) {
+	f := setup(t)
+	f.write(t, "# mine\n", 0o600)
+	added := identity(t).String()
+	f.during["bw unlock --raw"] = func() { f.write(t, "# mine\n"+added+"\n", 0o600) }
+	if err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	content := f.read(t)
+	for _, want := range []string{"# mine\n", added, f.one.String(), f.two.String()} {
+		if !strings.Contains(content, want) {
+			t.Errorf("lost %q", want[:6])
+		}
+	}
+}
+
+func TestSameKeyAddedDuringThePromptIsNotDoubled(t *testing.T) {
+	f := setup(t)
+	f.during["bw get notes note two"] = func() { f.write(t, f.one.String()+"\n"+f.two.String()+"\n", 0o600) }
+	if err := f.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	if want := f.one.String() + "\n" + f.two.String() + "\n"; f.read(t) != want {
+		t.Error("the keys should appear once each")
+	}
+}
+
+func TestKeyRemovedDuringThePromptStopsTheRestore(t *testing.T) {
+	f := setup(t)
+	original := f.one.String() + "\n"
+	f.write(t, original, 0o600)
+	f.during["bw get notes note two"] = func() { f.write(t, "# emptied\n", 0o600) }
+	err := f.apply(t)
+	if err == nil || !strings.Contains(err.Error(), "changed during the restore") {
+		t.Fatalf("err = %v", err)
+	}
+	if f.read(t) != "# emptied\n" {
+		t.Error("the file should stay as the user left it")
+	}
+}
+
+func TestSymlinkedParentIsRefused(t *testing.T) {
+	f := setup(t)
+	other := filepath.Join(f.home, "other")
+	if err := os.Mkdir(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, filepath.Dir(f.keysPath)); err != nil {
+		t.Skip(err)
+	}
+	_, err := f.module.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "is a symlink") {
+		t.Fatalf("err = %v", err)
+	}
+	if entries, _ := os.ReadDir(other); len(entries) != 0 {
+		t.Errorf("wrote through the link: %v", entries)
 	}
 }

@@ -816,10 +816,10 @@ secrets:
 | `age[].keys[].publicKey` | string | yes | The key's public half (`age1…`). X25519 keys only. |
 
 - **`plan` and `check`** read the file, compare public keys and list what is missing by note name. They never start `bw` or ask for a password, and `check --offline` skips this module.
-- **`apply`** logs in or unlocks `bw` once, adds only the missing keys and locks `bw` at the end, even after a failure. A vault you had already unlocked stays unlocked. Install `bw` with `brew` or `mise`; both run first.
+- **`apply`** logs in or unlocks `bw` once, adds only the missing keys and locks `bw` at the end, even after a failure. A vault you had already unlocked stays unlocked. On macOS, `brew` and `mise` can install `bw`, since both run first. On Linux, install it yourself before `apply`.
 - **Only the matching line is copied.** Anything else in the note stays in the vault. Keys, comments and other lines already in the file stay too, so zakwas never removes a key and makes no backup of the file.
 - **A wrong or missing note** changes nothing in that file. Every key is checked against its `publicKey` before the file is replaced.
-- **Modes:** the file is kept at `0600`, and a wider mode shows up as drift. Directories it creates are `0700`.
+- **Modes:** the file is kept at `0600`, and a wider mode shows up as drift. Directories it creates are `0700`. Like other destinations, it can't sit behind a symlinked directory under `$HOME`.
 - **It needs you at a terminal.** Without one, in an agent session or through `zakwas_apply`, `apply` stops with an error once it reaches a missing key.
 
 ## commands
