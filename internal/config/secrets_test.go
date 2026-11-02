@@ -23,6 +23,9 @@ func TestSecretsValidation(t *testing.T) {
 		{"no public key", "secrets: {age: [{dst: ~/k.txt, keys: [{bitwarden: note}]}]}", "publicKey is required"},
 		{"bad public key", "secrets: {age: [{dst: ~/k.txt, keys: [{bitwarden: note, publicKey: age1nope}]}]}", "isn't an age"},
 		{"private key", "secrets: {age: [{dst: ~/k.txt, keys: [{bitwarden: note, publicKey: " + privateKey + "}]}]}", "holds a private key"},
+		{"private key as the note", "secrets: {age: [{dst: ~/k.txt, keys: [{bitwarden: " + privateKey + ", publicKey: " + testPublicKey + "}]}]}", "bitwarden holds a private key"},
+		{"private key as the dst", "secrets: {age: [{dst: " + privateKey + ", keys: [" + valid + "]}]}", "dst holds a private key"},
+		{"lower case private key as the note", "secrets: {age: [{dst: ~/k.txt, keys: [{bitwarden: " + strings.ToLower(privateKey) + ", publicKey: " + testPublicKey + "}]}]}", "bitwarden holds a private key"},
 		{"listed twice", "secrets: {age: [{dst: ~/k.txt, keys: [" + valid + ", " + valid + "]}]}", "listed twice"},
 		{"overlaps files", "files: [{src: a, dst: ~/k.txt}]\nsecrets: {age: [{dst: ~/k.txt, keys: [" + valid + "]}]}", "overlaps"},
 		{"overlaps itself", "secrets: {age: [{dst: ~/k.txt, keys: [" + valid + "]}, {dst: ~/k.txt, keys: [" + valid + "]}]}", "overlaps"},
@@ -40,7 +43,7 @@ func TestSecretsValidation(t *testing.T) {
 			case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
 				t.Fatalf("err = %v, want %q", err, test.want)
 			}
-			if err != nil && strings.Contains(err.Error(), privateKey) {
+			if err != nil && strings.Contains(strings.ToUpper(err.Error()), privateKey) {
 				t.Error("an error quotes the private key")
 			}
 		})
@@ -73,6 +76,20 @@ func TestSecretsAreNotSupportedOnWindows(t *testing.T) {
 	yaml := "secrets: {age: [{dst: ~/k.txt, keys: [{bitwarden: note, publicKey: " + testPublicKey + "}]}]}"
 	_, err := ParseFor([]byte(yaml), filepath.Join(t.TempDir(), FileName), t.TempDir(), "windows")
 	if err == nil || !strings.Contains(err.Error(), "secrets") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSecretsRefusesADestinationInALayersRepo(t *testing.T) {
+	root, layerRoot, home := t.TempDir(), t.TempDir(), t.TempDir()
+	layerPath := filepath.Join(layerRoot, FileName)
+	if err := os.WriteFile(layerPath, []byte("files: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(layerRoot, "keys.txt")
+	yaml := "secrets: {age: [{dst: " + dst + ", keys: [{bitwarden: note, publicKey: " + testPublicKey + "}]}]}"
+	_, err := ParseLayered([]byte(yaml), filepath.Join(root, FileName), home, "darwin", []Layer{{Name: "work", Path: layerPath}})
+	if err == nil || !strings.Contains(err.Error(), "inside a config repo") {
 		t.Fatalf("err = %v", err)
 	}
 }

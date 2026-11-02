@@ -30,13 +30,17 @@ func (c *Config) validateSecrets(paths Paths, claimDst func(dst, what string)) [
 	var errs []error
 	for i, f := range c.Secrets.Age {
 		what := c.where("secrets.age", i)
-		if f.Dst == "" {
+		switch {
+		case f.Dst == "":
 			errs = append(errs, fmt.Errorf("%s: dst is required", what))
-		}
-		claimDst(f.Dst, what)
-		for _, root := range paths.Roots() {
-			if f.Dst != "" && PathsOverlap(paths.Dst(f.Dst), root) {
-				errs = append(errs, fmt.Errorf("%s: %q is inside a config repo, where a private key could get committed", what, f.Dst))
+		case holdsPrivateKey(f.Dst):
+			errs = append(errs, fmt.Errorf("%s: dst %s", what, privateKeyAdvice))
+		default:
+			claimDst(f.Dst, what)
+			for _, root := range c.Paths(paths.Home).Roots() {
+				if PathsOverlap(paths.Dst(f.Dst), root) {
+					errs = append(errs, fmt.Errorf("%s: %q is inside a config repo, where a private key could get committed", what, f.Dst))
+				}
 			}
 		}
 		if len(f.Keys) == 0 {
@@ -45,8 +49,11 @@ func (c *Config) validateSecrets(paths Paths, claimDst func(dst, what string)) [
 		seen := map[string]bool{}
 		for j, k := range f.Keys {
 			key := fmt.Sprintf("%s.keys[%d]", what, j)
-			if k.Bitwarden == "" {
+			switch {
+			case k.Bitwarden == "":
 				errs = append(errs, fmt.Errorf("%s: bitwarden is required", key))
+			case holdsPrivateKey(k.Bitwarden):
+				errs = append(errs, fmt.Errorf("%s: bitwarden %s", key, privateKeyAdvice))
 			}
 			if err := checkPublicKey(k.PublicKey); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", key, err))
@@ -59,14 +66,22 @@ func (c *Config) validateSecrets(paths Paths, claimDst func(dst, what string)) [
 	return errs
 }
 
+const privateKeyAdvice = "holds a private key; remove it from the config and rotate it if it was committed"
+
+// holdsPrivateKey catches a key pasted into the wrong field, so it is refused
+// without being quoted, and never reaches a plan or the apply history.
+func holdsPrivateKey(value string) bool {
+	return strings.Contains(strings.ToUpper(value), "AGE-SECRET-KEY-")
+}
+
 // checkPublicKey never quotes a value it rejects: a pasted private key would
 // otherwise land in the error message.
 func checkPublicKey(key string) error {
 	switch {
 	case key == "":
 		return errors.New("publicKey is required")
-	case strings.HasPrefix(strings.ToUpper(key), "AGE-SECRET-KEY-"):
-		return errors.New("publicKey holds a private key; remove it from the config and rotate it if it was committed")
+	case holdsPrivateKey(key):
+		return errors.New("publicKey " + privateKeyAdvice)
 	}
 	if _, err := age.ParseX25519Recipient(key); err != nil {
 		return errors.New("publicKey isn't an age X25519 public key (age1...)")
