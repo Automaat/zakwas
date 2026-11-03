@@ -1,0 +1,73 @@
+[windows] skip 'the fake brew is an sh script'
+env ZAKWAS_TEST_GOOS=darwin
+chmod 755 bin/brew
+chmod 755 bin/gh
+cd repo
+
+zakwas plan
+stdout 'formula jq'
+! exists ../gh.log
+! zakwas check
+! exists ../gh.log
+
+zakwas apply -y
+! stdout gho_secretvalue
+! stderr gho_secretvalue
+grep -count=1 '^auth token --hostname github.com$' ../gh.log
+grep '^bundle install .* token=gho_secretvalue$' ../brew.log
+! grep 'bundle check .* token=gho' ../brew.log
+! grep 'bundle cleanup .* token=gho' ../brew.log
+exists $HOME/.local/state/zakwas/history.jsonl
+! exec grep -r gho_secretvalue $HOME/.local/state/zakwas
+
+rm ../gh.log ../brew.log ../state-installed
+env HOMEBREW_GITHUB_API_TOKEN=mine
+zakwas apply -y
+! exists ../gh.log
+grep '^bundle install .* token=mine$' ../brew.log
+env HOMEBREW_GITHUB_API_TOKEN=
+
+rm ../brew.log ../state-installed
+env GH_FAKE_FAIL=1 BREW_NEEDS_TOKEN=1
+! zakwas apply -y
+stdout 'HOMEBREW_GITHUB_API_TOKEN is required'
+grep '^bundle install .* token=$' ../brew.log
+env GH_FAKE_FAIL= BREW_NEEDS_TOKEN=
+
+rm ../gh.log ../brew.log
+cp ../off.yaml zakwas.yaml
+zakwas apply -y
+! exists ../gh.log
+grep '^bundle install .* token=$' ../brew.log
+
+-- repo/zakwas.yaml --
+brew:
+  file: Brewfile
+  githubToken: gh
+-- off.yaml --
+brew:
+  file: Brewfile
+-- repo/Brewfile --
+brew "jq"
+-- bin/gh --
+#!/bin/sh
+echo "$*" >> "$WORK/gh.log"
+[ -n "$GH_FAKE_FAIL" ] && { echo "no oauth token" >&2; exit 1; }
+echo gho_secretvalue
+-- bin/brew --
+#!/bin/sh
+echo "$* token=$HOMEBREW_GITHUB_API_TOKEN" >> "$WORK/brew.log"
+case "$1 $2" in
+  "bundle check")
+    if [ -f "$WORK/state-installed" ]; then exit 0; fi
+    echo "→ Formula jq needs to be installed."
+    exit 1 ;;
+  "bundle install")
+    if [ -n "$BREW_NEEDS_TOKEN" ] && [ -z "$HOMEBREW_GITHUB_API_TOKEN" ]; then
+      echo "Error: jq: Download failed: Environmental variable HOMEBREW_GITHUB_API_TOKEN is required."
+      exit 1
+    fi
+    touch "$WORK/state-installed" ;;
+  "bundle cleanup") exit 0 ;;
+  *) echo "unexpected brew $*" >&2; exit 99 ;;
+esac

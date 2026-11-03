@@ -255,6 +255,7 @@ Homebrew packages from a [Brewfile](https://github.com/Homebrew/homebrew-bundle)
 | `file` | string | yes | | Brewfile in the config repo. |
 | `cleanup` | `none` \| `uninstall` \| `zap` | no | `none` | What to do with installed packages missing from the Brewfile. |
 | `upgrade` | bool | no | `false` | Upgrade outdated Brewfile packages on `apply`. |
+| `githubToken` | `gh` | no | | Give `brew bundle install` the GitHub token `gh` holds, for taps that download from private repositories. |
 
 `cleanup`:
 
@@ -265,6 +266,8 @@ Homebrew packages from a [Brewfile](https://github.com/Homebrew/homebrew-bundle)
 `upgrade`: when `false`, only missing packages are installed (`brew bundle install --no-upgrade`). Every brew call sets `HOMEBREW_NO_AUTO_UPDATE=1`, so versions only move after `zakwas upgrade`, which runs `brew update` and then applies.
 
 Every third-party `tap` in the Brewfile needs `trusted: true`, otherwise the plan fails: `brew bundle cleanup --force` resets Homebrew's trust store to the Brewfile, so trust granted any other way is lost.
+
+`githubToken`: a tap with its own download code can stop with `Environmental variable HOMEBREW_GITHUB_API_TOKEN is required`, because that code doesn't use Homebrew's fallback to `gh`. With `githubToken: gh`, the `brew bundle install` step reads the token with `gh auth token --hostname github.com` when it runs and gets it in that variable. No other command gets it, and `plan` and `check` never read it. A variable you already set wins. If `gh` is missing or logged out, or an agent started the run (from its session or with `zakwas_apply`), brew runs without a token and reports the same error. On a new Mac, install and log in to `gh` first, or run `apply` again once it is.
 
 ```yaml
 brew:
@@ -973,7 +976,7 @@ How each section merges (the main config first, then the layers in the order the
 | `system.sudoTouchID` | on when any file sets it |
 | `mise.config` | each layer's config is installed too; the main config needs a `mise` section; a tool pinned in two mise configs is an error naming both files |
 | `brew.file` | each layer's Brewfile is converged too; the main config needs a `brew` section (see [Brewfiles in layers](#brewfiles-in-layers)) |
-| `protect`, `mise.prune`, `brew.cleanup`, `brew.upgrade` | main config only; a layer that sets one fails with a line naming the layer file and the section |
+| `protect`, `mise.prune`, `brew.cleanup`, `brew.upgrade`, `brew.githubToken` | main config only; a layer that sets one fails with a line naming the layer file and the section |
 | `agents` | see [agents in layers](#layer-agents); the main config must have an `agents` section |
 
 The checks that look across entries run on the merged config: a destination claimed by two files (`files`, `links`, `templates`, the plist of a `launchd` job), a `launchd` label used twice and a `defaults` domain and key set twice are errors that name both files.

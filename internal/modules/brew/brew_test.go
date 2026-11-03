@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -194,6 +195,95 @@ Satisfy missing dependencies with ` + "`brew bundle install`."})
 		if !reflect.DeepEqual(c.Env, noAutoUpdate) {
 			t.Errorf("%s ran without disabling auto-update", c)
 		}
+	}
+}
+
+func TestGitHubToken(t *testing.T) {
+	const gh = "gh auth token --hostname github.com"
+	const secret = "gho_secretvalue"
+	tests := []struct {
+		name      string
+		setting   string
+		preset    string
+		gh        *runner.Result
+		noGh      bool
+		agent     bool
+		wantToken string
+		wantGh    bool
+	}{
+		{name: "off by default", gh: &runner.Result{Stdout: secret}},
+		{name: "from gh", setting: config.GitHubTokenGh, gh: &runner.Result{Stdout: secret + "\n"}, wantToken: secret, wantGh: true},
+		{name: "a set variable wins", setting: config.GitHubTokenGh, preset: "mine", gh: &runner.Result{Stdout: secret}},
+		{name: "gh logged out", setting: config.GitHubTokenGh, gh: &runner.Result{ExitCode: 1, Stderr: "no oauth token"}, wantGh: true},
+		{name: "gh prints nothing", setting: config.GitHubTokenGh, gh: &runner.Result{Stdout: "\n"}, wantGh: true},
+		{name: "gh missing", setting: config.GitHubTokenGh, noGh: true},
+		{name: "withheld from an agent", setting: config.GitHubTokenGh, agent: true, gh: &runner.Result{Stdout: secret}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(githubTokenEnv, tt.preset)
+			m, fake, file := newModuleWith(t, config.Brew{GitHubToken: tt.setting, Cleanup: config.CleanupZap}, "brew \"jq\"\n")
+			m.AgentDriven = tt.agent
+			if tt.noGh {
+				fake.Missing("gh")
+			}
+			if tt.gh != nil {
+				fake.On(gh, *tt.gh)
+			}
+			fake.On("brew bundle check --file "+file+" --verbose --no-upgrade", runner.Result{ExitCode: 1, Stdout: "→ Formula jq needs to be installed.\n"})
+			fake.On("brew bundle cleanup --file "+file, runner.Result{ExitCode: 1, Stdout: cleanupOut})
+			fake.OnOK("brew bundle install --file "+file+" --no-upgrade", "")
+			fake.OnOK("brew bundle cleanup --force --file "+file+" --zap", "")
+
+			changes, err := m.Plan(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.Contains(fake.Lines(), gh) {
+				t.Error("plan read the token")
+			}
+			if err := enginetest.Apply(context.Background(), engine.Plan{{Module: "brew", Changes: changes}}); err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Contains(fake.Lines(), gh); got != tt.wantGh {
+				t.Errorf("gh called: %v, want %v in %v", got, tt.wantGh, fake.Lines())
+			}
+			for _, c := range fake.Calls {
+				want := noAutoUpdate
+				if c.Name == "gh" {
+					want = nil
+				}
+				if tt.wantToken != "" && strings.HasPrefix(c.String(), "brew bundle install") {
+					want = append(slices.Clone(noAutoUpdate), githubTokenEnv+"="+tt.wantToken)
+				}
+				if !slices.Equal(c.Env, want) {
+					t.Errorf("%s env %v, want %v", c, c.Env, want)
+				}
+				if strings.Contains(c.String(), secret) {
+					t.Errorf("token in the command line: %s", c)
+				}
+			}
+		})
+	}
+}
+
+func TestGitHubTokenOnABootstrapInstall(t *testing.T) {
+	t.Setenv(githubTokenEnv, "")
+	m, fake, file := newModuleWith(t, config.Brew{GitHubToken: config.GitHubTokenGh}, "brew \"jq\"\n")
+	fake.Missing("brew")
+	fake.OnOK("gh auth token --hostname github.com", "gho_secretvalue\n")
+	fake.OnOK("brew bundle install --file "+file+" --no-upgrade", "")
+	changes, err := m.Plan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := changes[len(changes)-1]
+	if err := last.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	install := fake.Calls[len(fake.Calls)-1]
+	if !slices.Contains(install.Env, githubTokenEnv+"=gho_secretvalue") {
+		t.Errorf("%s env %v", install, install.Env)
 	}
 }
 

@@ -89,9 +89,10 @@ type TemplateFile struct {
 }
 
 type Brew struct {
-	File    string `yaml:"file" jsonschema:"required,minLength=1" jsonschema_description:"Brewfile path in the config repo, relative to the directory holding zakwas.yaml (or absolute). Every third-party tap in it needs 'trusted: true'."`
-	Cleanup string `yaml:"cleanup" jsonschema:"enum=none,enum=uninstall,enum=zap,default=none" jsonschema_description:"What to do with installed packages missing from the Brewfile: 'none' keeps them, 'uninstall' removes them ('brew bundle cleanup --force'), 'zap' also removes cask app data ('--zap'). Removals are shown in 'zakwas plan' first. Default none."`
-	Upgrade bool   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Upgrade outdated Brewfile packages on apply. When false, only missing packages are installed ('--no-upgrade'). Run 'zakwas upgrade' to refresh Homebrew's package list first. Default false."`
+	File        string `yaml:"file" jsonschema:"required,minLength=1" jsonschema_description:"Brewfile path in the config repo, relative to the directory holding zakwas.yaml (or absolute). Every third-party tap in it needs 'trusted: true'."`
+	Cleanup     string `yaml:"cleanup" jsonschema:"enum=none,enum=uninstall,enum=zap,default=none" jsonschema_description:"What to do with installed packages missing from the Brewfile: 'none' keeps them, 'uninstall' removes them ('brew bundle cleanup --force'), 'zap' also removes cask app data ('--zap'). Removals are shown in 'zakwas plan' first. Default none."`
+	Upgrade     bool   `yaml:"upgrade" jsonschema:"default=false" jsonschema_description:"Upgrade outdated Brewfile packages on apply. When false, only missing packages are installed ('--no-upgrade'). Run 'zakwas upgrade' to refresh Homebrew's package list first. Default false."`
+	GitHubToken string `yaml:"githubToken,omitempty" jsonschema:"enum=gh" jsonschema_description:"Where 'brew bundle install' gets HOMEBREW_GITHUB_API_TOKEN when it isn't set, for taps that download from private GitHub repositories. 'gh' reads it with 'gh auth token' when that step runs. Omit to pass no token."`
 
 	// Layers are the Brewfiles of the local layers merged into this config,
 	// in registration order; see ParseLayered. They are read, trusted,
@@ -110,6 +111,8 @@ const (
 	CleanupNone      = "none"
 	CleanupUninstall = "uninstall"
 	CleanupZap       = "zap"
+
+	GitHubTokenGh = "gh"
 )
 
 // Mise points at the global mise config. Prune removes installed versions no
@@ -302,6 +305,9 @@ func (c *Config) Validate(home string) error {
 		case "", CleanupNone, CleanupUninstall, CleanupZap:
 		default:
 			errs = append(errs, fmt.Errorf("brew.cleanup: %q is not one of none, uninstall, zap", c.Brew.Cleanup))
+		}
+		if c.Brew.GitHubToken != "" && c.Brew.GitHubToken != GitHubTokenGh {
+			errs = append(errs, errors.New(`brew.githubToken: the only supported value is "gh"; a token can't be set in the config`))
 		}
 	}
 	if c.Mise != nil && here("mise") && c.Mise.Config == "" {

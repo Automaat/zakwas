@@ -589,6 +589,26 @@ func TestCommandsSeeTheRunLockHolder(t *testing.T) {
 	}
 }
 
+func TestAgentDriven(t *testing.T) {
+	tests := []struct {
+		name string
+		env  Env
+		want bool
+	}{
+		{"a person", Env{StdinTTY: true, Runner: &runner.Exec{}}, false},
+		{"no terminal", Env{Runner: &runner.Exec{}}, false},
+		{"an agent session", Env{AgentSession: "Codex", Runner: &runner.Exec{}}, true},
+		{"the MCP server", Env{StdinTTY: true, Runner: &runner.Exec{NoStdin: true}}, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := agentDriven(test.env); got != test.want {
+				t.Errorf("agentDriven = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestCanPrompt(t *testing.T) {
 	for _, test := range []struct {
 		name string

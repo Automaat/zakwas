@@ -144,6 +144,7 @@ func TestParseLayeredRejects(t *testing.T) {
 		{"a layer Brewfile needs a brew section in the main config", []string{"brew: {file: Brewfile}\n"}, []string{`layer "l0"`, "brew.file is set in", "the main zakwas.yaml has no brew section"}},
 		{"brew.cleanup is root-only", []string{"brew: {file: B, cleanup: zap}\n"}, []string{"brew.cleanup is set in a layer", "layer \"l0\" is invalid"}},
 		{"brew.upgrade is root-only even when false", []string{"brew: {file: B, upgrade: false}\n"}, []string{"brew.upgrade is set in a layer"}},
+		{"brew.githubToken is root-only", []string{"brew: {file: B, githubToken: gh}\n"}, []string{"brew.githubToken is set in a layer"}},
 		{"every root-only brew key is named", []string{"brew: {file: B, cleanup: none, upgrade: true}\n"}, []string{"brew.cleanup is set", "brew.upgrade is set"}},
 		{"mise.prune is root-only", []string{"mise: {config: m.toml, prune: true}\n"}, []string{"mise.prune is set in a layer"}},
 		{"an empty mise.prune is still set", []string{"mise: {config: m.toml, prune: false}\n"}, []string{"mise.prune is set in a layer"}},
