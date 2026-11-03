@@ -163,6 +163,17 @@
             "boolean",
             "null"
           ]
+        },
+        "githubToken": {
+          "enum": [
+            "gh",
+            null
+          ],
+          "description": "Where 'brew bundle install' gets HOMEBREW_GITHUB_API_TOKEN when it isn't set, for taps that download from private GitHub repositories. 'gh' reads it with 'gh auth token' when that step runs. Omit to pass no token.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,

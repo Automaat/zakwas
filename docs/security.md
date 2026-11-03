@@ -126,7 +126,7 @@ What remains bounded is the damage: the wrapped server applies only a low-risk p
 
 A [layer](config.md#layers) is another `zakwas.yaml` that a machine merges into its config, and it has the full power of the main one: shell `commands`, files and links written anywhere under your home, `launchd` jobs and `defaults`. Registering a layer is therefore the same decision as applying that repo's config. Register only repos you control, and review `zakwas plan` after `zakwas layer add`.
 
-- **A layer cannot widen the machine-wide settings.** `protect`, `mise.prune`, `brew.cleanup`, `brew.upgrade` and the machine-wide `agents` settings (so the guard, the agent providers and the permission rules) are read from the main config only; a layer that sets one fails validation. A layer's `brew.file` adds a Brewfile whose taps need `trusted: true` like the main one's.
+- **A layer cannot widen the machine-wide settings.** `protect`, `mise.prune`, `brew.cleanup`, `brew.upgrade`, `brew.githubToken` and the machine-wide `agents` settings (so the guard, the agent providers and the permission rules) are read from the main config only; a layer that sets one fails validation. A layer's `brew.file` adds a Brewfile whose taps need `trusted: true` like the main one's.
 - **Agents can't register one.** `layer` is a guarded command: the deny rules cover it and `layer add` / `remove` refuse an agent session. A layer path that an agent can write to is a way to run commands at the next `apply`, which is why the guard's edit rules cover every layer repo's checkout, not just the main one.
 - **A broken layer stops everything.** A missing or invalid layer fails the plan instead of being skipped, so a moved checkout can never turn into a prune of what it installed.
 
@@ -141,6 +141,16 @@ The `secrets` module is the one place zakwas handles private keys. `zakwas.yaml`
 - A person has to be at the terminal. An agent session or `zakwas_apply` can't start the prompt.
 
 Anyone who can edit `zakwas.yaml` chooses which notes `apply` reads and where their keys go, and you still type the password. Review a change to `secrets` as you would any change to your shell config.
+
+## GitHub token for Homebrew
+
+With `brew.githubToken: gh`, `apply` reads your `gh` token just before `brew bundle install` and passes it to that command in `HOMEBREW_GITHUB_API_TOKEN`.
+
+- It never reaches the plan, `-json` output, history, state files or any other command, and it isn't written to disk.
+- `plan` and `check` never read it.
+- A run an agent started, from its session or with `zakwas_apply`, doesn't get it, because brew's output goes back to the agent. A proposal that needs it has to be applied at a terminal.
+- Code in any tap you trust can read the variable during that step. It could already run `gh auth token` itself, since it runs as you, but this makes the token easier to reach. Leave the setting off if no tap needs it.
+- The setting is read from the main config only; a layer that sets it fails validation.
 
 ## sudo
 

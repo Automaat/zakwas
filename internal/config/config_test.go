@@ -169,6 +169,7 @@ defaults:
   - {domain: d, key: k, value: false, currentHost: true}`, []string{"defaults[1]: d k is already set by defaults[0]"}},
 		{"missing file fields", "files: [{dst: ~/x}]", []string{"files[0]: src and dst are required"}},
 		{"bad cleanup", "brew: {file: B, cleanup: nuke}", []string{`brew.cleanup: "nuke"`}},
+		{"bad githubToken", "brew: {file: B, githubToken: ghp_abc}", []string{"brew.githubToken", `"gh"`}},
 		{"brew without file", "brew: {upgrade: true}", []string{"brew.file is required"}},
 		{"unsupported default", "defaults: [{domain: d, key: k, value: [1]}]", []string{"unsupported value"}},
 		{"unquoted date default", "defaults: [{domain: d, key: k, value: 2024-01-01}]", []string{"defaults[0] d k: YAML reads 2024-01-01 as a date; quote it"}},

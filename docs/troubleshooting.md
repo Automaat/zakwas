@@ -74,6 +74,10 @@ zakwas installs what it needs. With a `brew` section and no `brew` on `PATH`, th
 
 Details: [security.md](security.md#tools-zakwas-bootstraps) and [security.md](security.md#sudo).
 
+## `HOMEBREW_GITHUB_API_TOKEN is required`
+
+A tap downloads from a private GitHub repository, and its own download code reads only that variable. Log in with `gh auth login` and set [`brew.githubToken: gh`](config.md#brew). If an earlier package already failed this way, the `brew bundle cleanup` step was skipped, so the next `apply` also runs it: read the `-` lines of the plan first.
+
 ## `not supported on Linux`
 
 ```

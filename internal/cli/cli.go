@@ -647,10 +647,16 @@ func configPath(flagPath string, env Env) (string, error) {
 // agent, whose transcript would see the exchange, and not the MCP server, whose
 // commands run without stdin.
 func canPrompt(env Env) bool {
+	return env.StdinTTY && !agentDriven(env)
+}
+
+// agentDriven reports whether a coding agent started this run: from its own
+// session, or through the MCP server, whose runner has no stdin.
+func agentDriven(env Env) bool {
 	if ex, ok := env.Runner.(*runner.Exec); ok && ex.NoStdin {
-		return false
+		return true
 	}
-	return env.StdinTTY && env.AgentSession == ""
+	return env.AgentSession != ""
 }
 
 // Modules returns every configured module in apply order. Order matters:
@@ -674,7 +680,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	}
 	mods = append(mods, &templates.Module{Templates: cfg.Templates, Agents: cfg.Agents, Paths: paths, Installer: installer, GOOS: goos})
 	if cfg.Brew != nil && here("brew") {
-		mods = append(mods, &brew.Module{Brew: *cfg.Brew, Paths: paths, Runner: env.Runner})
+		mods = append(mods, &brew.Module{Brew: *cfg.Brew, Paths: paths, Runner: env.Runner, AgentDriven: agentDriven(env)})
 	}
 	if cfg.Mise != nil && here("mise") {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Layers: cfg.LayerMise(), Paths: paths, Runner: env.Runner})

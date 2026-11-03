@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Automaat/zakwas/internal/config"
 	"github.com/Automaat/zakwas/internal/engine"
@@ -25,10 +26,18 @@ import (
 // `zakwas upgrade` runs `brew update` explicitly instead.
 var noAutoUpdate = []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ENV_HINTS=1"}
 
+const (
+	githubTokenEnv = "HOMEBREW_GITHUB_API_TOKEN"
+	tokenTimeout   = 30 * time.Second
+)
+
 type Module struct {
 	Brew   config.Brew
 	Paths  config.Paths
 	Runner runner.Runner
+	// AgentDriven withholds the GitHub token: brew's output goes back to the
+	// agent, so anything a tap prints from its environment would reach it.
+	AgentDriven bool
 }
 
 func (m *Module) Name() string { return "brew" }
@@ -295,8 +304,30 @@ func (m *Module) bundleInstall(src source) engine.Change {
 	cmd := src.cmd([]string{"bundle", "install"}, rest, true)
 	return engine.Change{
 		Action: engine.Run, Target: "brew bundle install", Streams: true,
-		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, cmd) },
+		Apply: func(ctx context.Context) error { return runner.Check(ctx, m.Runner, m.withGitHubToken(ctx, cmd)) },
 	}
+}
+
+// withGitHubToken adds the token gh holds, read only when the step runs so it
+// reaches nothing but this one command. A tap's own download code may read
+// just the variable, without Homebrew's fallback to gh. With no token brew
+// runs as it would without the setting and reports what it needs.
+func (m *Module) withGitHubToken(ctx context.Context, cmd runner.Cmd) runner.Cmd {
+	if m.Brew.GitHubToken != config.GitHubTokenGh || m.AgentDriven || os.Getenv(githubTokenEnv) != "" || !m.Runner.Installed("gh") {
+		return cmd
+	}
+	ctx, cancel := context.WithTimeout(ctx, tokenTimeout)
+	defer cancel()
+	res, err := m.Runner.Run(ctx, runner.Cmd{Name: "gh", Args: []string{"auth", "token", "--hostname", "github.com"}})
+	if err != nil || res.ExitCode != 0 {
+		return cmd
+	}
+	token := strings.TrimSpace(res.Stdout)
+	if token == "" {
+		return cmd
+	}
+	cmd.Env = append(slices.Clone(cmd.Env), githubTokenEnv+"="+token)
+	return cmd
 }
 
 var missingLine = regexp.MustCompile(`^→ (\S+) (\S+) needs to be `)

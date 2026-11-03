@@ -339,8 +339,8 @@ func rootOnly(data []byte) []error {
 	return append(errs, rootOnlyAgents(top)...)
 }
 
-// brewRootOnly allows only brew.file in a layer: cleanup and upgrade are
-// machine-wide.
+// brewRootOnly allows only brew.file in a layer: cleanup, upgrade and
+// githubToken are machine-wide.
 func brewRootOnly(node yaml.Node) []error {
 	if node.Kind != yaml.MappingNode {
 		return []error{errors.New("brew.file is required")}
