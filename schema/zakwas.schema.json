@@ -390,6 +390,33 @@
             "array",
             "null"
           ]
+        },
+        "gpg": {
+          "items": {
+            "properties": {
+              "bitwarden": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name of the Bitwarden secure note holding the exported secret key (gpg --export-secret-keys --armor). The whole note is imported."
+              },
+              "fingerprint": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The 40 hex characters of the fingerprint of the primary key or of a subkey the import must provide, without spaces. A key that lives on a smartcard doesn't count."
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "bitwarden",
+              "fingerprint"
+            ]
+          },
+          "description": "GPG secret keys kept as an exported key in a Bitwarden secure note. Apply imports a note whose key the keyring lacks; plan and check list the keyring and never open the vault.",
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,

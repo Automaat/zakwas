@@ -685,7 +685,7 @@ func Modules(cfg *config.Config, env Env) []engine.Module {
 	if cfg.Mise != nil && here("mise") {
 		mods = append(mods, &mise.Module{Mise: *cfg.Mise, Layers: cfg.LayerMise(), Paths: paths, Runner: env.Runner})
 	}
-	if len(cfg.Secrets.Age) > 0 && here("secrets") {
+	if cfg.Secrets.Any() && here("secrets") {
 		mods = append(mods, &secrets.Module{Secrets: cfg.Secrets, Paths: paths, Runner: env.Runner, Interactive: canPrompt(env)})
 	}
 	agentsCfg := cfg.Agents

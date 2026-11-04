@@ -1,9 +1,11 @@
-// Package secrets restores age identities from Bitwarden secure notes. Plan
-// reads only local files, so plan and check never start bw or ask for a
-// password; apply opens the vault once and only adds what is missing.
+// Package secrets restores age identities and GPG secret keys from Bitwarden
+// secure notes. Plan reads only local files and the gpg keyring listing, so
+// plan and check never start bw or ask for a password; apply opens the vault
+// once and only adds what is missing.
 //
 // Nothing here may print or return a secret: errors name the note and the
-// public key, never a note's content, a key file's content or the session.
+// public key or fingerprint, never a note's content, a key file's content,
+// gpg's output or the session.
 package secrets
 
 import (
@@ -80,9 +82,9 @@ func (m *Module) inspect(entry config.AgeFile) (keyFile, error) {
 	return f, nil
 }
 
-func (m *Module) Plan(context.Context) ([]engine.Change, error) {
+func (m *Module) Plan(ctx context.Context) ([]engine.Change, error) {
 	var changes []engine.Change
-	restore := false
+	ageMissing := false
 	for _, entry := range m.Secrets.Age {
 		f, err := m.inspect(entry)
 		if err != nil {
@@ -91,7 +93,7 @@ func (m *Module) Plan(context.Context) ([]engine.Change, error) {
 		target := m.Paths.Pretty(f.path)
 		switch {
 		case len(f.missing) > 0:
-			restore = true
+			ageMissing = true
 			action := engine.Create
 			if f.exists {
 				action = engine.Update
@@ -105,8 +107,20 @@ func (m *Module) Plan(context.Context) ([]engine.Change, error) {
 			})
 		}
 	}
-	if restore {
+	gpgMissing, err := m.gpgMissing(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range gpgMissing {
+		changes = append(changes, engine.Change{Action: engine.Create, Target: gpgTarget(key), Detail: "import from Bitwarden: " + key.Bitwarden})
+	}
+	switch {
+	case ageMissing && len(gpgMissing) > 0:
+		changes = append(changes, engine.Change{Action: engine.Run, Target: "restore keys from Bitwarden", Streams: true, Apply: m.restore})
+	case ageMissing:
 		changes = append(changes, engine.Change{Action: engine.Run, Target: "restore age keys from Bitwarden", Streams: true, Apply: m.restore})
+	case len(gpgMissing) > 0:
+		changes = append(changes, engine.Change{Action: engine.Run, Target: "restore GPG keys from Bitwarden", Streams: true, Apply: m.restore})
 	}
 	return changes, nil
 }
@@ -123,14 +137,21 @@ func (m *Module) restore(ctx context.Context) (err error) {
 			pending = append(pending, f)
 		}
 	}
-	if len(pending) == 0 {
+	gpgPending, err := m.gpgMissing(ctx)
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 && len(gpgPending) == 0 {
 		return nil
 	}
 	if !m.Interactive {
-		return errors.New("secrets: restoring age keys needs your master password; run zakwas apply yourself in a terminal")
+		return errors.New("secrets: restoring keys needs your master password; run zakwas apply yourself in a terminal")
 	}
 	if !m.Runner.Installed(bw) {
 		return errors.New("secrets: the Bitwarden CLI (bw) isn't installed; install it and run zakwas apply again")
+	}
+	if len(gpgPending) > 0 && !m.Runner.Installed(gpg) {
+		return errors.New("secrets: gpg isn't installed; install it and run zakwas apply again")
 	}
 	session, opened, err := m.open(ctx)
 	if err != nil {
@@ -142,6 +163,11 @@ func (m *Module) restore(ctx context.Context) (err error) {
 	m.syncVault(ctx, session)
 	for _, f := range pending {
 		if err := m.restoreFile(ctx, f, session); err != nil {
+			return err
+		}
+	}
+	for _, key := range gpgPending {
+		if err := m.restoreGPG(ctx, key, session); err != nil {
 			return err
 		}
 	}

@@ -802,7 +802,7 @@ system:
 
 ## secrets
 
-Private keys restored from Bitwarden on `apply`. Each `age` entry is an identity file, such as the one sops reads, and the keys it must hold.
+Private keys restored from Bitwarden on `apply`. Each `age` entry is an identity file, such as the one sops reads, and the keys it must hold. Each `gpg` entry is a GPG secret key kept as an exported key in a note.
 
 ```yaml
 secrets:
@@ -810,6 +810,8 @@ secrets:
     - dst: ~/.config/sops/age/keys.txt
       keys:
         - {bitwarden: "sops age - main", publicKey: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p}
+  gpg:
+    - {bitwarden: "gpg - signing key", fingerprint: 0123456789ABCDEF0123456789ABCDEF01234567}
 ```
 
 | Key | Type | Required | Description |
@@ -817,9 +819,12 @@ secrets:
 | `age[].dst` | string | yes | Identity file: absolute or `~/…`, outside every config repo. |
 | `age[].keys[].bitwarden` | string | yes | Name of the Bitwarden secure note that holds the private key. |
 | `age[].keys[].publicKey` | string | yes | The key's public half (`age1…`). X25519 keys only. |
+| `gpg[].bitwarden` | string | yes | Name of the Bitwarden secure note that holds the output of `gpg --export-secret-keys --armor`. |
+| `gpg[].fingerprint` | string | yes | The 40 hex characters of the fingerprint of the primary key or of a subkey that the import must provide, without spaces. |
 
-- **`plan` and `check`** read the file, compare public keys and list what is missing by note name. They never start `bw` or ask for a password, and `check --offline` skips this module.
+- **`plan` and `check`** read the file, compare public keys and list what is missing by note name. They never start `bw` or ask for a password, and `check --offline` skips this module. For `gpg` they run `gpg --list-secret-keys` and look for the fingerprint.
 - **`apply`** logs in or unlocks `bw` once, adds only the missing keys and locks `bw` at the end, even after a failure. A vault you had already unlocked stays unlocked. On macOS, `brew` and `mise` can install `bw`, since both run first. On Linux, install it yourself before `apply`.
+- **GPG keys** are restored by piping the whole note to `gpg --batch --import`, so every key in the note is imported, a passphrase-protected key keeps its passphrase, and nothing is removed from the keyring. After the import zakwas lists the keyring again and fails if the fingerprint is still not there. A key that lives on a smartcard, or a stub without its secret, doesn't count as present. gpg's output and the note never reach a message or the apply history.
 - **Only the matching line is copied.** Anything else in the note stays in the vault. Keys, comments and other lines already in the file stay too, so zakwas never removes a key and makes no backup of the file.
 - **A wrong or missing note** changes nothing in that file. Every key is checked against its `publicKey` before the file is replaced.
 - **Modes:** the file is kept at `0600`, and a wider mode shows up as drift. Directories it creates are `0700`. Like other destinations, it can't sit behind a symlinked directory under `$HOME`.
