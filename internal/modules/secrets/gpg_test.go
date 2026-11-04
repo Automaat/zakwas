@@ -288,13 +288,24 @@ func TestGPGAndAgeShareOneVaultSession(t *testing.T) {
 	if err := f.apply(t); err != nil {
 		t.Fatal(err)
 	}
+	lines := f.fake.Lines()
 	unlocks := 0
-	for _, line := range f.fake.Lines() {
+	for _, line := range lines {
 		if line == "bw unlock --raw" {
 			unlocks++
 		}
 	}
 	if unlocks != 1 {
-		t.Errorf("unlocked %d times: %v", unlocks, f.fake.Lines())
+		t.Errorf("unlocked %d times: %v", unlocks, lines)
+	}
+	if lines[len(lines)-1] != "bw lock" {
+		t.Errorf("last call = %q in %v", lines[len(lines)-1], lines)
+	}
+	ageNote, gpgNote, imported := slices.Index(lines, "bw get notes note one"), slices.Index(lines, "bw get notes "+noteName), slices.Index(lines, importCmd)
+	if ageNote < 0 || gpgNote < ageNote || imported < gpgNote {
+		t.Errorf("want the age note, then the gpg note, then the import: %v", lines)
+	}
+	if got := f.read(t); !strings.Contains(got, f.one.String()) {
+		t.Error("the age file should have been restored in the same session")
 	}
 }
