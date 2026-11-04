@@ -175,6 +175,7 @@ func newMerge(c *Config) *merge {
 	m.Commands = slices.Clone(c.Commands)
 	m.Launchd = slices.Clone(c.Launchd)
 	m.Secrets.Age = slices.Clone(c.Secrets.Age)
+	m.Secrets.GPG = slices.Clone(c.Secrets.GPG)
 	m.System.Dirs = slices.Clone(c.System.Dirs)
 	m.Layers = nil
 	m.layerMise = nil
@@ -192,6 +193,7 @@ func newMerge(c *Config) *merge {
 	mg.label("defaults", len(c.Defaults), c.Path)
 	mg.label("launchd", len(c.Launchd), c.Path)
 	mg.label("secrets.age", len(c.Secrets.Age), c.Path)
+	mg.label("secrets.gpg", len(c.Secrets.GPG), c.Path)
 	for k, v := range c.Templates.Vars {
 		m.Templates.Vars[k] = v
 		mg.varFile[k] = c.Path
@@ -236,6 +238,7 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	c.Defaults = append(c.Defaults, lc.Defaults...)
 	c.Launchd = append(c.Launchd, lc.Launchd...)
 	c.Secrets.Age = append(c.Secrets.Age, lc.Secrets.Age...)
+	c.Secrets.GPG = append(c.Secrets.GPG, lc.Secrets.GPG...)
 	c.Commands = append(c.Commands, lc.Commands...)
 	c.System.Dirs = append(c.System.Dirs, lc.System.Dirs...)
 	c.System.SudoTouchID = c.System.SudoTouchID || lc.System.SudoTouchID
@@ -266,6 +269,7 @@ func (m *merge) add(l Layer, lc *Config) []error {
 	m.label("defaults", len(lc.Defaults), lc.Path)
 	m.label("launchd", len(lc.Launchd), lc.Path)
 	m.label("secrets.age", len(lc.Secrets.Age), lc.Path)
+	m.label("secrets.gpg", len(lc.Secrets.GPG), lc.Path)
 	errs = append(errs, m.agents.add(lc)...)
 	for _, k := range slices.Sorted(maps.Keys(lc.Templates.Vars)) {
 		if first, dup := m.varFile[k]; dup {

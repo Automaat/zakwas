@@ -12,6 +12,17 @@ import (
 // config holds only where they go and how to recognize them.
 type Secrets struct {
 	Age []AgeFile `yaml:"age" jsonschema_description:"Files of age private keys, such as the identities sops reads. Apply adds the keys a file is missing from Bitwarden; plan and check compare public keys and never open the vault."`
+	GPG []GPGKey  `yaml:"gpg" jsonschema_description:"GPG secret keys kept as an exported key in a Bitwarden secure note. Apply imports a note whose key the keyring lacks; plan and check list the keyring and never open the vault."`
+}
+
+// Any reports whether there is a secret to restore.
+func (s Secrets) Any() bool { return len(s.Age) > 0 || len(s.GPG) > 0 }
+
+// GPGKey names one GPG secret key by where its export is kept and the
+// fingerprint that identifies it in the keyring.
+type GPGKey struct {
+	Bitwarden   string `yaml:"bitwarden" jsonschema:"required,minLength=1" jsonschema_description:"Name of the Bitwarden secure note holding the exported secret key (gpg --export-secret-keys --armor). The whole note is imported."`
+	Fingerprint string `yaml:"fingerprint" jsonschema:"required,minLength=1" jsonschema_description:"The 40 hex characters of the fingerprint of the primary key or of a subkey the import must provide, without spaces. A key that lives on a smartcard doesn't count."`
 }
 
 // AgeFile is one identity file and the keys it must hold.
@@ -63,7 +74,46 @@ func (c *Config) validateSecrets(paths Paths, claimDst func(dst, what string)) [
 			seen[k.PublicKey] = true
 		}
 	}
+	seen := map[string]bool{}
+	for i, k := range c.Secrets.GPG {
+		what := c.where("secrets.gpg", i)
+		switch {
+		case k.Bitwarden == "":
+			errs = append(errs, fmt.Errorf("%s: bitwarden is required", what))
+		case holdsPrivateKey(k.Bitwarden):
+			errs = append(errs, fmt.Errorf("%s: bitwarden %s", what, privateKeyAdvice))
+		}
+		if err := checkFingerprint(k.Fingerprint); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", what, err))
+			continue
+		}
+		fpr := strings.ToUpper(k.Fingerprint)
+		if seen[fpr] {
+			errs = append(errs, fmt.Errorf("%s: fingerprint %s is listed twice", what, fpr))
+		}
+		seen[fpr] = true
+	}
 	return errs
+}
+
+// checkFingerprint never quotes a value it rejects: a pasted private key
+// would otherwise land in the error message.
+func checkFingerprint(fpr string) error {
+	switch {
+	case fpr == "":
+		return errors.New("fingerprint is required")
+	case holdsPrivateKey(fpr):
+		return errors.New("fingerprint " + privateKeyAdvice)
+	}
+	if len(fpr) != 40 {
+		return errors.New("fingerprint must be 40 hex characters, without spaces")
+	}
+	for _, r := range fpr {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return errors.New("fingerprint must be 40 hex characters, without spaces")
+		}
+	}
+	return nil
 }
 
 const privateKeyAdvice = "holds a private key; remove it from the config and rotate it if it was committed"
@@ -71,7 +121,8 @@ const privateKeyAdvice = "holds a private key; remove it from the config and rot
 // holdsPrivateKey catches a key pasted into the wrong field, so it is refused
 // without being quoted, and never reaches a plan or the apply history.
 func holdsPrivateKey(value string) bool {
-	return strings.Contains(strings.ToUpper(value), "AGE-SECRET-KEY-")
+	upper := strings.ToUpper(value)
+	return strings.Contains(upper, "AGE-SECRET-KEY-") || strings.Contains(upper, "PGP PRIVATE KEY BLOCK")
 }
 
 // checkPublicKey never quotes a value it rejects: a pasted private key would

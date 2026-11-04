@@ -12,7 +12,7 @@ What it manages:
 - **links**: plain symlinks for configs apps must write themselves
 - **brew**: apps and formulae from a `Brewfile`, with optional cleanup
 - **mise**: CLI tools pinned in a global mise config
-- **secrets**: age private keys restored from Bitwarden, only when missing
+- **secrets**: age and GPG private keys restored from Bitwarden, only when missing
 - **agents**: Claude Code, opencode and, when named, Codex, Gemini CLI and Copilot CLI: plugins, MCP servers, instructions, skills, permissions
 - **defaults**: macOS preferences
 - **system**: Touch ID for sudo, directories, SSH key
@@ -28,7 +28,7 @@ On Linux, the agents module, files, links, templates, secrets, commands and syst
 ## Who it is for
 
 - **Fits:** you keep dotfiles in git and want apps, tool versions, macOS preferences and agent config declared in one place, with a plan before anything changes. You use several coding agents (Claude Code, Codex, opencode, Gemini CLI, Copilot CLI) and want their setup declared once. You want to know when a Mac drifted.
-- **Does not fit:** Windows beyond the agent features and the portable core (see [Windows](#windows-early)), or Linux if you need Homebrew, mise or preferences managed (those modules are macOS only; see [Linux](#linux)). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Storing secrets: keep them out of the config repo. The `secrets` module only restores age keys from Bitwarden.
+- **Does not fit:** Windows beyond the agent features and the portable core (see [Windows](#windows-early)), or Linux if you need Homebrew, mise or preferences managed (those modules are macOS only; see [Linux](#linux)). Many machines from a server (zakwas converges the Mac it runs on, as your user). Building packages (it hands that to Homebrew and mise; see [Compared to](#compared-to)). Storing secrets: keep them out of the config repo. The `secrets` module only restores age and GPG keys from Bitwarden.
 
 ## Status
 

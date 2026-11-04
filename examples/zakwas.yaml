@@ -51,12 +51,15 @@ system:
     path: ~/.ssh/id_ed25519
     comment: you@example.com
 
-# Age keys for sops, restored from Bitwarden secure notes when missing.
+# Age keys for sops and a GPG signing key, restored from Bitwarden secure
+# notes when missing.
 secrets:
   age:
     - dst: ~/.config/sops/age/keys.txt
       keys:
         - {bitwarden: "sops age - main", publicKey: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p}
+  gpg:
+    - {bitwarden: "gpg - signing key", fingerprint: 0123456789ABCDEF0123456789ABCDEF01234567}
 
 commands:
   - name: rosetta

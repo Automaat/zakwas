@@ -386,7 +386,7 @@ func (c *Config) platformErrors(goos string) []error {
 		"system":   len(c.System.Dirs) > 0 || c.System.SSHKey != nil,
 		"links":    len(c.Links) > 0,
 		"commands": len(c.Commands) > 0,
-		"secrets":  len(c.Secrets.Age) > 0,
+		"secrets":  c.Secrets.Any(),
 		"brew":     c.Brew != nil,
 		"mise":     c.Mise != nil,
 		"launchd":  len(c.Launchd) > 0,
