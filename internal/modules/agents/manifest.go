@@ -94,19 +94,32 @@ func (ms manifests) otherName(want string) string {
 }
 
 // pluginPath finds the directory of an in-repo plugin in the first
-// manifest listing it, and the extra skill paths its entry declares. A
-// source is a relative path, or Codex's {"source": "local", "path": …};
-// plugins fetched from elsewhere are reported as such.
+// manifest listing it from the repo, and the extra skill paths its entry
+// declares. A source is a relative path, or Codex's {"source": "local",
+// "path": …}; plugins every manifest fetches from elsewhere are reported as
+// such.
 func (ms manifests) pluginPath(root, plugin string) (string, []string, error) {
 	paths := make([]string, 0, len(ms))
+	var remote error
 	for _, m := range ms {
 		paths = append(paths, m.path)
 		for _, p := range m.Plugins {
-			if p.Name == plugin {
-				dir, err := m.dir(root, plugin, p.Source)
-				return dir, stringList(p.Skills), err
+			if p.Name != plugin {
+				continue
 			}
+			dir, err := m.dir(root, plugin, p.Source)
+			if errors.Is(err, errNotInRepo) {
+				// A repo may point Claude at a release and Codex at its own checkout.
+				if remote == nil {
+					remote = err
+				}
+				break
+			}
+			return dir, stringList(p.Skills), err
 		}
+	}
+	if remote != nil {
+		return "", nil, remote
 	}
 	return "", nil, fmt.Errorf("plugin %q is not in %s", plugin, strings.Join(paths, " or "))
 }
