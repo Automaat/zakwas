@@ -560,6 +560,22 @@ func TestOpencodePluginOnlyInCodexManifest(t *testing.T) {
 	}
 }
 
+func TestOpencodePluginRemoteInClaudeLocalInCodexManifest(t *testing.T) {
+	testutil.RequireSymlinks(t)
+	m, _ := newOpencode(t, config.Agents{
+		Marketplaces: map[string]config.Marketplace{"mp": {Source: "./mp"}},
+		Plugins:      []config.Plugin{{ID: "a@mp"}},
+	})
+	root := filepath.Join(m.Paths.Root, "mp")
+	writeFile(t, filepath.Join(root, ".claude-plugin", "marketplace.json"), `{"name":"mp","plugins":[{"name":"a","source":{"source":"url","url":"https://example.com/a.git","ref":"v1"}}]}`)
+	writeFile(t, filepath.Join(root, ".agents", "plugins", "marketplace.json"), `{"name":"mp","plugins":[{"name":"a","source":{"source":"local","path":"./"}}]}`)
+	writeFile(t, filepath.Join(root, "skills", "sa", "SKILL.md"), "")
+	want := []string{"+ opencode skill sa (a@mp)"}
+	if got := targets(plan(t, m)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+}
+
 func TestOpencodeImplicitProviderSkipsRemotePlugins(t *testing.T) {
 	testutil.RequireSymlinks(t)
 	m, r := newOpencode(t, config.Agents{
